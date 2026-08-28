@@ -1,15 +1,13 @@
 from __future__ import annotations
 
 from time import perf_counter
+from typing import Any
 from urllib.parse import urlparse
 
 import requests
 
-
-USER_AGENT = (
-    "Application-Security-Platform/0.1 "
-    "(authorized-security-discovery)"
-)
+from backend.config.settings import FETCH_TIMEOUT, USER_AGENT
+from backend.discovery.http import build_session, cookie_to_dict
 
 
 def validate_url(url: str) -> str:
@@ -31,19 +29,54 @@ def validate_url(url: str) -> str:
     return url.rstrip("/")
 
 
+def check_http_redirect(
+    url: str,
+    session: requests.Session | None = None,
+) -> dict[str, Any]:
+    """
+    Determine whether the plain-HTTP origin redirects to HTTPS.
+
+    Returns `{"tested": False}` when the check could not be performed.
+    """
+
+    parsed = urlparse(url)
+
+    if parsed.scheme != "https":
+        return {"tested": False, "reason": "target is not https"}
+
+    session = session or build_session()
+
+    http_url = parsed._replace(scheme="http").geturl()
+
+    try:
+        response = session.get(
+            http_url,
+            timeout=FETCH_TIMEOUT,
+            allow_redirects=True,
+        )
+
+    except requests.RequestException as exc:
+        return {"tested": False, "reason": str(exc)}
+
+    return {
+        "tested": True,
+        "http_url": http_url,
+        "final_url": response.url,
+        "redirects_to_https": urlparse(response.url).scheme == "https",
+        "status_code": response.status_code,
+    }
+
+
 def fetch_application(url: str) -> dict:
     url = validate_url(url)
 
+    session = build_session()
+
     started = perf_counter()
 
-    response = requests.get(
+    response = session.get(
         url,
-        headers={
-            "User-Agent": USER_AGENT,
-            "Accept": "text/html,application/xhtml+xml,"
-                      "application/json;q=0.9,*/*;q=0.8",
-        },
-        timeout=20,
+        timeout=FETCH_TIMEOUT,
         allow_redirects=True,
     )
 
@@ -77,8 +110,28 @@ def fetch_application(url: str) -> dict:
             for key, value in response.headers.items()
         },
         "cookies": [
-            cookie.name
+            cookie_to_dict(cookie)
             for cookie in response.cookies
         ],
+        "redirect_chain": [
+            {
+                "url": step.url,
+                "status_code": step.status_code,
+                "location": step.headers.get("Location", ""),
+            }
+            for step in response.history
+        ],
+        "http_redirect": check_http_redirect(
+            response.url,
+            session,
+        ),
         "body": response.text,
     }
+
+
+__all__ = [
+    "USER_AGENT",
+    "check_http_redirect",
+    "fetch_application",
+    "validate_url",
+]

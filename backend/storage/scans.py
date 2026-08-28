@@ -4,7 +4,6 @@ import json
 from pathlib import Path
 from typing import Any
 
-
 ROOT = (
     Path(__file__)
     .resolve()
@@ -165,6 +164,11 @@ def list_applications() -> list[dict[str, Any]]:
                 application_file
             )
 
+            security = data.get(
+                "security",
+                {},
+            ) or {}
+
             applications.append(
                 {
                     "id":
@@ -202,6 +206,35 @@ def list_applications() -> list[dict[str, Any]]:
                     "updated_at":
                         data.get(
                             "updated_at"
+                        ),
+
+                    "risk_score":
+                        security.get(
+                            "risk_score",
+                            0,
+                        ),
+
+                    "risk_grade":
+                        security.get(
+                            "risk_grade",
+                            "",
+                        ),
+
+                    "total_findings":
+                        security.get(
+                            "total_findings",
+                            len(
+                                security.get(
+                                    "findings",
+                                    [],
+                                )
+                            ),
+                        ),
+
+                    "severity_counts":
+                        security.get(
+                            "severity_counts",
+                            {},
                         ),
                 }
             )

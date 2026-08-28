@@ -1,1 +1,3 @@
-"""Module placeholder. Implement this component in the next development stage."""
+from backend.recommendations.engine import build_recommendations
+
+__all__ = ["build_recommendations"]
