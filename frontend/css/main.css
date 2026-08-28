@@ -271,3 +271,265 @@ input[type="url"] {
     }
 
 }
+/* Navigation */
+
+.nav {
+    max-width: 1100px;
+    margin: 24px auto 0;
+    display: flex;
+    gap: 8px;
+}
+
+.nav a {
+    color: #c7cbd1;
+    text-decoration: none;
+    font-size: 13px;
+    font-weight: 700;
+    padding: 9px 15px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.08);
+}
+
+.nav a.active,
+.nav a:hover {
+    background: #00a8d6;
+    color: #071116;
+}
+
+.link {
+    color: #0a7ea4;
+    font-weight: 700;
+    font-size: 13px;
+    text-decoration: none;
+}
+
+/* Risk grade */
+
+.risk-grade {
+    min-width: 46px;
+    text-align: center;
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 22px;
+    font-weight: 800;
+    background: #e8ebee;
+    color: #111318;
+}
+
+.risk-grade.grade-a {
+    background: #d8f5e6;
+    color: #10653f;
+}
+
+.risk-grade.grade-b {
+    background: #e6f6d9;
+    color: #3f6310;
+}
+
+.risk-grade.grade-c {
+    background: #fdf3d3;
+    color: #7a5a08;
+}
+
+.risk-grade.grade-d {
+    background: #fde3d3;
+    color: #8a3c0c;
+}
+
+.risk-grade.grade-e,
+.risk-grade.grade-f {
+    background: #fbd8dc;
+    color: #8f1524;
+}
+
+/* Severity */
+
+.severity {
+    display: inline-block;
+    min-width: 92px;
+    text-align: center;
+    text-transform: capitalize;
+    padding: 6px 10px;
+    border-radius: 999px;
+    font-size: 11px;
+    font-weight: 800;
+    background: #e8ebee;
+    color: #111318;
+}
+
+.severity.critical {
+    background: #8f1524;
+    color: white;
+}
+
+.severity.high {
+    background: #fbd8dc;
+    color: #8f1524;
+}
+
+.severity.medium {
+    background: #fdf0d3;
+    color: #7a5a08;
+}
+
+.severity.low {
+    background: #ddeefb;
+    color: #10516d;
+}
+
+.severity.informational {
+    background: #eceff2;
+    color: #4a525c;
+}
+
+.severity-counts {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 12px;
+    margin-top: 20px;
+}
+
+.severity-count {
+    background: #f7f8f9;
+    border-radius: 10px;
+    padding: 14px;
+    border-left: 4px solid #cfd5dc;
+}
+
+.severity-count strong {
+    display: block;
+    font-size: 24px;
+}
+
+.severity-count span {
+    display: block;
+    color: #68717d;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.6px;
+    margin-top: 4px;
+}
+
+.severity-count.critical {
+    border-left-color: #8f1524;
+}
+
+.severity-count.high {
+    border-left-color: #d4453c;
+}
+
+.severity-count.medium {
+    border-left-color: #e0a112;
+}
+
+.severity-count.low {
+    border-left-color: #2f8fd0;
+}
+
+.severity-count.informational {
+    border-left-color: #9aa3ad;
+}
+
+/* Findings */
+
+.finding-list,
+.recommendation-list,
+.application-list {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.finding,
+.recommendation,
+.application {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+    padding: 14px;
+    border: 1px solid #e1e4e8;
+    border-radius: 10px;
+    text-decoration: none;
+    color: inherit;
+    background: white;
+}
+
+.finding:hover,
+.application:hover {
+    border-color: #00a8d6;
+    background: #f8fdff;
+}
+
+.finding strong,
+.recommendation strong,
+.application strong {
+    display: block;
+    margin-bottom: 4px;
+}
+
+.finding small,
+.recommendation small,
+.application small {
+    color: #68717d;
+}
+
+.recommendation p {
+    margin: 6px 0;
+    line-height: 1.5;
+}
+
+.finding .location {
+    display: block;
+    margin-top: 6px;
+    font-family: monospace;
+    font-size: 12px;
+    color: #4a525c;
+    word-break: break-all;
+}
+
+.application .severity-counts {
+    grid-template-columns: repeat(5, minmax(60px, 1fr));
+    margin-top: 12px;
+}
+
+/* Filters */
+
+.filters {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+    margin-top: 20px;
+}
+
+.filters label {
+    margin: 0;
+}
+
+.filters select {
+    height: 38px;
+    border: 1px solid #cfd5dc;
+    border-radius: 9px;
+    padding: 0 10px;
+    background: white;
+}
+
+/* Evidence */
+
+pre {
+    background: #111318;
+    color: #e6edf3;
+    padding: 16px;
+    border-radius: 10px;
+    overflow-x: auto;
+    font-size: 12px;
+    line-height: 1.5;
+}
+
+@media (max-width: 800px) {
+
+    .severity-counts {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+}

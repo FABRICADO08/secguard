@@ -43,6 +43,25 @@
 
     </div>
 
+    <nav class="nav">
+
+        <a
+            class="active"
+            href="/index.html"
+        >
+            Discovery
+        </a>
+
+        <a href="/dashboard.html">
+            Dashboard
+        </a>
+
+        <a href="/findings.html">
+            Findings
+        </a>
+
+    </nav>
+
 </header>
 
 
@@ -202,6 +221,121 @@
 
         <div class="card">
 
+            <div class="section-heading">
+
+                <div>
+
+                    <div class="eyebrow">
+                        SECURITY POSTURE
+                    </div>
+
+                    <h2>
+                        Risk
+                    </h2>
+
+                </div>
+
+                <div
+                    id="riskGrade"
+                    class="risk-grade"
+                >
+                    -
+                </div>
+
+            </div>
+
+
+            <div class="metrics">
+
+                <div class="metric">
+
+                    <strong id="riskScore">
+                        0
+                    </strong>
+
+                    <span>
+                        Risk Score
+                    </span>
+
+                </div>
+
+                <div class="metric">
+
+                    <strong id="totalFindings">
+                        0
+                    </strong>
+
+                    <span>
+                        Findings
+                    </span>
+
+                </div>
+
+                <div class="metric">
+
+                    <strong id="rulesEvaluated">
+                        0
+                    </strong>
+
+                    <span>
+                        Rules Evaluated
+                    </span>
+
+                </div>
+
+            </div>
+
+
+            <div
+                id="severityCounts"
+                class="severity-counts"
+            ></div>
+
+        </div>
+
+
+        <div class="card">
+
+            <div class="section-heading">
+
+                <h2>
+                    Top Findings
+                </h2>
+
+                <a
+                    id="allFindingsLink"
+                    class="link hidden"
+                    href="/findings.html"
+                >
+                    View all findings
+                </a>
+
+            </div>
+
+            <div
+                id="topFindings"
+                class="finding-list"
+            ></div>
+
+        </div>
+
+
+        <div class="card">
+
+            <h2>
+                Recommendations
+            </h2>
+
+            <div
+                id="recommendations"
+                class="recommendation-list"
+            ></div>
+
+        </div>
+
+
+        <div class="card">
+
             <h2>
                 Technology
             </h2>
@@ -308,6 +442,10 @@
 
 </main>
 
+
+<script
+    src="/js/common.js"
+></script>
 
 <script
     src="/js/app.js"

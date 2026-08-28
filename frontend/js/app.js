@@ -364,6 +364,17 @@ function showResults(
 
     /*
      |--------------------------------------------------------------------------
+     | Security Posture
+     |--------------------------------------------------------------------------
+     */
+
+    showSecurity(
+        application
+    );
+
+
+    /*
+     |--------------------------------------------------------------------------
      | Store Application ID
      |--------------------------------------------------------------------------
      */
@@ -400,42 +411,229 @@ function showResults(
 
 /*
 |--------------------------------------------------------------------------
-| HTML Escaping
+| Display Security Posture
 |--------------------------------------------------------------------------
 */
 
-function escapeHtml(
-    value
+function showSecurity(
+    application
 ) {
 
-    return String(
-        value ?? ""
-    )
+    const security =
+        application.security || {};
 
-        .replaceAll(
-            "&",
-            "&amp;"
-        )
+    const findings =
+        security.findings || [];
 
-        .replaceAll(
-            "<",
-            "&lt;"
-        )
+    const recommendations =
+        security.recommendations || [];
 
-        .replaceAll(
-            ">",
-            "&gt;"
-        )
 
-        .replaceAll(
-            '"',
-            "&quot;"
-        )
+    document.getElementById(
+        "riskScore"
+    ).textContent =
+        security.risk_score ?? 0;
 
-        .replaceAll(
-            "'",
-            "&#039;"
+
+    const grade =
+        document.getElementById(
+            "riskGrade"
         );
+
+    grade.textContent =
+        security.risk_grade || "-";
+
+    grade.className =
+        `risk-grade grade-${
+            String(
+                security.risk_grade || "a"
+            ).toLowerCase()
+        }`;
+
+
+    document.getElementById(
+        "totalFindings"
+    ).textContent =
+        security.total_findings ?? findings.length;
+
+
+    document.getElementById(
+        "rulesEvaluated"
+    ).textContent =
+        security.rules_evaluated ?? 0;
+
+
+    document.getElementById(
+        "severityCounts"
+    ).innerHTML =
+        severityCounts(
+            security.severity_counts
+        );
+
+
+    const findingsLink =
+        document.getElementById(
+            "allFindingsLink"
+        );
+
+    findingsLink.href =
+        `/findings.html?application=${
+            encodeURIComponent(
+                application.id || ""
+            )
+        }`;
+
+    findingsLink.classList.toggle(
+        "hidden",
+        !findings.length
+    );
+
+
+    /*
+     * Top findings
+     */
+
+    const findingsContainer =
+        document.getElementById(
+            "topFindings"
+        );
+
+    if (!findings.length) {
+
+        findingsContainer.innerHTML =
+            `
+            <p class="muted">
+                No security findings were raised by the
+                ${escapeHtml(
+                    security.rules_evaluated ?? 0
+                )} rules that were evaluated.
+            </p>
+            `;
+
+    } else {
+
+        findingsContainer.innerHTML =
+            findings
+                .slice(0, 10)
+                .map(
+                    finding => `
+                        <a
+                            class="finding"
+                            href="/finding-detail.html?application=${
+                                encodeURIComponent(
+                                    application.id || ""
+                                )
+                            }&finding=${
+                                encodeURIComponent(
+                                    finding.id || ""
+                                )
+                            }"
+                        >
+
+                            ${severityBadge(
+                                finding.severity
+                            )}
+
+                            <div>
+
+                                <strong>
+                                    ${escapeHtml(
+                                        finding.title
+                                    )}
+                                </strong>
+
+                                <small>
+                                    ${escapeHtml(
+                                        finding.rule_id
+                                    )}
+
+                                    ·
+
+                                    ${escapeHtml(
+                                        finding.category
+                                    )}
+
+                                    ·
+
+                                    risk ${escapeHtml(
+                                        (finding.risk || {}).score ?? 0
+                                    )}
+                                </small>
+
+                            </div>
+
+                        </a>
+                    `
+                )
+                .join("");
+
+    }
+
+
+    /*
+     * Recommendations
+     */
+
+    const recommendationContainer =
+        document.getElementById(
+            "recommendations"
+        );
+
+    if (!recommendations.length) {
+
+        recommendationContainer.innerHTML =
+            `
+            <p class="muted">
+                No remediation actions required.
+            </p>
+            `;
+
+    } else {
+
+        recommendationContainer.innerHTML =
+            recommendations
+                .map(
+                    recommendation => `
+                        <div class="recommendation">
+
+                            ${severityBadge(
+                                recommendation.severity
+                            )}
+
+                            <div>
+
+                                <strong>
+                                    ${escapeHtml(
+                                        recommendation.rule_id
+                                    )}
+                                </strong>
+
+                                <p>
+                                    ${escapeHtml(
+                                        recommendation.recommendation
+                                    )}
+                                </p>
+
+                                <small>
+                                    ${escapeHtml(
+                                        recommendation.category
+                                    )}
+
+                                    ·
+
+                                    ${escapeHtml(
+                                        recommendation.finding_count ?? 1
+                                    )} finding(s)
+                                </small>
+
+                            </div>
+
+                        </div>
+                    `
+                )
+                .join("");
+
+    }
 }
 
 
@@ -449,6 +647,13 @@ async function startDiscovery() {
 
     const url =
         urlInput.value.trim();
+
+
+    /*
+     * Reset previous results
+     */
+
+    clearResults();
 
 
     /*
@@ -479,13 +684,6 @@ async function startDiscovery() {
 
         return;
     }
-
-
-    /*
-     * Reset previous results
-     */
-
-    clearResults();
 
 
     scanButton.disabled =

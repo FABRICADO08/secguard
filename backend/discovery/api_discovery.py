@@ -31,6 +31,10 @@ DOCUMENTATION_PATHS = {
 }
 
 
+# States that mean the candidate path does not exist on the target.
+MISSING_STATES = {"absent", "unreachable"}
+
+
 def _classify(result: dict[str, Any]) -> str:
     status = result.get("status_code")
 
@@ -59,8 +63,9 @@ def discover_common_api_paths(
     """
     Look for well-known API entry points.
 
-    When `probe_paths` is true each candidate is requested so callers can
-    distinguish paths that actually exist from ones that merely might.
+    When `probe_paths` is true each candidate is requested and paths that
+    do not exist (404/410 or unreachable) are dropped, so the result only
+    contains API entry points the target actually serves.
     """
 
     session = build_session() if probe_paths else None
@@ -97,6 +102,9 @@ def discover_common_api_paths(
                     "body_preview": result["body_preview"],
                 }
             )
+
+            if record["state"] in MISSING_STATES:
+                continue
 
             if record["state"] == "accessible":
                 record["type"] = "api"

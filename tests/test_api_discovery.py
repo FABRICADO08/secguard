@@ -50,6 +50,24 @@ def test_probe_results_are_classified(monkeypatch):
     assert results["/api"]["state"] == "accessible"
     assert results["/api"]["type"] == "api"
     assert results["/graphql"]["state"] == "protected"
-    assert results["/odata"]["state"] == "absent"
-    assert results["/swagger.json"]["documentation"] is True
     assert results["/api"]["documentation"] is False
+
+
+def test_missing_paths_are_not_reported(monkeypatch):
+    def fake_probe(url, session=None, **kwargs):
+        return {
+            "url": url,
+            "status_code": 200 if url.endswith("/api") else 404,
+            "content_type": "application/json",
+            "content_length": 10,
+            "final_url": url,
+            "body_preview": "{}",
+        }
+
+    monkeypatch.setattr(api_discovery, "probe", fake_probe)
+
+    results = api_discovery.discover_common_api_paths(
+        "https://app.test"
+    )
+
+    assert [result["path"] for result in results] == ["/api"]

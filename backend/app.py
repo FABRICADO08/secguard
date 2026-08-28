@@ -249,6 +249,14 @@ def discover():
             platform
         )
 
+        application.status_code = (
+            response["status_code"]
+        )
+
+        application.response_time_ms = (
+            response["response_time_ms"]
+        )
+
         application.technologies = (
             technologies
         )
