@@ -1,1 +1,3 @@
-"""Module placeholder. Implement this component in the next development stage."""
+from backend.scanners.configuration import scan_exposed_paths
+
+__all__ = ["scan_exposed_paths"]

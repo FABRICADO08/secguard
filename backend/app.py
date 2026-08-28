@@ -12,38 +12,50 @@ from flask import (
 from backend.discovery.api_discovery import (
     discover_common_api_paths,
 )
-
 from backend.discovery.crawler import (
     crawl,
 )
-
 from backend.discovery.endpoints import (
     discover_endpoints,
 )
-
 from backend.discovery.fingerprint import (
     fetch_application,
 )
-
 from backend.discovery.technology import (
     detect_technologies,
 )
-
 from backend.model.application import (
     Application,
 )
-
 from backend.model.normalized import (
     model_statistics,
 )
-
+from backend.recommendations import (
+    build_recommendations,
+)
+from backend.risk.scoring import (
+    summarize,
+)
+from backend.rules.base import (
+    ScanContext,
+)
+from backend.rules.engine import (
+    analyze,
+    default_rules,
+)
+from backend.scanners.configuration import (
+    scan_exposed_paths,
+)
+from backend.storage.findings import (
+    load_findings,
+    save_findings,
+)
 from backend.storage.scans import (
     application_exists,
     list_applications,
     load_application,
     save_application,
 )
-
 
 ROOT = (
     Path(__file__)
@@ -194,6 +206,14 @@ def discover():
         )
 
         # ----------------------------------------------------
+        # Exposed sensitive files
+        # ----------------------------------------------------
+
+        exposed_paths = scan_exposed_paths(
+            response["final_url"]
+        )
+
+        # ----------------------------------------------------
         # Platform detection
         # ----------------------------------------------------
 
@@ -260,17 +280,65 @@ def discover():
             "potential_api_paths":
                 potential_api_paths,
 
+            "exposed_paths":
+                exposed_paths,
+
             "pages_scanned":
                 crawl_result[
                     "pages_scanned"
                 ],
         }
 
+        # ----------------------------------------------------
+        # Security analysis
+        # ----------------------------------------------------
+
+        analysis = analyze(
+            ScanContext(
+                application_id=
+                    application.id,
+
+                requested_url=
+                    application.requested_url,
+
+                final_url=
+                    application.final_url,
+
+                platform=
+                    platform,
+
+                response=
+                    response,
+
+                technologies=
+                    technologies,
+
+                attack_surface=
+                    application.attack_surface,
+            )
+        )
+
+        findings = analysis["findings"]
+
         application.security = {
-            "findings": [],
-            "risk_score": 0,
-            "recommendations": [],
+            **summarize(findings),
+
+            "findings":
+                findings,
+
+            "recommendations":
+                build_recommendations(findings),
+
+            "rules_evaluated":
+                analysis["rules_evaluated"],
+
+            "rule_errors":
+                analysis["rule_errors"],
         }
+
+        application.status = "analyzed"
+
+        application.update_timestamp()
 
         # ----------------------------------------------------
         # Save
@@ -278,6 +346,11 @@ def discover():
 
         save_application(
             application.to_dict()
+        )
+
+        save_findings(
+            application.id,
+            findings,
         )
 
         # ----------------------------------------------------
@@ -406,6 +479,159 @@ def get_application(
                     str(exc),
             }
         ), 500
+
+
+# ============================================================
+# Findings
+# ============================================================
+
+@app.get(
+    "/api/applications/<application_id>/findings"
+)
+def application_findings(
+    application_id: str,
+):
+
+    if not application_exists(
+        application_id
+    ):
+
+        return jsonify(
+            {
+                "success":
+                    False,
+
+                "error":
+                    "Application not found.",
+            }
+        ), 404
+
+    findings = load_findings(
+        application_id
+    )
+
+    filters = {
+        key: str(
+            request.args.get(key)
+        ).lower()
+        for key in (
+            "severity",
+            "category",
+            "platform",
+            "rule_id",
+        )
+        if request.args.get(key)
+    }
+
+    for key, value in filters.items():
+
+        findings = [
+            finding
+            for finding in findings
+            if str(
+                finding.get(key, "")
+            ).lower() == value
+        ]
+
+    return jsonify(
+        {
+            "success":
+                True,
+
+            "application_id":
+                application_id,
+
+            "filters":
+                filters,
+
+            "summary":
+                summarize(findings),
+
+            "findings":
+                findings,
+        }
+    )
+
+
+@app.get(
+    "/api/applications/<application_id>"
+    "/findings/<finding_id>"
+)
+def application_finding(
+    application_id: str,
+    finding_id: str,
+):
+
+    if not application_exists(
+        application_id
+    ):
+
+        return jsonify(
+            {
+                "success":
+                    False,
+
+                "error":
+                    "Application not found.",
+            }
+        ), 404
+
+    for finding in load_findings(
+        application_id
+    ):
+
+        if finding.get("id") == finding_id:
+
+            return jsonify(
+                {
+                    "success":
+                        True,
+
+                    "finding":
+                        finding,
+                }
+            )
+
+    return jsonify(
+        {
+            "success":
+                False,
+
+            "error":
+                "Finding not found.",
+        }
+    ), 404
+
+
+# ============================================================
+# Rule catalogue
+# ============================================================
+
+@app.get("/api/rules")
+def rules_catalogue():
+
+    return jsonify(
+        {
+            "success":
+                True,
+
+            "rules": [
+                {
+                    "id": rule.id,
+                    "title": rule.title,
+                    "severity": rule.severity,
+                    "category": rule.category,
+                    "confidence": rule.confidence,
+                    "platform": rule.platform,
+                    "cwe": rule.cwe,
+                    "owasp": rule.owasp,
+                    "description": rule.description,
+                    "recommendation": rule.recommendation,
+                }
+                for rule in default_rules()
+            ],
+        }
+    )
 
 
 # ============================================================

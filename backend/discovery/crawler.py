@@ -6,7 +6,6 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-
 USER_AGENT = (
     "Application-Security-Platform/0.1 "
     "(authorized-security-discovery)"
@@ -182,6 +181,12 @@ def crawl(
                                 "type",
                                 field.name,
                             ),
+
+                        "autocomplete":
+                            field.get(
+                                "autocomplete",
+                                "",
+                            ),
                     }
                 )
 
@@ -195,6 +200,12 @@ def crawl(
 
                     "method":
                         method,
+
+                    "autocomplete":
+                        form.get(
+                            "autocomplete",
+                            "",
+                        ),
 
                     "inputs":
                         inputs,
