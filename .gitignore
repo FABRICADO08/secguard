@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.env
+data/scans/*
+data/findings/*
+data/applications/*
+!data/scans/.gitkeep
+!data/findings/.gitkeep
+!data/applications/.gitkeep
+model.json 
+model_structure.txt 
