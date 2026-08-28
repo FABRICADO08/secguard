@@ -240,6 +240,45 @@ def test_credentials_over_http_and_missing_csrf():
     assert {"GEN-AUTH-001", "GEN-AUTH-002"} <= rule_ids(findings)
 
 
+@pytest.mark.parametrize(
+    "autocomplete,reported",
+    [
+        ("", True),
+        ("on", True),
+        ("username", True),
+        ("off", False),
+        ("new-password", False),
+        ("current-password", False),
+    ],
+)
+def test_password_autocomplete_only_accepts_safe_values(
+    autocomplete,
+    reported,
+):
+    findings = run(
+        make_context(
+            attack_surface={
+                "forms": [
+                    {
+                        "page": "https://app.test/login",
+                        "action": "https://app.test/login",
+                        "method": "POST",
+                        "inputs": [
+                            {
+                                "name": "password",
+                                "type": "password",
+                                "autocomplete": autocomplete,
+                            }
+                        ],
+                    }
+                ]
+            }
+        )
+    )
+
+    assert ("GEN-AUTH-003" in rule_ids(findings)) is reported
+
+
 def test_csrf_token_field_suppresses_the_finding():
     findings = run(
         make_context(
