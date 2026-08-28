@@ -1,16 +1,244 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Finding Detail - Application Security Platform</title>
-  <link rel="stylesheet" href="/css/main.css">
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Finding Detail - Application Security Platform
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="/css/main.css"
+    >
+
 </head>
+
 <body>
-  <main class="container">
-    <h1>Finding Detail</h1>
-    <p>This page is part of the new application security platform. Functionality will be added incrementally.</p>
-  </main>
-  <script src="/js/app.js"></script>
+
+<header class="header">
+
+    <div>
+
+        <div class="eyebrow">
+            APPLICATION SECURITY PLATFORM
+        </div>
+
+        <h1 id="findingTitle">
+            Finding
+        </h1>
+
+        <p id="findingRule">
+            -
+        </p>
+
+    </div>
+
+    <nav class="nav">
+
+        <a href="/index.html">
+            Discovery
+        </a>
+
+        <a href="/dashboard.html">
+            Dashboard
+        </a>
+
+        <a
+            id="backToFindings"
+            href="/findings.html"
+        >
+            Findings
+        </a>
+
+    </nav>
+
+</header>
+
+
+<main class="container">
+
+    <div
+        id="error"
+        class="status hidden"
+    ></div>
+
+    <section
+        id="detail"
+        class="hidden"
+    >
+
+        <div class="card">
+
+            <div class="section-heading">
+
+                <div>
+
+                    <div class="eyebrow">
+                        LOCATION
+                    </div>
+
+                    <h2 id="findingLocation">
+                        -
+                    </h2>
+
+                </div>
+
+                <div id="findingSeverity"></div>
+
+            </div>
+
+
+            <div class="metrics">
+
+                <div class="metric">
+
+                    <strong id="findingRisk">
+                        0
+                    </strong>
+
+                    <span>
+                        Risk Score
+                    </span>
+
+                </div>
+
+                <div class="metric">
+
+                    <strong id="findingConfidence">
+                        -
+                    </strong>
+
+                    <span>
+                        Confidence
+                    </span>
+
+                </div>
+
+                <div class="metric">
+
+                    <strong id="findingCategory">
+                        -
+                    </strong>
+
+                    <span>
+                        Category
+                    </span>
+
+                </div>
+
+                <div class="metric">
+
+                    <strong id="findingPlatform">
+                        -
+                    </strong>
+
+                    <span>
+                        Platform
+                    </span>
+
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="card">
+
+            <h2>
+                Description
+            </h2>
+
+            <p id="findingDescription"></p>
+
+        </div>
+
+
+        <div class="card">
+
+            <h2>
+                Recommendation
+            </h2>
+
+            <p id="findingRecommendation"></p>
+
+        </div>
+
+
+        <div class="card">
+
+            <h2>
+                Classification
+            </h2>
+
+            <div class="surface-grid">
+
+                <div>
+                    <strong id="findingCwe">
+                        -
+                    </strong>
+
+                    <span>
+                        CWE
+                    </span>
+                </div>
+
+                <div>
+                    <strong id="findingOwasp">
+                        -
+                    </strong>
+
+                    <span>
+                        OWASP
+                    </span>
+                </div>
+
+                <div>
+                    <strong id="findingDetectedAt">
+                        -
+                    </strong>
+
+                    <span>
+                        Detected
+                    </span>
+                </div>
+
+            </div>
+
+        </div>
+
+
+        <div class="card">
+
+            <h2>
+                Evidence
+            </h2>
+
+            <pre id="findingEvidence"></pre>
+
+        </div>
+
+    </section>
+
+</main>
+
+
+<script
+    src="/js/common.js"
+></script>
+
+<script
+    src="/js/finding-detail.js"
+></script>
+
 </body>
+
 </html>

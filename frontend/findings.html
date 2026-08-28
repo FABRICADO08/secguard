@@ -1,16 +1,156 @@
 <!doctype html>
 <html lang="en">
+
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Findings - Application Security Platform</title>
-  <link rel="stylesheet" href="/css/main.css">
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>
+        Findings - Application Security Platform
+    </title>
+
+    <link
+        rel="stylesheet"
+        href="/css/main.css"
+    >
+
 </head>
+
 <body>
-  <main class="container">
-    <h1>Findings</h1>
-    <p>This page is part of the new application security platform. Functionality will be added incrementally.</p>
-  </main>
-  <script src="/js/app.js"></script>
+
+<header class="header">
+
+    <div>
+
+        <div class="eyebrow">
+            APPLICATION SECURITY PLATFORM
+        </div>
+
+        <h1>
+            Findings
+        </h1>
+
+        <p id="applicationSubtitle">
+            Security findings raised by the rule engine
+            for the selected application.
+        </p>
+
+    </div>
+
+    <nav class="nav">
+
+        <a href="/index.html">
+            Discovery
+        </a>
+
+        <a href="/dashboard.html">
+            Dashboard
+        </a>
+
+        <a
+            class="active"
+            href="/findings.html"
+        >
+            Findings
+        </a>
+
+    </nav>
+
+</header>
+
+
+<main class="container">
+
+    <section class="card">
+
+        <div class="section-heading">
+
+            <div>
+
+                <div class="eyebrow">
+                    APPLICATION
+                </div>
+
+                <h2 id="applicationUrl">
+                    -
+                </h2>
+
+            </div>
+
+            <div
+                id="riskGrade"
+                class="risk-grade"
+            >
+                -
+            </div>
+
+        </div>
+
+        <div
+            id="severityCounts"
+            class="severity-counts"
+        ></div>
+
+
+        <div class="filters">
+
+            <label for="severityFilter">
+                Severity
+            </label>
+
+            <select id="severityFilter">
+                <option value="">All</option>
+                <option value="critical">Critical</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+                <option value="informational">Informational</option>
+            </select>
+
+
+            <label for="categoryFilter">
+                Category
+            </label>
+
+            <select id="categoryFilter">
+                <option value="">All</option>
+            </select>
+
+        </div>
+
+    </section>
+
+
+    <section class="card">
+
+        <h2>
+            <span id="findingCount">0</span>
+            findings
+        </h2>
+
+        <div
+            id="findings"
+            class="finding-list"
+        ></div>
+
+    </section>
+
+</main>
+
+
+<script
+    src="/js/common.js"
+></script>
+
+<script
+    src="/js/findings.js"
+></script>
+
 </body>
+
 </html>

@@ -22,6 +22,9 @@ class Application:
 
     platform: str = "Unknown"
 
+    status_code: int | None = None
+    response_time_ms: float | None = None
+
     created_at: str = ""
     updated_at: str = ""
 
@@ -119,6 +122,12 @@ class Application:
             platform=data.get(
                 "platform",
                 "Unknown",
+            ),
+            status_code=data.get(
+                "status_code"
+            ),
+            response_time_ms=data.get(
+                "response_time_ms"
             ),
             created_at=data.get(
                 "created_at",
