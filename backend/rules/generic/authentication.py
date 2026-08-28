@@ -24,6 +24,12 @@ SESSION_COOKIE_MARKERS = (
     "phpsessid",
 )
 
+SAFE_PASSWORD_AUTOCOMPLETE = (
+    "off",
+    "new-password",
+    "current-password",
+)
+
 CSRF_FIELD_MARKERS = (
     "csrf",
     "xsrf",
@@ -309,7 +315,8 @@ class PasswordFieldWithAutocomplete(Rule):
                 continue
 
             if all(
-                str(field.get("autocomplete", "")).strip()
+                str(field.get("autocomplete", "")).strip().lower()
+                in SAFE_PASSWORD_AUTOCOMPLETE
                 for field in form.get("inputs") or []
                 if str(field.get("type", "")).lower() == "password"
             ):
