@@ -56,6 +56,26 @@ function clearResults() {
 
 /*
 |--------------------------------------------------------------------------
+| Busy State
+|--------------------------------------------------------------------------
+*/
+
+/*
+ * Discovery and Mendix analysis both render into the same result
+ * card, so only one of them may run at a time.
+ */
+
+function setBusy(
+    busy
+) {
+    scanButton.disabled = busy;
+
+    mendixButton.disabled = busy;
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | Display Discovery Results
 |--------------------------------------------------------------------------
 */
@@ -686,8 +706,7 @@ async function startDiscovery() {
     }
 
 
-    scanButton.disabled =
-        true;
+    setBusy(true);
 
 
     setStatus(
@@ -798,8 +817,7 @@ async function startDiscovery() {
 
     } finally {
 
-        scanButton.disabled =
-            false;
+        setBusy(false);
 
     }
 }
@@ -863,7 +881,7 @@ async function analyzeMendixModel() {
         "loading"
     );
 
-    mendixButton.disabled = true;
+    setBusy(true);
 
 
     try {
@@ -932,7 +950,7 @@ async function analyzeMendixModel() {
 
     } finally {
 
-        mendixButton.disabled = false;
+        setBusy(false);
 
     }
 }
