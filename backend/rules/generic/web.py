@@ -432,17 +432,27 @@ class DirectoryListingEnabled(Rule):
     )
 
     MARKERS = (
-        "index of /",
-        "<title>directory listing for",
-        "[to parent directory]",
+        re.compile(r"<title>\s*index of\s*/", re.IGNORECASE),
+        re.compile(r"<h1>\s*index of\s*/", re.IGNORECASE),
+        re.compile(
+            r"<title>\s*directory listing for",
+            re.IGNORECASE,
+        ),
+        re.compile(r"\[to parent directory\]", re.IGNORECASE),
     )
 
+    LINK_PATTERN = re.compile(r"<a\s[^>]*href=", re.IGNORECASE)
+
     def evaluate(self, context: ScanContext) -> list[Finding]:
-        body = context.body.lower()
+        body = context.body
 
-        matched = [marker for marker in self.MARKERS if marker in body]
+        matched = [
+            marker.pattern
+            for marker in self.MARKERS
+            if marker.search(body)
+        ]
 
-        if not matched:
+        if not matched or not self.LINK_PATTERN.search(body):
             return []
 
         return [

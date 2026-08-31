@@ -10,6 +10,10 @@ from backend.config.settings import FETCH_TIMEOUT, USER_AGENT
 from backend.discovery.http import build_session, cookie_to_dict
 
 
+class TargetUnreachableError(Exception):
+    """The target refused, dropped or never answered the connection."""
+
+
 def validate_url(url: str) -> str:
     url = str(url or "").strip()
 
@@ -74,11 +78,26 @@ def fetch_application(url: str) -> dict:
 
     started = perf_counter()
 
-    response = session.get(
-        url,
-        timeout=FETCH_TIMEOUT,
-        allow_redirects=True,
-    )
+    try:
+        response = session.get(
+            url,
+            timeout=FETCH_TIMEOUT,
+            allow_redirects=True,
+        )
+
+    except requests.Timeout as exc:
+        raise TargetUnreachableError(
+            f"{url} did not respond within {FETCH_TIMEOUT} seconds. "
+            "Check that the application is running and reachable "
+            "from this machine."
+        ) from exc
+
+    except requests.RequestException as exc:
+        raise TargetUnreachableError(
+            f"Could not connect to {url}. Check the host, port and "
+            "scheme, and that the application is reachable from this "
+            "machine."
+        ) from exc
 
     elapsed_ms = round(
         (perf_counter() - started) * 1000,
@@ -131,6 +150,7 @@ def fetch_application(url: str) -> dict:
 
 __all__ = [
     "USER_AGENT",
+    "TargetUnreachableError",
     "check_http_redirect",
     "fetch_application",
     "validate_url",

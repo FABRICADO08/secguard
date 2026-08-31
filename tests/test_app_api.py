@@ -87,6 +87,26 @@ def test_discover_requires_a_url(client):
     assert response.get_json()["success"] is False
 
 
+def test_unreachable_target_returns_502(client, monkeypatch):
+    def unreachable(url):
+        raise app_module.TargetUnreachableError(
+            f"Could not connect to {url}."
+        )
+
+    monkeypatch.setattr(app_module, "fetch_application", unreachable)
+
+    response = client.post(
+        "/api/discover",
+        json={"url": "http://127.0.0.1:9"},
+    )
+
+    payload = response.get_json()
+
+    assert response.status_code == 502
+    assert payload["reason"] == "unreachable"
+    assert "127.0.0.1:9" in payload["error"]
+
+
 def test_findings_are_returned_with_a_summary(client, stored_application):
     payload = client.get("/api/applications/app-1/findings").get_json()
 
