@@ -280,3 +280,19 @@ def test_rule_errors_is_a_list(client, model_document):
     security = response.get_json()["application"]["security"]
 
     assert security["rule_errors"] == []
+
+
+def test_create_only_access_on_sensitive_entity_is_reported(
+    client,
+    access_model_document,
+):
+    response = analyze(client, access_model_document)
+
+    findings = response.get_json()["application"]["security"]["findings"]
+
+    assert response.status_code == 200
+    assert any(
+        finding["rule_id"] == "MXSEC-101"
+        and finding["location"] == "Billing.PaymentToken"
+        for finding in findings
+    )

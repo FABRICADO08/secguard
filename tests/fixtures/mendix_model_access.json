@@ -33,6 +33,36 @@
     },
     {
       "$Type": "DomainModels$Entity",
+      "$ID": "entity-token",
+      "$QualifiedName": "Billing.PaymentToken",
+      "name": "PaymentToken",
+      "attributes": [
+        {
+          "$Type": "DomainModels$Attribute",
+          "$ID": "attribute-token",
+          "$QualifiedName": "Billing.PaymentToken.Token",
+          "name": "Token",
+          "type": {
+            "$Type": "DomainModels$StringAttributeType"
+          }
+        }
+      ],
+      "accessRules": [
+        {
+          "$Type": "DomainModels$AccessRule",
+          "$ID": "rule-create-only",
+          "moduleRoles": [
+            "role-agent"
+          ],
+          "allowCreate": true,
+          "allowDelete": false,
+          "defaultMemberAccessRights": "None",
+          "xPathConstraint": ""
+        }
+      ]
+    },
+    {
+      "$Type": "DomainModels$Entity",
       "$ID": "entity-profile",
       "$QualifiedName": "Billing.Profile",
       "name": "Profile",

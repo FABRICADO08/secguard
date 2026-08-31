@@ -428,7 +428,11 @@ class MendixSecurityAnalyzer:
                     }:
                         broad_member_access = True
 
-                if not broad_member_access and not allow_delete:
+                if (
+                    not broad_member_access
+                    and not allow_delete
+                    and not allow_create
+                ):
                     continue
 
                 sensitive = bool(categories)
@@ -456,6 +460,12 @@ class MendixSecurityAnalyzer:
                     title = (
                         "Entity has broad write access "
                         "without row-level restriction"
+                    )
+
+                elif sensitive and allow_create:
+                    severity = "medium"
+                    title = (
+                        "Sensitive entity allows record creation"
                     )
 
                 else:
