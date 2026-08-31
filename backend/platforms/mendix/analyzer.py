@@ -428,10 +428,11 @@ class MendixSecurityAnalyzer:
                     }:
                         broad_member_access = True
 
-                if not broad_member_access and not allow_delete:
-                    continue
-
-                if not broad_member_access and not allow_create:
+                if (
+                    not broad_member_access
+                    and not allow_delete
+                    and not allow_create
+                ):
                     continue
 
                 sensitive = bool(categories)
@@ -459,6 +460,12 @@ class MendixSecurityAnalyzer:
                     title = (
                         "Entity has broad write access "
                         "without row-level restriction"
+                    )
+
+                elif sensitive and allow_create:
+                    severity = "medium"
+                    title = (
+                        "Sensitive entity allows record creation"
                     )
 
                 else:
@@ -681,6 +688,7 @@ class MendixSecurityAnalyzer:
                                 "readwrite",
                                 "write",
                                 "read",
+                                "readonly",
                             }:
                                 risky_roles.extend(
                                     roles
@@ -790,24 +798,25 @@ class MendixSecurityAnalyzer:
                 ),
             )
 
-            if not delete_behavior:
-                continue
+            # Parsed associations carry the behaviour as flat fields
+            # while raw dump nodes nest it in a delete behaviour object.
+            behavior = delete_behavior or association
 
             parent_behavior = self._get(
-                delete_behavior,
+                behavior,
                 "parent_delete_behavior",
                 self._get(
-                    delete_behavior,
+                    behavior,
                     "parentDeleteBehavior",
                     "",
                 ),
             )
 
             child_behavior = self._get(
-                delete_behavior,
+                behavior,
                 "child_delete_behavior",
                 self._get(
-                    delete_behavior,
+                    behavior,
                     "childDeleteBehavior",
                     "",
                 ),

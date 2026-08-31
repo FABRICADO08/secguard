@@ -161,3 +161,138 @@ def test_missing_body_is_rejected(client):
 
     assert response.status_code == 400
     assert "model" in response.get_json()["error"]
+
+
+ACCESS_MODEL_FILE = (
+    Path(__file__).resolve().parent
+    / "fixtures"
+    / "mendix_model_access.json"
+)
+
+
+@pytest.fixture
+def access_model_document():
+    return json.loads(ACCESS_MODEL_FILE.read_text(encoding="utf-8"))
+
+
+def rule_ids(payload):
+    return {
+        finding["rule_id"]
+        for finding in payload["application"]["security"]["findings"]
+    }
+
+
+def test_upload_filename_is_stripped_of_markup(client, model_document):
+    response = client.post(
+        "/api/mendix/analyze",
+        data={
+            "model": (
+                io.BytesIO(json.dumps(model_document).encode("utf-8")),
+                "../<img src=x onerror=alert(1)>.json",
+            )
+        },
+        content_type="multipart/form-data",
+    )
+
+    name = response.get_json()["application"]["name"]
+
+    assert response.status_code == 200
+    assert "<" not in name
+    assert ">" not in name
+    assert "/" not in name
+
+
+def test_json_name_is_stripped_of_markup(client, model_document):
+    response = client.post(
+        "/api/mendix/analyze",
+        json={
+            "model": model_document,
+            "name": "<script>alert(1)</script>",
+        },
+    )
+
+    name = response.get_json()["application"]["name"]
+
+    assert response.status_code == 200
+    assert "<" not in name
+    assert ">" not in name
+
+
+def test_oversized_json_body_is_rejected(client, monkeypatch):
+    monkeypatch.setattr(app_module, "MAX_MODEL_BYTES", 8)
+
+    response = client.post(
+        "/api/mendix/analyze",
+        json={"model": {"units": [{"$Type": "Projects$Module"}] * 64}},
+    )
+
+    assert response.status_code == 400
+    assert "upload limit" in response.get_json()["error"]
+
+
+def test_empty_object_model_is_rejected(client):
+    response = client.post("/api/mendix/analyze", json={"model": {}})
+
+    assert response.status_code == 400
+    assert "Mendix model elements" in response.get_json()["error"]
+
+
+def test_unrelated_json_document_is_rejected(client):
+    response = client.post(
+        "/api/mendix/analyze",
+        json={"model": {"hello": "world", "items": [1, 2, 3]}},
+    )
+
+    assert response.status_code == 400
+    assert "Mendix model elements" in response.get_json()["error"]
+
+
+def test_delete_only_access_rule_is_reported(
+    client,
+    access_model_document,
+):
+    response = analyze(client, access_model_document)
+
+    assert response.status_code == 200
+    assert "MXSEC-101" in rule_ids(response.get_json())
+
+
+def test_member_access_to_sensitive_attribute_is_reported(
+    client,
+    access_model_document,
+):
+    response = analyze(client, access_model_document)
+
+    assert response.status_code == 200
+    assert "MXSEC-106" in rule_ids(response.get_json())
+
+
+def test_cascading_association_delete_is_reported(client, model_document):
+    response = analyze(client, model_document)
+
+    assert response.status_code == 200
+    assert "MXSEC-401" in rule_ids(response.get_json())
+
+
+def test_rule_errors_is_a_list(client, model_document):
+    response = analyze(client, model_document)
+
+    security = response.get_json()["application"]["security"]
+
+    assert security["rule_errors"] == []
+
+
+def test_create_only_access_on_sensitive_entity_is_reported(
+    client,
+    access_model_document,
+):
+    response = analyze(client, access_model_document)
+
+    findings = response.get_json()["application"]["security"]["findings"]
+
+    assert response.status_code == 200
+    assert any(
+        finding["rule_id"] == "MXSEC-101"
+        and finding["location"] == "Billing.PaymentToken"
+        for finding in findings
+    )
