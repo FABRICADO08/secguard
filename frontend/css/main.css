@@ -487,6 +487,31 @@ input[type="url"] {
     word-break: break-all;
 }
 
+.application-row {
+    display: flex;
+    align-items: stretch;
+    gap: 10px;
+}
+
+.application-row .application {
+    flex: 1;
+}
+
+.application-row .danger {
+    align-self: center;
+    padding: 8px 14px;
+    border: 1px solid #d9534f;
+    border-radius: 8px;
+    background: white;
+    color: #d9534f;
+    cursor: pointer;
+}
+
+.application-row .danger:hover {
+    background: #d9534f;
+    color: white;
+}
+
 .application .severity-counts {
     grid-template-columns: repeat(5, minmax(60px, 1fr));
     margin-top: 12px;
