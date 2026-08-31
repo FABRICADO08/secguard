@@ -122,6 +122,48 @@
     </section>
 
 
+    <section class="card">
+
+        <h2>
+            Analyze a Mendix model
+        </h2>
+
+        <p class="muted">
+
+            Upload a Mendix model export (dump-mpr JSON)
+            to analyze entity access rules, sensitive
+            attributes and associations.
+
+        </p>
+
+
+        <label for="mendixModel">
+            Mendix model JSON
+        </label>
+
+        <input
+            id="mendixModel"
+            type="file"
+            accept="application/json,.json"
+        >
+
+
+        <button
+            id="mendixButton"
+            class="primary"
+        >
+            Analyze Model
+        </button>
+
+
+        <div
+            id="mendixStatus"
+            class="status"
+        ></div>
+
+    </section>
+
+
     <section
         id="results"
         class="results hidden"
