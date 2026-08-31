@@ -12,11 +12,13 @@ def build_recommendations(
     """
     Collapse findings into a prioritized, de-duplicated remediation list.
 
-    Findings produced by the same rule share one recommendation, so the
-    list stays actionable instead of repeating per affected URL.
+    Findings that share a rule and identical remediation text collapse
+    into one entry, so the list stays actionable instead of repeating
+    per affected URL. A rule that emits different remediation for
+    different findings keeps one entry per distinct recommendation.
     """
 
-    grouped: dict[str, dict[str, Any]] = {}
+    grouped: dict[tuple[str, str], dict[str, Any]] = {}
 
     for finding in findings:
         recommendation = str(finding.get("recommendation") or "").strip()
@@ -27,7 +29,7 @@ def build_recommendations(
         rule_id = str(finding.get("rule_id") or recommendation)
 
         entry = grouped.setdefault(
-            rule_id,
+            (rule_id, recommendation),
             {
                 "rule_id": rule_id,
                 "recommendation": recommendation,

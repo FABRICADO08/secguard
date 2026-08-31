@@ -807,6 +807,139 @@ async function startDiscovery() {
 
 /*
 |--------------------------------------------------------------------------
+| Mendix Model Analysis
+|--------------------------------------------------------------------------
+*/
+
+const mendixInput =
+    document.getElementById(
+        "mendixModel"
+    );
+
+const mendixButton =
+    document.getElementById(
+        "mendixButton"
+    );
+
+const mendixStatusBox =
+    document.getElementById(
+        "mendixStatus"
+    );
+
+
+function setMendixStatus(
+    message,
+    type = ""
+) {
+    mendixStatusBox.textContent = message;
+
+    mendixStatusBox.className =
+        `status ${type}`;
+}
+
+
+async function analyzeMendixModel() {
+
+    clearResults();
+
+
+    const file =
+        (mendixInput.files || [])[0];
+
+
+    if (!file) {
+
+        setMendixStatus(
+            "Select a Mendix model JSON file first.",
+            "error"
+        );
+
+        return;
+    }
+
+
+    setMendixStatus(
+        "Analyzing Mendix model...",
+        "loading"
+    );
+
+    mendixButton.disabled = true;
+
+
+    try {
+
+        const form = new FormData();
+
+        form.append(
+            "model",
+            file
+        );
+
+
+        const response =
+            await fetch(
+                "/api/mendix/analyze",
+                {
+                    method: "POST",
+                    body: form
+                }
+            );
+
+
+        const data =
+            await response.json();
+
+
+        if (
+            !response.ok ||
+            !data.success
+        ) {
+
+            throw new Error(
+                data.error ||
+                "Mendix model analysis failed."
+            );
+
+        }
+
+
+        showResults(
+            data
+        );
+
+
+        setMendixStatus(
+            `Analysis completed. Application ID: ${
+                data.application_id || "unknown"
+            }`,
+            "success"
+        );
+
+
+    } catch (error) {
+
+        console.error(
+            "Mendix analysis error:",
+            error
+        );
+
+        setMendixStatus(
+            error.message ||
+            "Mendix model analysis failed.",
+            "error"
+        );
+
+
+    } finally {
+
+        mendixButton.disabled = false;
+
+    }
+}
+
+
+/*
+|--------------------------------------------------------------------------
 | Button Event
 |--------------------------------------------------------------------------
 */
@@ -814,6 +947,11 @@ async function startDiscovery() {
 scanButton.addEventListener(
     "click",
     startDiscovery
+);
+
+mendixButton.addEventListener(
+    "click",
+    analyzeMendixModel
 );
 
 

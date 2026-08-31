@@ -16,6 +16,11 @@ const categoryFilter =
         "categoryFilter"
     );
 
+const platformFilter =
+    document.getElementById(
+        "platformFilter"
+    );
+
 
 /*
 |--------------------------------------------------------------------------
@@ -114,16 +119,18 @@ function renderFindings(
 }
 
 
-function renderCategories(
-    findings
+function renderOptions(
+    select,
+    findings,
+    field
 ) {
 
-    const categories =
+    const values =
         [
             ...new Set(
                 findings
                     .map(
-                        finding => finding.category
+                        finding => finding[field]
                     )
                     .filter(Boolean)
             )
@@ -131,23 +138,41 @@ function renderCategories(
 
 
     const selected =
-        categoryFilter.value;
+        select.value;
 
 
-    categoryFilter.innerHTML =
+    select.innerHTML =
         `<option value="">All</option>` +
-        categories
+        values
             .map(
-                category => `
-                    <option value="${escapeHtml(category)}">
-                        ${escapeHtml(category)}
+                value => `
+                    <option value="${escapeHtml(value)}">
+                        ${escapeHtml(value)}
                     </option>
                 `
             )
             .join("");
 
 
-    categoryFilter.value = selected;
+    select.value = selected;
+}
+
+
+function renderFilterOptions(
+    findings
+) {
+
+    renderOptions(
+        categoryFilter,
+        findings,
+        "category"
+    );
+
+    renderOptions(
+        platformFilter,
+        findings,
+        "platform"
+    );
 }
 
 
@@ -229,6 +254,15 @@ async function loadFindings() {
 
     }
 
+    if (platformFilter.value) {
+
+        parameters.set(
+            "platform",
+            platformFilter.value
+        );
+
+    }
+
 
     const data =
         await getJson(
@@ -276,7 +310,7 @@ async function initialize() {
                 }/findings`
             );
 
-        renderCategories(
+        renderFilterOptions(
             all.findings || []
         );
 
@@ -305,6 +339,11 @@ severityFilter.addEventListener(
 );
 
 categoryFilter.addEventListener(
+    "change",
+    loadFindings
+);
+
+platformFilter.addEventListener(
     "change",
     loadFindings
 );
