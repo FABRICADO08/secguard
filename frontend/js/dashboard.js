@@ -180,27 +180,36 @@ async function deleteApplication(
     }
 
 
-    const response =
-        await fetch(
-            `/api/applications/${
-                encodeURIComponent(
-                    applicationId
-                )
-            }`,
-            {
-                method: "DELETE"
-            }
-        );
+    try {
 
+        const response =
+            await fetch(
+                `/api/applications/${
+                    encodeURIComponent(
+                        applicationId
+                    )
+                }`,
+                {
+                    method: "DELETE"
+                }
+            );
 
-    const data =
-        await response.json();
+        const data =
+            await response.json();
 
+        if (!response.ok || !data.success) {
 
-    if (!response.ok || !data.success) {
+            throw new Error(
+                data.error ||
+                "Could not delete the application."
+            );
+
+        }
+
+    } catch (error) {
 
         window.alert(
-            data.error ||
+            error.message ||
             "Could not delete the application."
         );
 
@@ -282,6 +291,11 @@ applicationsContainer.addEventListener(
 
         deleteApplication(
             button.dataset.delete
+        ).catch(
+            error => window.alert(
+                error.message ||
+                "Could not delete the application."
+            )
         );
     }
 );
