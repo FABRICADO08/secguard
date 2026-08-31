@@ -65,9 +65,14 @@ function clearResults() {
  * card, so only one of them may run at a time.
  */
 
+let requestInFlight = false;
+
+
 function setBusy(
     busy
 ) {
+    requestInFlight = busy;
+
     scanButton.disabled = busy;
 
     mendixButton.disabled = busy;
@@ -673,6 +678,11 @@ async function startDiscovery() {
      * Reset previous results
      */
 
+    if (requestInFlight) {
+        return;
+    }
+
+
     clearResults();
 
 
@@ -857,6 +867,11 @@ function setMendixStatus(
 
 
 async function analyzeMendixModel() {
+
+    if (requestInFlight) {
+        return;
+    }
+
 
     clearResults();
 
