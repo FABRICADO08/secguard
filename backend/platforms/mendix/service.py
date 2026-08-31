@@ -141,6 +141,22 @@ def analyze_model(data: dict[str, Any]) -> dict[str, Any]:
 
     model = MendixModelParser(data).parse()
 
+    if not any(
+        (
+            model.modules,
+            model.entities,
+            model.microflows,
+            model.pages,
+            model.module_roles,
+            model.associations,
+        )
+    ):
+        raise ValueError(
+            "No Mendix model elements were found. Upload a dump-mpr "
+            "JSON export containing modules, entities, microflows, "
+            "pages or security roles."
+        )
+
     findings = to_findings(
         MendixSecurityAnalyzer(model).analyze()
     )

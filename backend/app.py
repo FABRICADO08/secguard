@@ -435,12 +435,39 @@ def discover():
 # Mendix model analysis
 # ============================================================
 
+def _model_name(value: str) -> str:
+    """
+    Reduce an uploaded model name to a safe display label.
+
+    Only the file name is kept, control characters and markup are
+    dropped, and the result is truncated.
+    """
+
+    name = str(value or "").replace("\\", "/").rsplit("/", 1)[-1]
+
+    name = "".join(
+        character
+        for character in name
+        if character.isprintable()
+        and character not in "<>\"'&"
+    ).strip()
+
+    return name[:128] or "mendix-model.json"
+
+
 def _read_model_upload() -> tuple[dict, str]:
     """
     Accept a Mendix model as a multipart upload or a JSON body.
 
     Returns the decoded model document and the name to display for it.
     """
+
+    if (request.content_length or 0) > MAX_MODEL_BYTES:
+
+        raise ValueError(
+            "Mendix model exceeds the "
+            f"{MAX_MODEL_BYTES // (1024 * 1024)} MB upload limit."
+        )
 
     upload = request.files.get("model")
 
@@ -475,9 +502,8 @@ def _read_model_upload() -> tuple[dict, str]:
                 f"Uploaded Mendix model is not valid JSON: {exc}"
             ) from exc
 
-        return document, (
+        return document, _model_name(
             upload.filename
-            or "mendix-model.json"
         )
 
     body = request.get_json(
@@ -496,15 +522,12 @@ def _read_model_upload() -> tuple[dict, str]:
         body,
     )
 
-    name = str(
+    return document, _model_name(
         body.get(
             "name",
             "",
         )
-        or "mendix-model.json"
     )
-
-    return document, name
 
 
 @app.post("/api/mendix/analyze")
@@ -576,7 +599,7 @@ def analyze_mendix_model():
             len(MENDIX_RULE_CATALOGUE),
 
         "rule_errors":
-            0,
+            [],
     }
 
     application.status = "analyzed"

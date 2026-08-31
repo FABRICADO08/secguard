@@ -431,9 +431,6 @@ class MendixSecurityAnalyzer:
                 if not broad_member_access and not allow_delete:
                     continue
 
-                if not broad_member_access and not allow_create:
-                    continue
-
                 sensitive = bool(categories)
 
                 if sensitive and allow_delete:
@@ -681,6 +678,7 @@ class MendixSecurityAnalyzer:
                                 "readwrite",
                                 "write",
                                 "read",
+                                "readonly",
                             }:
                                 risky_roles.extend(
                                     roles
@@ -790,24 +788,25 @@ class MendixSecurityAnalyzer:
                 ),
             )
 
-            if not delete_behavior:
-                continue
+            # Parsed associations carry the behaviour as flat fields
+            # while raw dump nodes nest it in a delete behaviour object.
+            behavior = delete_behavior or association
 
             parent_behavior = self._get(
-                delete_behavior,
+                behavior,
                 "parent_delete_behavior",
                 self._get(
-                    delete_behavior,
+                    behavior,
                     "parentDeleteBehavior",
                     "",
                 ),
             )
 
             child_behavior = self._get(
-                delete_behavior,
+                behavior,
                 "child_delete_behavior",
                 self._get(
-                    delete_behavior,
+                    behavior,
                     "childDeleteBehavior",
                     "",
                 ),

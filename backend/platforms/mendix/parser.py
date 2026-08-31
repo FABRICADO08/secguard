@@ -1699,9 +1699,87 @@ class MendixModelParser:
     # REFERENCE RESOLUTION
     # ============================================================
 
+    def _resolve_member_access_attributes(
+        self,
+    ) -> None:
+
+        """
+        Member accesses reference their attribute by $ID.
+
+        Consumers compare member accesses against attribute names, so
+        the GUID is resolved to the attribute qualified name here and
+        the original reference is kept as attribute_id.
+        """
+
+        for entity in self.model.entities:
+
+            attributes_by_id = {
+                str(
+                    getattr(
+                        attribute,
+                        "id",
+                        "",
+                    )
+                    or ""
+                ): attribute
+
+                for attribute in getattr(
+                    entity,
+                    "attributes",
+                    [],
+                )
+            }
+
+            for rule in getattr(
+                entity,
+                "access_rules",
+                [],
+            ):
+
+                for member in getattr(
+                    rule,
+                    "member_accesses",
+                    [],
+                ):
+
+                    if not isinstance(
+                        member,
+                        dict,
+                    ):
+
+                        continue
+
+                    reference = str(
+                        member.get(
+                            "attribute",
+                            "",
+                        )
+                        or ""
+                    )
+
+                    attribute = (
+                        attributes_by_id.get(
+                            reference
+                        )
+                    )
+
+                    if attribute is None:
+
+                        continue
+
+                    member["attribute_id"] = reference
+
+                    member["attribute"] = (
+                        attribute.qualified_name
+                        or
+                        attribute.name
+                    )
+
     def _resolve_references(
         self,
     ) -> None:
+
+        self._resolve_member_access_attributes()
 
         # ========================================================
         # ASSOCIATIONS

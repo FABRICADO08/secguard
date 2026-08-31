@@ -1,0 +1,72 @@
+{
+  "$Type": "Projects$Project",
+  "units": [
+    {
+      "$Type": "DomainModels$Entity",
+      "$ID": "entity-credential",
+      "$QualifiedName": "Billing.CustomerCredential",
+      "name": "CustomerCredential",
+      "attributes": [
+        {
+          "$Type": "DomainModels$Attribute",
+          "$ID": "attribute-secret",
+          "$QualifiedName": "Billing.CustomerCredential.ClientSecret",
+          "name": "ClientSecret",
+          "type": {
+            "$Type": "DomainModels$StringAttributeType"
+          }
+        }
+      ],
+      "accessRules": [
+        {
+          "$Type": "DomainModels$AccessRule",
+          "$ID": "rule-delete-only",
+          "moduleRoles": [
+            "role-agent"
+          ],
+          "allowCreate": false,
+          "allowDelete": true,
+          "defaultMemberAccessRights": "None",
+          "xPathConstraint": ""
+        }
+      ]
+    },
+    {
+      "$Type": "DomainModels$Entity",
+      "$ID": "entity-profile",
+      "$QualifiedName": "Billing.Profile",
+      "name": "Profile",
+      "attributes": [
+        {
+          "$Type": "DomainModels$Attribute",
+          "$ID": "attribute-email",
+          "$QualifiedName": "Billing.Profile.EmailAddress",
+          "name": "EmailAddress",
+          "type": {
+            "$Type": "DomainModels$StringAttributeType"
+          }
+        }
+      ],
+      "accessRules": [
+        {
+          "$Type": "DomainModels$AccessRule",
+          "$ID": "rule-member-read",
+          "moduleRoles": [
+            "role-agent"
+          ],
+          "allowCreate": false,
+          "allowDelete": false,
+          "defaultMemberAccessRights": "None",
+          "xPathConstraint": "",
+          "memberAccesses": [
+            {
+              "$Type": "DomainModels$MemberAccess",
+              "attribute": "attribute-email",
+              "accessRights": "ReadOnly"
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
