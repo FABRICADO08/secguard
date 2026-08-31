@@ -1,0 +1,103 @@
+{
+  "$Type": "Projects$Project",
+  "units": [
+    {
+      "$Type": "Security$ModuleSecurity",
+      "moduleRoles": [
+        {
+          "$Type": "Security$ModuleRole",
+          "$ID": "role-user",
+          "$QualifiedName": "Sales.User",
+          "name": "User"
+        }
+      ]
+    },
+    {
+      "$Type": "DomainModels$Entity",
+      "$ID": "entity-customer",
+      "$QualifiedName": "Sales.Customer",
+      "name": "Customer",
+      "attributes": [
+        {
+          "$Type": "DomainModels$Attribute",
+          "$ID": "attribute-password",
+          "$QualifiedName": "Sales.Customer.Password",
+          "name": "Password",
+          "type": {
+            "$Type": "DomainModels$StringAttributeType"
+          }
+        },
+        {
+          "$Type": "DomainModels$Attribute",
+          "$ID": "attribute-email",
+          "$QualifiedName": "Sales.Customer.EmailAddress",
+          "name": "EmailAddress",
+          "type": {
+            "$Type": "DomainModels$StringAttributeType"
+          }
+        }
+      ],
+      "accessRules": [
+        {
+          "$Type": "DomainModels$AccessRule",
+          "$ID": "rule-customer",
+          "moduleRoles": [
+            "role-user"
+          ],
+          "allowCreate": true,
+          "allowDelete": true,
+          "defaultMemberAccessRights": "ReadWrite",
+          "xPathConstraint": ""
+        }
+      ]
+    },
+    {
+      "$Type": "DomainModels$Entity",
+      "$ID": "entity-token",
+      "$QualifiedName": "Sales.AccessToken",
+      "name": "AccessToken",
+      "attributes": [
+        {
+          "$Type": "DomainModels$Attribute",
+          "$ID": "attribute-token",
+          "$QualifiedName": "Sales.AccessToken.Token",
+          "name": "Token",
+          "type": {
+            "$Type": "DomainModels$StringAttributeType"
+          }
+        }
+      ],
+      "accessRules": []
+    },
+    {
+      "$Type": "DomainModels$Association",
+      "$ID": "association-customer-token",
+      "$QualifiedName": "Sales.Customer_AccessToken",
+      "name": "Customer_AccessToken",
+      "parent": "entity-customer",
+      "child": "entity-token",
+      "deleteBehavior": {
+        "$Type": "DomainModels$DeleteBehavior",
+        "parentDeleteBehavior": "DeleteMeWithReferences",
+        "childDeleteBehavior": "DeleteMeButKeepReferences"
+      }
+    },
+    {
+      "$Type": "Microflows$Microflow",
+      "$ID": "microflow-import",
+      "$QualifiedName": "Sales.IMP_Customer",
+      "name": "IMP_Customer",
+      "applyEntityAccess": false,
+      "allowedModuleRoles": []
+    },
+    {
+      "$Type": "Pages$Page",
+      "$ID": "page-customers",
+      "$QualifiedName": "Sales.Customer_Overview",
+      "name": "Customer_Overview",
+      "allowedModuleRoles": [
+        "role-user"
+      ]
+    }
+  ]
+}

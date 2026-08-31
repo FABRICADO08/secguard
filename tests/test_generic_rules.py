@@ -171,11 +171,34 @@ def test_server_banner_is_only_reported_with_a_version():
 
 
 def test_directory_listing_is_reported():
-    findings = run(
-        make_context(response={"body": "<h1>Index of /uploads</h1>"})
+    body = (
+        "<h1>Index of /uploads</h1>"
+        '<a href="../">Parent Directory</a>'
+        '<a href="backup.zip">backup.zip</a>'
     )
 
+    findings = run(make_context(response={"body": body}))
+
     assert "GEN-INF-002" in rule_ids(findings)
+
+
+def test_directory_listing_ignores_prose_mentioning_index_of():
+    body = (
+        "<p>The index of /uploads is rebuilt nightly.</p>"
+        '<a href="/help">Help</a>'
+    )
+
+    findings = run(make_context(response={"body": body}))
+
+    assert "GEN-INF-002" not in rule_ids(findings)
+
+
+def test_directory_listing_requires_links():
+    body = "<h1>Index of /uploads</h1><p>Nothing here yet.</p>"
+
+    findings = run(make_context(response={"body": body}))
+
+    assert "GEN-INF-002" not in rule_ids(findings)
 
 
 def test_insecure_session_cookie_flags():

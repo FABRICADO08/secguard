@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from flask import (
@@ -19,6 +20,7 @@ from backend.discovery.endpoints import (
     discover_endpoints,
 )
 from backend.discovery.fingerprint import (
+    TargetUnreachableError,
     fetch_application,
 )
 from backend.discovery.technology import (
@@ -29,6 +31,12 @@ from backend.model.application import (
 )
 from backend.model.normalized import (
     model_statistics,
+)
+from backend.platforms.mendix.findings import (
+    RULE_CATALOGUE as MENDIX_RULE_CATALOGUE,
+)
+from backend.platforms.mendix.service import (
+    analyze_model,
 )
 from backend.recommendations import (
     build_recommendations,
@@ -62,6 +70,8 @@ ROOT = (
     .resolve()
     .parent.parent
 )
+
+MAX_MODEL_BYTES = 25 * 1024 * 1024
 
 FRONTEND = ROOT / "frontend"
 
@@ -390,6 +400,21 @@ def discover():
             }
         ), 400
 
+    except TargetUnreachableError as exc:
+
+        return jsonify(
+            {
+                "success":
+                    False,
+
+                "error":
+                    str(exc),
+
+                "reason":
+                    "unreachable",
+            }
+        ), 502
+
     except Exception as exc:
 
         return jsonify(
@@ -404,6 +429,186 @@ def discover():
                     str(exc),
             }
         ), 500
+
+
+# ============================================================
+# Mendix model analysis
+# ============================================================
+
+def _read_model_upload() -> tuple[dict, str]:
+    """
+    Accept a Mendix model as a multipart upload or a JSON body.
+
+    Returns the decoded model document and the name to display for it.
+    """
+
+    upload = request.files.get("model")
+
+    if upload is not None:
+
+        raw = upload.read(
+            MAX_MODEL_BYTES + 1
+        )
+
+        if len(raw) > MAX_MODEL_BYTES:
+
+            raise ValueError(
+                "Mendix model exceeds the "
+                f"{MAX_MODEL_BYTES // (1024 * 1024)} MB upload limit."
+            )
+
+        if not raw.strip():
+
+            raise ValueError(
+                "Uploaded Mendix model file is empty."
+            )
+
+        try:
+
+            document = json.loads(
+                raw.decode("utf-8")
+            )
+
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+
+            raise ValueError(
+                f"Uploaded Mendix model is not valid JSON: {exc}"
+            ) from exc
+
+        return document, (
+            upload.filename
+            or "mendix-model.json"
+        )
+
+    body = request.get_json(
+        silent=True
+    )
+
+    if not isinstance(body, dict):
+
+        raise ValueError(
+            "Provide a Mendix model as a 'model' file upload or a "
+            "JSON body."
+        )
+
+    document = body.get(
+        "model",
+        body,
+    )
+
+    name = str(
+        body.get(
+            "name",
+            "",
+        )
+        or "mendix-model.json"
+    )
+
+    return document, name
+
+
+@app.post("/api/mendix/analyze")
+def analyze_mendix_model():
+
+    try:
+
+        document, name = _read_model_upload()
+
+        result = analyze_model(
+            document
+        )
+
+    except ValueError as exc:
+
+        return jsonify(
+            {
+                "success":
+                    False,
+
+                "error":
+                    str(exc),
+            }
+        ), 400
+
+    except Exception as exc:
+
+        return jsonify(
+            {
+                "success":
+                    False,
+
+                "error":
+                    "Mendix model analysis failed.",
+
+                "details":
+                    str(exc),
+            }
+        ), 500
+
+    findings = result["findings"]
+
+    application = Application.create(
+        requested_url=
+            f"mendix-model://{name}",
+
+        final_url=
+            f"mendix-model://{name}",
+
+        name=name,
+    )
+
+    application.set_platform(
+        "Mendix"
+    )
+
+    application.model = result["model"]
+
+    application.security = {
+        **summarize(findings),
+
+        "findings":
+            findings,
+
+        "recommendations":
+            build_recommendations(findings),
+
+        "rules_evaluated":
+            len(MENDIX_RULE_CATALOGUE),
+
+        "rule_errors":
+            0,
+    }
+
+    application.status = "analyzed"
+
+    application.update_timestamp()
+
+    save_application(
+        application.to_dict()
+    )
+
+    save_findings(
+        application.id,
+        findings,
+    )
+
+    return jsonify(
+        {
+            "success":
+                True,
+
+            "application_id":
+                application.id,
+
+            "application":
+                application.to_dict(),
+
+            "model_statistics":
+                model_statistics(
+                    application.model
+                ),
+        }
+    )
 
 
 # ============================================================
