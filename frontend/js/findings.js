@@ -119,6 +119,84 @@ function renderFindings(
 }
 
 
+/*
+|--------------------------------------------------------------------------
+| Filter State
+|--------------------------------------------------------------------------
+*/
+
+const FILTERS = [
+    ["severity", () => severityFilter],
+    ["category", () => categoryFilter],
+    ["platform", () => platformFilter],
+];
+
+
+/*
+ * Filters live in the page URL so a reload, a bookmark or a shared
+ * link keeps the same view.
+ */
+
+function applyFiltersFromUrl() {
+
+    for (const [name, element] of FILTERS) {
+
+        const value =
+            queryParameter(name) || "";
+
+        const select = element();
+
+        const known =
+            [...select.options].some(
+                option => option.value === value
+            );
+
+        select.value = known
+            ? value
+            : "";
+    }
+}
+
+
+function writeFiltersToUrl() {
+
+    const parameters =
+        new URLSearchParams(
+            window.location.search
+        );
+
+    for (const [name, element] of FILTERS) {
+
+        const value = element().value;
+
+        if (value) {
+
+            parameters.set(
+                name,
+                value
+            );
+
+        } else {
+
+            parameters.delete(name);
+
+        }
+    }
+
+    const query =
+        parameters.toString();
+
+
+    window.history.replaceState(
+        null,
+        "",
+        window.location.pathname +
+        (query ? `?${query}` : "") +
+        window.location.hash
+    );
+}
+
+
 function renderOptions(
     select,
     findings,
@@ -233,6 +311,9 @@ async function loadApplication() {
 
 async function loadFindings() {
 
+    writeFiltersToUrl();
+
+
     const parameters =
         new URLSearchParams();
 
@@ -314,9 +395,9 @@ async function initialize() {
             all.findings || []
         );
 
-        renderFindings(
-            all.findings || []
-        );
+        applyFiltersFromUrl();
+
+        await loadFindings();
 
     } catch (error) {
 

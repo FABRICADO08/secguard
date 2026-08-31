@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from pathlib import Path
 from typing import Any
 
@@ -137,6 +138,36 @@ def application_exists(
     )
 
     return path.exists()
+
+
+def delete_application(
+    application_id: str,
+) -> bool:
+    """
+    Remove an application directory and everything stored under it.
+
+    Returns False when the application does not exist or the id does
+    not resolve to a direct child of the applications directory.
+    """
+
+    ensure_storage()
+
+    directory = (
+        APPLICATIONS_DIR
+        / application_id
+    ).resolve()
+
+    if directory.parent != APPLICATIONS_DIR.resolve():
+        return False
+
+    if not directory.is_dir():
+        return False
+
+    shutil.rmtree(
+        directory
+    )
+
+    return True
 
 
 def list_applications() -> list[dict[str, Any]]:

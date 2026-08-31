@@ -86,6 +86,7 @@ function renderApplications(
         applications
             .map(
                 application => `
+                  <div class="application-row">
                     <a
                         class="application"
                         href="/findings.html?application=${
@@ -147,9 +148,85 @@ function renderApplications(
                         </div>
 
                     </a>
+
+                    <button
+                        class="danger"
+                        type="button"
+                        data-delete="${escapeHtml(
+                            application.id || ""
+                        )}"
+                    >
+                        Delete
+                    </button>
+
+                  </div>
                 `
             )
             .join("");
+}
+
+
+async function deleteApplication(
+    applicationId
+) {
+
+    const confirmed =
+        window.confirm(
+            "Delete this application and all of its findings?"
+        );
+
+    if (!confirmed) {
+        return;
+    }
+
+
+    const response =
+        await fetch(
+            `/api/applications/${
+                encodeURIComponent(
+                    applicationId
+                )
+            }`,
+            {
+                method: "DELETE"
+            }
+        );
+
+
+    const data =
+        await response.json();
+
+
+    if (!response.ok || !data.success) {
+
+        window.alert(
+            data.error ||
+            "Could not delete the application."
+        );
+
+        return;
+    }
+
+
+    /*
+     * Findings and detail pages remember the last application, so
+     * a deleted one must not stay selected.
+     */
+
+    if (
+        localStorage.getItem(
+            "currentApplicationId"
+        ) === applicationId
+    ) {
+
+        localStorage.removeItem(
+            "currentApplicationId"
+        );
+
+    }
+
+
+    await initialize();
 }
 
 
@@ -186,6 +263,28 @@ async function initialize() {
 
     }
 }
+
+
+applicationsContainer.addEventListener(
+    "click",
+    event => {
+
+        const button =
+            event.target.closest(
+                "[data-delete]"
+            );
+
+        if (!button) {
+            return;
+        }
+
+        event.preventDefault();
+
+        deleteApplication(
+            button.dataset.delete
+        );
+    }
+);
 
 
 initialize();

@@ -149,3 +149,116 @@ def test_application_list_includes_risk(client, stored_application):
 
     assert applications[0]["risk_score"] == 70
     assert applications[0]["risk_grade"] == "D"
+
+
+@pytest.fixture
+def stubbed_discovery(monkeypatch):
+    def stub_discovery(technologies):
+        monkeypatch.setattr(
+            app_module,
+            "fetch_application",
+            lambda url: {
+                "requested_url": url,
+                "final_url": url + "/",
+                "status_code": 200,
+                "response_time_ms": 12,
+                "headers": {},
+                "cookies": [],
+                "body": "<html></html>",
+            },
+        )
+        monkeypatch.setattr(
+            app_module,
+            "detect_technologies",
+            lambda response: technologies,
+        )
+        monkeypatch.setattr(
+            app_module,
+            "crawl",
+            lambda url, max_pages=20: {
+                "pages": [],
+                "links": [],
+                "forms": [],
+                "scripts": [],
+                "pages_scanned": 1,
+            },
+        )
+        monkeypatch.setattr(
+            app_module,
+            "discover_endpoints",
+            lambda links, forms: [],
+        )
+        monkeypatch.setattr(
+            app_module,
+            "discover_common_api_paths",
+            lambda url: [],
+        )
+        monkeypatch.setattr(
+            app_module,
+            "scan_exposed_paths",
+            lambda url: [],
+        )
+
+    return stub_discovery
+
+
+def test_discovery_without_mendix_is_labelled_generic(
+    client,
+    stubbed_discovery,
+):
+    stubbed_discovery([])
+
+    payload = client.post(
+        "/api/discover",
+        json={"url": "http://127.0.0.1:8099"},
+    ).get_json()
+
+    assert payload["application"]["platform"] == "Generic"
+
+
+def test_discovery_of_a_mendix_target_is_labelled_mendix(
+    client,
+    stubbed_discovery,
+):
+    stubbed_discovery([{"name": "Mendix", "confidence": "high"}])
+
+    payload = client.post(
+        "/api/discover",
+        json={"url": "http://127.0.0.1:8099"},
+    ).get_json()
+
+    assert payload["application"]["platform"] == "Mendix"
+
+
+def test_application_is_deleted_with_its_findings(client, stored_application):
+    response = client.delete("/api/applications/app-1")
+
+    assert response.status_code == 200
+    assert response.get_json()["success"] is True
+
+    assert scans.application_exists("app-1") is False
+    assert not (scans.APPLICATIONS_DIR / "app-1").exists()
+    assert client.get("/api/applications").get_json()["applications"] == []
+    assert client.get("/api/applications/app-1/findings").status_code == 404
+
+
+def test_deleting_an_unknown_application_returns_404(client):
+    response = client.delete("/api/applications/missing")
+
+    assert response.status_code == 404
+    assert response.get_json()["success"] is False
+
+
+def test_delete_rejects_ids_outside_the_storage_directory(
+    client,
+    stored_application,
+    tmp_path,
+):
+    outsider = tmp_path / "outsider"
+    outsider.mkdir()
+
+    assert scans.delete_application("../outsider") is False
+    assert outsider.exists()
+
+    assert scans.delete_application("") is False
+    assert scans.application_exists("app-1") is True

@@ -60,6 +60,7 @@ from backend.storage.findings import (
 )
 from backend.storage.scans import (
     application_exists,
+    delete_application,
     list_applications,
     load_application,
     save_application,
@@ -236,7 +237,7 @@ def discover():
         platform = (
             "Mendix"
             if mendix_detected
-            else "Unknown"
+            else "Generic"
         )
 
         # ----------------------------------------------------
@@ -715,6 +716,42 @@ def get_application(
                     str(exc),
             }
         ), 500
+
+
+# ============================================================
+# Delete application
+# ============================================================
+
+@app.delete(
+    "/api/applications/<application_id>"
+)
+def remove_application(
+    application_id: str,
+):
+
+    if not delete_application(
+        application_id
+    ):
+
+        return jsonify(
+            {
+                "success":
+                    False,
+
+                "error":
+                    "Application not found.",
+            }
+        ), 404
+
+    return jsonify(
+        {
+            "success":
+                True,
+
+            "application_id":
+                application_id,
+        }
+    )
 
 
 # ============================================================
