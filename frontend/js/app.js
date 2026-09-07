@@ -76,6 +76,8 @@ function setBusy(
     scanButton.disabled = busy;
 
     mendixButton.disabled = busy;
+
+    outsystemsButton.disabled = busy;
 }
 
 
@@ -292,11 +294,15 @@ function showResults(
         "Unknown";
 
 
-    if (
-        detectedPlatform
-            .toLowerCase()
-            === "mendix"
-    ) {
+    const modelPlatform =
+        ["mendix", "outsystems"].includes(
+            detectedPlatform.toLowerCase()
+        )
+            ? detectedPlatform
+            : "";
+
+
+    if (modelPlatform) {
 
         platform.className =
             "platform detected";
@@ -304,15 +310,18 @@ function showResults(
         platform.innerHTML =
             `
             <strong>
-                Mendix detected
+                ${escapeHtml(
+                    modelPlatform
+                )} detected
             </strong>
 
             <br>
 
             <span>
-                Deep Mendix analysis will be performed
-                using the authorized Mendix model acquisition
-                process in the next phase.
+                Upload the ${escapeHtml(
+                    modelPlatform
+                )} model export above to add
+                platform-specific findings to this scan.
             </span>
             `;
 
@@ -835,7 +844,7 @@ async function startDiscovery() {
 
 /*
 |--------------------------------------------------------------------------
-| Mendix Model Analysis
+| Platform Model Analysis
 |--------------------------------------------------------------------------
 */
 
@@ -854,19 +863,40 @@ const mendixStatusBox =
         "mendixStatus"
     );
 
+const outsystemsInput =
+    document.getElementById(
+        "outsystemsModel"
+    );
 
-function setMendixStatus(
+const outsystemsButton =
+    document.getElementById(
+        "outsystemsButton"
+    );
+
+const outsystemsStatusBox =
+    document.getElementById(
+        "outsystemsStatus"
+    );
+
+
+function setModelStatus(
+    box,
     message,
     type = ""
 ) {
-    mendixStatusBox.textContent = message;
+    box.textContent = message;
 
-    mendixStatusBox.className =
+    box.className =
         `status ${type}`;
 }
 
 
-async function analyzeMendixModel() {
+async function analyzePlatformModel(
+    platform,
+    endpoint,
+    input,
+    statusBox
+) {
 
     if (requestInFlight) {
         return;
@@ -877,13 +907,14 @@ async function analyzeMendixModel() {
 
 
     const file =
-        (mendixInput.files || [])[0];
+        (input.files || [])[0];
 
 
     if (!file) {
 
-        setMendixStatus(
-            "Select a Mendix model JSON file first.",
+        setModelStatus(
+            statusBox,
+            `Select a ${platform} model JSON file first.`,
             "error"
         );
 
@@ -891,8 +922,9 @@ async function analyzeMendixModel() {
     }
 
 
-    setMendixStatus(
-        "Analyzing Mendix model...",
+    setModelStatus(
+        statusBox,
+        `Analyzing ${platform} model...`,
         "loading"
     );
 
@@ -911,7 +943,7 @@ async function analyzeMendixModel() {
 
         const response =
             await apiFetch(
-                "/api/mendix/analyze",
+                endpoint,
                 {
                     method: "POST",
                     body: form
@@ -930,7 +962,7 @@ async function analyzeMendixModel() {
 
             throw new Error(
                 data.error ||
-                "Mendix model analysis failed."
+                `${platform} model analysis failed.`
             );
 
         }
@@ -941,7 +973,8 @@ async function analyzeMendixModel() {
         );
 
 
-        setMendixStatus(
+        setModelStatus(
+            statusBox,
             `Analysis completed. Application ID: ${
                 data.application_id || "unknown"
             }`,
@@ -952,13 +985,14 @@ async function analyzeMendixModel() {
     } catch (error) {
 
         console.error(
-            "Mendix analysis error:",
+            `${platform} analysis error:`,
             error
         );
 
-        setMendixStatus(
+        setModelStatus(
+            statusBox,
             error.message ||
-            "Mendix model analysis failed.",
+            `${platform} model analysis failed.`,
             "error"
         );
 
@@ -1028,7 +1062,22 @@ if (apiTokenInput) {
 
 mendixButton.addEventListener(
     "click",
-    analyzeMendixModel
+    () => analyzePlatformModel(
+        "Mendix",
+        "/api/mendix/analyze",
+        mendixInput,
+        mendixStatusBox
+    )
+);
+
+outsystemsButton.addEventListener(
+    "click",
+    () => analyzePlatformModel(
+        "OutSystems",
+        "/api/outsystems/analyze",
+        outsystemsInput,
+        outsystemsStatusBox
+    )
 );
 
 

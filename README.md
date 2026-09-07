@@ -4,7 +4,7 @@ Application security intelligence platform.
 
 ## Goal
 
-Accept an authorized application URL, discover its technology and attack surface, perform generic security analysis, and provide deeper platform-specific analysis such as Mendix domain-model and security analysis.
+Accept an authorized application URL, discover its technology and attack surface, perform generic security analysis, and provide deeper platform-specific analysis for Mendix and OutSystems models.
 
 ## Run
 
@@ -30,6 +30,7 @@ Open `http://127.0.0.1:8000`.
 | `GET /api/health` | Service status. |
 | `POST /api/discover` | Discover, analyze and store an authorized application. Authenticated, rate limited. |
 | `POST /api/mendix/analyze` | Analyze a Mendix model export. Authenticated, rate limited. |
+| `POST /api/outsystems/analyze` | Analyze an OutSystems application export. Authenticated, rate limited. |
 | `DELETE /api/applications/<id>` | Delete a stored application and its findings. Authenticated. |
 | `GET /api/applications` | Stored applications with their risk summary. |
 | `GET /api/applications/<id>` | Full application record. |
@@ -47,8 +48,54 @@ Open `http://127.0.0.1:8000`.
 - `backend/risk/` — severity and confidence normalisation, per-finding and aggregate scoring.
 - `backend/recommendations/` — remediation grouped per rule.
 - `backend/platforms/mendix/` — Mendix model parsing and security analysis.
+- `backend/platforms/outsystems/` — OutSystems export parsing and security analysis.
 
 Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, evidence, location) and stored next to the application record under `data/applications/<id>/`.
+
+### OutSystems export format
+
+`POST /api/outsystems/analyze` reads a JSON document describing the application's modules; keys are accepted in camelCase or PascalCase and unknown keys are ignored, so an export only has to carry the parts it knows about. See `tests/fixtures/outsystems_model.json` for a complete example.
+
+```json
+{
+  "name": "CustomerPortal",
+  "modules": [
+    {
+      "name": "CustomerPortal",
+      "roles": ["Customer"],
+      "entities": [
+        {
+          "name": "Customer",
+          "public": true,
+          "exposeReadOnly": false,
+          "attributes": [{"name": "Email", "isEncrypted": false}]
+        }
+      ],
+      "screens": [{"name": "Login", "anonymous": true, "roles": []}],
+      "exposedRestApis": [
+        {
+          "name": "CustomerApi",
+          "authentication": "None",
+          "methods": [{"name": "ListCustomers", "httpMethod": "GET"}]
+        }
+      ],
+      "consumedRestApis": [{"name": "BillingApi", "baseUrl": "http://..."}],
+      "siteProperties": [{"name": "BillingApiKey", "defaultValue": "..."}],
+      "queries": [{"name": "SearchCustomers", "expandInline": ["OrderBy"]}]
+    }
+  ]
+}
+```
+
+| Rule | Detects |
+| --- | --- |
+| `OSSEC-101` | Screen reachable without a role. |
+| `OSSEC-102` | Exposed REST method with no authentication or roles. |
+| `OSSEC-103` | Public entity that consuming modules can write to. |
+| `OSSEC-104` | Site property shipping a secret as its default value. |
+| `OSSEC-105` | Sensitive attribute stored unencrypted. |
+| `OSSEC-106` | Advanced SQL expanding a parameter inline. |
+| `OSSEC-107` | Consumed API called over plain HTTP. |
 
 ## Security configuration
 

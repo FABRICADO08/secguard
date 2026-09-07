@@ -77,6 +77,36 @@ def detect_technologies(
             break
 
     # --------------------------------------------------------
+    # OutSystems
+    # --------------------------------------------------------
+
+    outsystems_patterns = [
+        r"outsystems",
+        r"outsystemsui",
+        r"/scripts/outsystems",
+        r"moduleservices/moduleversioninfo",
+        r"osjstooltip",
+        r"nr2users",
+        r"osvisit",
+    ]
+
+    for pattern in outsystems_patterns:
+
+        if re.search(
+            pattern,
+            body_lower,
+        ):
+
+            add(
+                "OutSystems",
+                "Platform",
+                "high",
+                f"Page content matched: {pattern}",
+            )
+
+            break
+
+    # --------------------------------------------------------
     # React
     # --------------------------------------------------------
 
