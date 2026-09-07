@@ -183,7 +183,7 @@ async function deleteApplication(
     try {
 
         const response =
-            await fetch(
+            await apiFetch(
                 `/api/applications/${
                     encodeURIComponent(
                         applicationId

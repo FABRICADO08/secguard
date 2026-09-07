@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 import requests
 
 from backend.config.settings import PROBE_TIMEOUT, USER_AGENT
+from backend.security.targets import guard_response
 
 
 def build_session() -> requests.Session:
@@ -19,6 +20,10 @@ def build_session() -> requests.Session:
                       "application/json;q=0.9,*/*;q=0.8",
         }
     )
+
+    # Every hop is re-checked, so a public target cannot redirect the
+    # scanner onto an internal address.
+    session.hooks["response"].append(guard_response)
 
     return session
 

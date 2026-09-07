@@ -8,6 +8,7 @@ import requests
 
 from backend.config.settings import FETCH_TIMEOUT, USER_AGENT
 from backend.discovery.http import build_session, cookie_to_dict
+from backend.security.targets import BlockedTargetError
 
 
 class TargetUnreachableError(Exception):
@@ -84,6 +85,11 @@ def fetch_application(url: str) -> dict:
             timeout=FETCH_TIMEOUT,
             allow_redirects=True,
         )
+
+    # A blocked redirect is a policy decision, not a transport failure,
+    # so it keeps its own message instead of "could not connect".
+    except BlockedTargetError:
+        raise
 
     except requests.Timeout as exc:
         raise TargetUnreachableError(

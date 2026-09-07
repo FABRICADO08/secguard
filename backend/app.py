@@ -54,6 +54,12 @@ from backend.rules.engine import (
 from backend.scanners.configuration import (
     scan_exposed_paths,
 )
+from backend.security.auth import require_api_token
+from backend.security.rate_limit import rate_limited
+from backend.security.targets import (
+    BlockedTargetError,
+    assert_target_allowed,
+)
 from backend.storage.findings import (
     load_findings,
     save_findings,
@@ -141,6 +147,8 @@ def health():
 # ============================================================
 
 @app.post("/api/discover")
+@require_api_token
+@rate_limited
 def discover():
 
     data = (
@@ -171,6 +179,14 @@ def discover():
         ), 400
 
     try:
+
+        # ----------------------------------------------------
+        # Target policy
+        # ----------------------------------------------------
+
+        assert_target_allowed(
+            url
+        )
 
         # ----------------------------------------------------
         # Initial HTTP discovery
@@ -389,6 +405,21 @@ def discover():
             }
         )
 
+    except BlockedTargetError as exc:
+
+        return jsonify(
+            {
+                "success":
+                    False,
+
+                "error":
+                    str(exc),
+
+                "reason":
+                    "blocked_target",
+            }
+        ), 403
+
     except ValueError as exc:
 
         return jsonify(
@@ -532,6 +563,8 @@ def _read_model_upload() -> tuple[dict, str]:
 
 
 @app.post("/api/mendix/analyze")
+@require_api_token
+@rate_limited
 def analyze_mendix_model():
 
     try:
@@ -725,6 +758,7 @@ def get_application(
 @app.delete(
     "/api/applications/<application_id>"
 )
+@require_api_token
 def remove_application(
     application_id: str,
 ):

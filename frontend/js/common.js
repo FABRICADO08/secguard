@@ -112,12 +112,55 @@ function currentApplicationId() {
 }
 
 
+const API_TOKEN_KEY = "secguardApiToken";
+
+
+function apiToken() {
+
+    return localStorage.getItem(
+        API_TOKEN_KEY
+    ) || "";
+}
+
+
+/*
+ * The scanning and delete endpoints require the token configured with
+ * SECGUARD_API_TOKEN whenever the server was started with one.
+ */
+
+async function apiFetch(
+    url,
+    options
+) {
+
+    const settings = {
+        ...(options || {})
+    };
+
+    const token = apiToken();
+
+    if (token) {
+
+        settings.headers = {
+            ...(settings.headers || {}),
+            "X-API-Key": token
+        };
+
+    }
+
+    return fetch(
+        url,
+        settings
+    );
+}
+
+
 async function getJson(
     url
 ) {
 
     const response =
-        await fetch(url);
+        await apiFetch(url);
 
     const data =
         await response.json();
