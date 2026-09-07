@@ -16,6 +16,14 @@ python -m venv .venv
 
 Open `http://127.0.0.1:8000`.
 
+To serve it with a production WSGI server:
+
+```bash
+.venv/bin/gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 1
+```
+
+Keep `--workers 1`: the rate limiter holds its counters in process, so additional workers would each enforce the limit separately.
+
 ## Tests
 
 ```bash
@@ -44,7 +52,7 @@ Open `http://127.0.0.1:8000`.
 
 - `backend/discovery/` — fetching, crawling, technology and endpoint discovery.
 - `backend/scanners/` — active path probing with soft-404 baselining.
-- `backend/rules/` — the rule engine and the generic rule packs (transport, headers, cookies, forms, API, exposure).
+- `backend/rules/` — the rule engine and the generic rule packs (transport, headers, content security policy, CORS, client-side secrets, cookies, forms, API, exposure).
 - `backend/risk/` — severity and confidence normalisation, per-finding and aggregate scoring.
 - `backend/recommendations/` — remediation grouped per rule.
 - `backend/platforms/mendix/` — Mendix model parsing and security analysis.
@@ -96,6 +104,28 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 | `OSSEC-105` | Sensitive attribute stored unencrypted. |
 | `OSSEC-106` | Advanced SQL expanding a parameter inline. |
 | `OSSEC-107` | Consumed API called over plain HTTP. |
+
+### Generic rule packs
+
+| Rule | Detects |
+| --- | --- |
+| `GEN-HDR-*` | Missing or weak security headers, wildcard CORS. |
+| `GEN-CSP-001` | Script sources allowing `'unsafe-inline'` or `'unsafe-eval'`, unless a nonce or hash neutralises them. |
+| `GEN-CSP-002` | Script sources allowing any origin (`*`, `http:`, `https:`, `data:`). |
+| `GEN-CSP-003` | Policy without `object-src`, `base-uri` or `frame-ancestors` and no `default-src` to fall back on. |
+| `GEN-CORS-001` | `Access-Control-Allow-Origin: null`. |
+| `GEN-CORS-002` | State-changing methods allowed from any origin. |
+| `GEN-JS-001` | Credentials embedded in inline scripts, reported redacted. |
+| `GEN-JS-002` | Source map exposed to the browser. |
+| `GEN-TLS-*` | Plain HTTP, missing HTTPS redirect, mixed content. |
+| `GEN-SES-001` to `GEN-SES-003` | Cookies missing `Secure`, `HttpOnly` or a `SameSite` policy. |
+| `GEN-SES-004` | Session cookie persisted to disk through an expiry date. |
+| `GEN-SES-005` | Cookie scoped to a parent domain and shared with every subdomain. |
+| `GEN-AUTH-001` to `GEN-AUTH-003` | Credentials over plain HTTP, missing CSRF token, password autocomplete. |
+| `GEN-AUTH-004` | HTTP Basic authentication challenge. |
+| `GEN-AUTHZ-001`, `GEN-CFG-001` | Unauthenticated admin interfaces and exposed sensitive paths. |
+| `GEN-API-*` | Exposed API documentation, unauthenticated endpoints, exposed GraphQL. |
+| `GEN-INF-*` | Server banner disclosure, directory listing. |
 
 ## Security configuration
 

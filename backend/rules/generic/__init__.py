@@ -1,5 +1,12 @@
 from backend.rules.base import Rule
-from backend.rules.generic import api, authentication, authorization, web
+from backend.rules.generic import (
+    api,
+    authentication,
+    authorization,
+    clientside,
+    content_security,
+    web,
+)
 
 
 def all_generic_rules() -> list[Rule]:
@@ -7,6 +14,8 @@ def all_generic_rules() -> list[Rule]:
 
     return [
         *web.rules(),
+        *content_security.rules(),
+        *clientside.rules(),
         *authentication.rules(),
         *authorization.rules(),
         *api.rules(),
@@ -18,5 +27,7 @@ __all__ = [
     "api",
     "authentication",
     "authorization",
+    "clientside",
+    "content_security",
     "web",
 ]
