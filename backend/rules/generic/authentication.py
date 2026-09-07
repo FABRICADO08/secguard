@@ -341,6 +341,143 @@ class PasswordFieldWithAutocomplete(Rule):
         return findings
 
 
+class PersistentSessionCookie(Rule):
+    id = "GEN-SES-004"
+    title = "Session cookie is persisted to disk"
+    severity = "low"
+    confidence = "firm"
+    category = SESSION
+    cwe = "CWE-539"
+    owasp = "A07:2021 Identification and Authentication Failures"
+    recommendation = (
+        "Issue session cookies without an Expires or Max-Age attribute so "
+        "they are discarded when the browser closes, and expire the "
+        "session server-side instead."
+    )
+
+    def evaluate(self, context: ScanContext) -> list[Finding]:
+        findings = []
+
+        for cookie in context.cookies:
+            expires = cookie.get("expires")
+
+            if not expires or not _is_session_cookie(cookie.get("name", "")):
+                continue
+
+            findings.append(
+                self.finding(
+                    context,
+                    title=(
+                        f"Session cookie '{cookie.get('name')}' is "
+                        "persisted to disk"
+                    ),
+                    description=(
+                        f"The session cookie '{cookie.get('name')}' has an "
+                        "expiry date, so the browser writes it to disk and "
+                        "replays it after the browser is closed. A stolen "
+                        "profile therefore yields a usable session."
+                    ),
+                    evidence=cookie,
+                )
+            )
+
+        return findings
+
+
+class CookieScopedToParentDomain(Rule):
+    id = "GEN-SES-005"
+    title = "Cookie is shared with every subdomain"
+    severity = "low"
+    confidence = "firm"
+    category = SESSION
+    cwe = "CWE-565"
+    owasp = "A05:2021 Security Misconfiguration"
+    recommendation = (
+        "Drop the Domain attribute so the cookie is host-only, unless a "
+        "sibling subdomain genuinely needs it."
+    )
+
+    def evaluate(self, context: ScanContext) -> list[Finding]:
+        host = urlparse(context.final_url).hostname or ""
+
+        findings = []
+
+        for cookie in context.cookies:
+            domain = str(cookie.get("domain") or "").lstrip(".").lower()
+
+            if not domain or not host or domain == host.lower():
+                continue
+
+            if not host.lower().endswith(f".{domain}"):
+                continue
+
+            session_cookie = _is_session_cookie(cookie.get("name", ""))
+
+            findings.append(
+                self.finding(
+                    context,
+                    title=(
+                        f"Cookie '{cookie.get('name')}' is shared with "
+                        "every subdomain"
+                    ),
+                    severity="medium" if session_cookie else self.severity,
+                    description=(
+                        f"The cookie '{cookie.get('name')}' is scoped to "
+                        f"'{domain}' rather than '{host}', so every "
+                        "subdomain — including any that is less trusted or "
+                        "operated by a third party — receives it."
+                    ),
+                    evidence=cookie,
+                )
+            )
+
+        return findings
+
+
+class BasicAuthenticationChallenge(Rule):
+    id = "GEN-AUTH-004"
+    title = "HTTP Basic authentication is used"
+    severity = "medium"
+    confidence = "confirmed"
+    category = AUTHENTICATION
+    cwe = "CWE-522"
+    owasp = "A07:2021 Identification and Authentication Failures"
+    recommendation = (
+        "Replace Basic authentication with a session or token based flow "
+        "that supports logout, lockout and multi-factor authentication."
+    )
+
+    def evaluate(self, context: ScanContext) -> list[Finding]:
+        challenge = context.header("WWW-Authenticate")
+
+        if not challenge.strip().lower().startswith("basic"):
+            return []
+
+        over_http = not context.is_https
+
+        return [
+            self.finding(
+                context,
+                severity="high" if over_http else self.severity,
+                description=(
+                    "The server challenges with HTTP Basic authentication, "
+                    "which sends the password base64-encoded on every "
+                    "request and cannot be logged out of."
+                    + (
+                        " The challenge is served over plain HTTP, so the "
+                        "credentials travel in the clear."
+                        if over_http
+                        else ""
+                    )
+                ),
+                evidence={
+                    "www_authenticate": challenge,
+                    "https": context.is_https,
+                },
+            )
+        ]
+
+
 def rules() -> list[Rule]:
     return [
         InsecureSessionCookie(),
@@ -349,4 +486,7 @@ def rules() -> list[Rule]:
         CredentialsOverInsecureChannel(),
         MissingCsrfToken(),
         PasswordFieldWithAutocomplete(),
+        PersistentSessionCookie(),
+        CookieScopedToParentDomain(),
+        BasicAuthenticationChallenge(),
     ]
