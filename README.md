@@ -60,6 +60,6 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 | `SECGUARD_RATE_LIMIT_REQUESTS` | `10` | Scan requests allowed per client address per window. |
 | `SECGUARD_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. |
 
-Target policy is enforced before the first request, again on every redirect hop, and once more against the address each connection actually lands on, so neither a redirect nor a second DNS answer can steer the scanner onto an internal address. Scans always run over direct connections; proxies are ignored and refused because a proxy would connect on the scanner's behalf. The rate limiter is in-process; running multiple workers would need a shared store.
+Target policy is enforced before the first request, again on every redirect hop, and once more against the address each connection actually lands on, so neither a redirect nor a second DNS answer can steer the scanner onto an internal address. Scans always run over direct connections: proxy settings are ignored and an explicitly proxied request is refused, because a proxy would connect on the scanner's behalf. Other environment settings, such as `REQUESTS_CA_BUNDLE`, still apply. The rate limiter is in-process; running multiple workers would need a shared store.
 
 Only scan applications you are authorised to test. The scanner is passive apart from unauthenticated GET requests to common paths; it does not attempt exploitation.

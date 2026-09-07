@@ -11,8 +11,35 @@ from backend.security.adapter import GuardedAdapter
 from backend.security.targets import guard_response
 
 
+class DirectSession(requests.Session):
+    """
+    Session that never selects a proxy.
+
+    A proxy would connect on the scanner's behalf, so the peer address the
+    transport adapter checks would be the proxy rather than the target.
+    Only proxy selection is dropped: environment settings such as
+    `REQUESTS_CA_BUNDLE` still apply.
+    """
+
+    def merge_environment_settings(self, url, proxies, stream, verify, cert):
+        settings = super().merge_environment_settings(
+            url,
+            proxies,
+            stream,
+            verify,
+            cert,
+        )
+
+        settings["proxies"] = {}
+
+        return settings
+
+    def rebuild_proxies(self, prepared_request, proxies):
+        return {}
+
+
 def build_session() -> requests.Session:
-    session = requests.Session()
+    session = DirectSession()
 
     session.headers.update(
         {
@@ -32,12 +59,6 @@ def build_session() -> requests.Session:
 
     session.mount("http://", adapter)
     session.mount("https://", adapter)
-
-    # A proxy would connect on the scanner's behalf, so the peer address
-    # checked above would be the proxy rather than the target. Scans stay
-    # direct and environment proxy settings are ignored.
-    session.trust_env = False
-    session.proxies = {}
 
     return session
 

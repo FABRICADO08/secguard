@@ -128,11 +128,29 @@ def test_proxied_callers_are_rejected_when_no_token_is_configured(
     assert response.status_code == 401
 
 
-def test_scans_do_not_go_through_a_proxy():
+def test_scans_do_not_go_through_a_proxy(tmp_path, monkeypatch):
+    bundle = tmp_path / "ca.pem"
+
+    bundle.write_text("")
+
+    monkeypatch.setenv("HTTP_PROXY", "http://proxy.test:3128")
+    monkeypatch.setenv("HTTPS_PROXY", "http://proxy.test:3128")
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(bundle))
+
     session = build_session()
 
-    assert session.trust_env is False
-    assert session.proxies == {}
+    merged = session.merge_environment_settings(
+        "https://app.test/",
+        {},
+        None,
+        None,
+        None,
+    )
+
+    assert merged["proxies"] == {}
+
+    # Environment integration beyond proxies is still honoured.
+    assert merged["verify"] == str(bundle)
 
     with pytest.raises(BlockedTargetError):
         session.get_adapter("http://app.test/").proxy_manager_for(
