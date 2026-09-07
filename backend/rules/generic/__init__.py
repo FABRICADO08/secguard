@@ -5,6 +5,7 @@ from backend.rules.generic import (
     authorization,
     clientside,
     content_security,
+    discovery,
     web,
 )
 
@@ -16,6 +17,7 @@ def all_generic_rules() -> list[Rule]:
         *web.rules(),
         *content_security.rules(),
         *clientside.rules(),
+        *discovery.rules(),
         *authentication.rules(),
         *authorization.rules(),
         *api.rules(),
@@ -29,5 +31,6 @@ __all__ = [
     "authorization",
     "clientside",
     "content_security",
+    "discovery",
     "web",
 ]

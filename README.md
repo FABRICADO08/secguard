@@ -48,9 +48,11 @@ Keep `--workers 1`: the rate limiter holds its counters in process, so additiona
 
 ## Analysis pipeline
 
-`POST /api/discover` fetches the target, crawls same-origin pages, probes common API and sensitive paths, then runs the rule engine over the collected evidence.
+`POST /api/discover` fetches the target, crawls same-origin pages, reads `robots.txt` and any sitemap it declares, mines same-origin JavaScript for endpoints and secrets, probes common API and sensitive paths, sends an inert reflection marker through GET parameters, then runs the rule engine over the collected evidence.
 
-- `backend/discovery/` — fetching, crawling, technology and endpoint discovery.
+The reflection probe is the only active input test: it appends `"'<>` plus a random marker to a GET parameter and reports how the value comes back. It never touches POST forms, so a scan cannot create or modify data on the target.
+
+- `backend/discovery/` — fetching, crawling, robots/sitemap reading, script mining, reflection probing, technology and endpoint discovery.
 - `backend/scanners/` — active path probing with soft-404 baselining.
 - `backend/rules/` — the rule engine and the generic rule packs (transport, headers, content security policy, CORS, client-side secrets, cookies, forms, API, exposure).
 - `backend/risk/` — severity and confidence normalisation, per-finding and aggregate scoring.
@@ -116,7 +118,10 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 | `GEN-CORS-001` | `Access-Control-Allow-Origin: null`. |
 | `GEN-CORS-002` | State-changing methods allowed from any origin. |
 | `GEN-JS-001` | Credentials embedded in inline scripts, reported redacted. |
-| `GEN-JS-002` | Source map exposed to the browser. |
+| `GEN-JS-002` | Source map referenced by the page. |
+| `GEN-JS-003` | Credentials found in a served JavaScript file, reported redacted. |
+| `GEN-JS-004` | Source map referenced by a served JavaScript bundle. |
+| `GEN-INP-001` | GET parameter reflected with its quotes and angle brackets intact. |
 | `GEN-TLS-*` | Plain HTTP, missing HTTPS redirect, mixed content. |
 | `GEN-SES-001` to `GEN-SES-003` | Cookies missing `Secure`, `HttpOnly` or a `SameSite` policy. |
 | `GEN-SES-004` | Session cookie persisted to disk through an expiry date. |
@@ -125,7 +130,8 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 | `GEN-AUTH-004` | HTTP Basic authentication challenge. |
 | `GEN-AUTHZ-001`, `GEN-CFG-001` | Unauthenticated admin interfaces and exposed sensitive paths. |
 | `GEN-API-*` | Exposed API documentation, unauthenticated endpoints, exposed GraphQL. |
-| `GEN-INF-*` | Server banner disclosure, directory listing. |
+| `GEN-INF-001`, `GEN-INF-002` | Server banner disclosure, directory listing. |
+| `GEN-INF-004` | `robots.txt` disallowing administrative or internal paths. |
 
 ## Security configuration
 
