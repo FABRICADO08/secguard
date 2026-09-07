@@ -33,6 +33,12 @@ def build_session() -> requests.Session:
     session.mount("http://", adapter)
     session.mount("https://", adapter)
 
+    # A proxy would connect on the scanner's behalf, so the peer address
+    # checked above would be the proxy rather than the target. Scans stay
+    # direct and environment proxy settings are ignored.
+    session.trust_env = False
+    session.proxies = {}
+
     return session
 
 

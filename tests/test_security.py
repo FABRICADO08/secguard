@@ -108,6 +108,38 @@ def test_loopback_is_allowed_when_no_token_is_configured(client, monkeypatch):
     assert response.status_code == 400
 
 
+@pytest.mark.parametrize(
+    "header",
+    ["X-Forwarded-For", "X-Real-IP", "Forwarded"],
+)
+def test_proxied_callers_are_rejected_when_no_token_is_configured(
+    client,
+    monkeypatch,
+    header,
+):
+    monkeypatch.setattr(settings, "API_TOKEN", "")
+
+    response = client.post(
+        "/api/discover",
+        json={},
+        headers={header: "203.0.113.10"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_scans_do_not_go_through_a_proxy():
+    session = build_session()
+
+    assert session.trust_env is False
+    assert session.proxies == {}
+
+    with pytest.raises(BlockedTargetError):
+        session.get_adapter("http://app.test/").proxy_manager_for(
+            "http://proxy.test:3128",
+        )
+
+
 def test_delete_requires_a_token(client, token):
     response = client.delete("/api/applications/app-1")
 

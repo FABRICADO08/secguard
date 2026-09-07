@@ -11,6 +11,12 @@ from backend.config import settings
 
 LOOPBACK_ADDRESSES = frozenset({"127.0.0.1", "::1", "localhost"})
 
+FORWARDING_HEADERS = (
+    "X-Forwarded-For",
+    "X-Real-IP",
+    "Forwarded",
+)
+
 
 def _presented_token() -> str:
     header = request.headers.get("Authorization", "")
@@ -29,6 +35,10 @@ def request_is_authorized() -> bool:
     With `SECGUARD_API_TOKEN` set a matching token is required. Without one
     the endpoints stay open to the local UI but refuse remote callers, so an
     unconfigured deployment cannot be driven from the network.
+
+    A loopback peer only proves locality for a direct connection: behind a
+    reverse proxy every forwarded request looks local, so a proxied request
+    is refused and the deployment has to configure a token.
     """
 
     if settings.API_TOKEN:
@@ -37,6 +47,9 @@ def request_is_authorized() -> bool:
             _presented_token(),
             settings.API_TOKEN,
         )
+
+    if any(header in request.headers for header in FORWARDING_HEADERS):
+        return False
 
     return (request.remote_addr or "") in LOOPBACK_ADDRESSES
 

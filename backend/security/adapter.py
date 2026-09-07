@@ -5,7 +5,7 @@ from urllib3.connection import HTTPConnection, HTTPSConnection
 from urllib3.connectionpool import HTTPConnectionPool, HTTPSConnectionPool
 from urllib3.poolmanager import PoolManager
 
-from backend.security.targets import assert_address_allowed
+from backend.security.targets import BlockedTargetError, assert_address_allowed
 
 
 def _assert_socket_allowed(host: str, sock) -> None:
@@ -83,4 +83,16 @@ class GuardedAdapter(HTTPAdapter):
             maxsize=maxsize,
             block=block,
             **pool_kwargs,
+        )
+
+    def proxy_manager_for(self, proxy, **proxy_kwargs):
+        """
+        Refuse proxied scans: the proxy would resolve and connect on the
+        scanner's behalf, so the connected peer says nothing about the
+        target and the policy could not be enforced.
+        """
+
+        raise BlockedTargetError(
+            f"Refusing to scan through the proxy {proxy}: the target "
+            "policy can only be enforced on direct connections."
         )
