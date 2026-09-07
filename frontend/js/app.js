@@ -732,7 +732,7 @@ async function startDiscovery() {
          */
 
         const response =
-            await fetch(
+            await apiFetch(
                 "/api/discover",
                 {
                     method:
@@ -910,7 +910,7 @@ async function analyzeMendixModel() {
 
 
         const response =
-            await fetch(
+            await apiFetch(
                 "/api/mendix/analyze",
                 {
                     method: "POST",
@@ -981,6 +981,50 @@ scanButton.addEventListener(
     "click",
     startDiscovery
 );
+
+
+/*
+|--------------------------------------------------------------------------
+| API Token
+|--------------------------------------------------------------------------
+*/
+
+const apiTokenInput =
+    document.getElementById(
+        "apiToken"
+    );
+
+if (apiTokenInput) {
+
+    apiTokenInput.value =
+        apiToken();
+
+    apiTokenInput.addEventListener(
+        "input",
+        () => {
+
+            const value =
+                apiTokenInput.value.trim();
+
+            if (value) {
+
+                localStorage.setItem(
+                    API_TOKEN_KEY,
+                    value
+                );
+
+            } else {
+
+                localStorage.removeItem(
+                    API_TOKEN_KEY
+                );
+
+            }
+
+        }
+    );
+
+}
 
 mendixButton.addEventListener(
     "click",

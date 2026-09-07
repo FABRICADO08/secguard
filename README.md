@@ -11,7 +11,7 @@ Accept an authorized application URL, discover its technology and attack surface
 ```bash
 python -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python run.py
+.venv/bin/python -m flask --app backend.app run --port 8000
 ```
 
 Open `http://127.0.0.1:8000`.
@@ -28,7 +28,9 @@ Open `http://127.0.0.1:8000`.
 | Endpoint | Description |
 | --- | --- |
 | `GET /api/health` | Service status. |
-| `POST /api/discover` | Discover, analyze and store an authorized application. |
+| `POST /api/discover` | Discover, analyze and store an authorized application. Authenticated, rate limited. |
+| `POST /api/mendix/analyze` | Analyze a Mendix model export. Authenticated, rate limited. |
+| `DELETE /api/applications/<id>` | Delete a stored application and its findings. Authenticated. |
 | `GET /api/applications` | Stored applications with their risk summary. |
 | `GET /api/applications/<id>` | Full application record. |
 | `GET /api/applications/<id>/findings` | Findings, filterable by `severity`, `category`, `platform` and `rule_id`. |
@@ -47,5 +49,17 @@ Open `http://127.0.0.1:8000`.
 - `backend/platforms/mendix/` — Mendix model parsing and security analysis.
 
 Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, evidence, location) and stored next to the application record under `data/applications/<id>/`.
+
+## Security configuration
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `SECGUARD_API_TOKEN` | empty | Shared secret for the scanning and delete endpoints, sent as `Authorization: Bearer <token>` or `X-API-Key`. When it is empty those endpoints only answer direct requests from the loopback interface — requests carrying `X-Forwarded-For`, `X-Real-IP` or `Forwarded` are refused, so a reverse proxy cannot make remote callers look local. Configure a token when serving SecGuard behind a proxy. Set it in the UI's *API token* field. |
+| `SECGUARD_ALLOW_PRIVATE_TARGETS` | `0` | Allow scanning targets that resolve to loopback, RFC1918, link-local or reserved addresses. Off by default, so the scanner cannot be pointed at internal services or cloud metadata endpoints. |
+| `SECGUARD_ALLOWED_TARGET_HOSTS` | empty | Comma-separated hostnames that may be scanned regardless of the address they resolve to, e.g. `127.0.0.1,localhost` for a local test target. |
+| `SECGUARD_RATE_LIMIT_REQUESTS` | `10` | Scan requests allowed per client address per window. |
+| `SECGUARD_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. |
+
+Target policy is enforced before the first request, again on every redirect hop, and once more against the address each connection actually lands on, so neither a redirect nor a second DNS answer can steer the scanner onto an internal address. Scans always run over direct connections: proxy settings are ignored and an explicitly proxied request is refused, because a proxy would connect on the scanner's behalf. Other environment settings, such as `REQUESTS_CA_BUNDLE`, still apply. The rate limiter is in-process; running multiple workers would need a shared store.
 
 Only scan applications you are authorised to test. The scanner is passive apart from unauthenticated GET requests to common paths; it does not attempt exploitation.

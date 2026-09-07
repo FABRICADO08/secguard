@@ -87,7 +87,7 @@ def test_discover_requires_a_url(client):
     assert response.get_json()["success"] is False
 
 
-def test_unreachable_target_returns_502(client, monkeypatch):
+def test_unreachable_target_returns_502(client, monkeypatch, allow_local_targets):
     def unreachable(url):
         raise app_module.TargetUnreachableError(
             f"Could not connect to {url}."
@@ -205,6 +205,7 @@ def stubbed_discovery(monkeypatch):
 def test_discovery_without_mendix_is_labelled_generic(
     client,
     stubbed_discovery,
+    allow_local_targets,
 ):
     stubbed_discovery([])
 
@@ -219,6 +220,7 @@ def test_discovery_without_mendix_is_labelled_generic(
 def test_discovery_of_a_mendix_target_is_labelled_mendix(
     client,
     stubbed_discovery,
+    allow_local_targets,
 ):
     stubbed_discovery([{"name": "Mendix", "confidence": "high"}])
 

@@ -7,10 +7,39 @@ from urllib.parse import urljoin
 import requests
 
 from backend.config.settings import PROBE_TIMEOUT, USER_AGENT
+from backend.security.adapter import GuardedAdapter
+from backend.security.targets import guard_response
+
+
+class DirectSession(requests.Session):
+    """
+    Session that never selects a proxy.
+
+    A proxy would connect on the scanner's behalf, so the peer address the
+    transport adapter checks would be the proxy rather than the target.
+    Only proxy selection is dropped: environment settings such as
+    `REQUESTS_CA_BUNDLE` still apply.
+    """
+
+    def merge_environment_settings(self, url, proxies, stream, verify, cert):
+        settings = super().merge_environment_settings(
+            url,
+            proxies,
+            stream,
+            verify,
+            cert,
+        )
+
+        settings["proxies"] = {}
+
+        return settings
+
+    def rebuild_proxies(self, prepared_request, proxies):
+        return {}
 
 
 def build_session() -> requests.Session:
-    session = requests.Session()
+    session = DirectSession()
 
     session.headers.update(
         {
@@ -19,6 +48,17 @@ def build_session() -> requests.Session:
                       "application/json;q=0.9,*/*;q=0.8",
         }
     )
+
+    # Every hop is re-checked, so a public target cannot redirect the
+    # scanner onto an internal address.
+    session.hooks["response"].append(guard_response)
+
+    # ...and the address each connection actually lands on is checked
+    # too, so a second DNS answer cannot point at an internal host.
+    adapter = GuardedAdapter()
+
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
 
     return session
 

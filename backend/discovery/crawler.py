@@ -6,10 +6,7 @@ from urllib.parse import urljoin, urlparse
 import requests
 from bs4 import BeautifulSoup
 
-USER_AGENT = (
-    "Application-Security-Platform/0.1 "
-    "(authorized-security-discovery)"
-)
+from backend.discovery.http import build_session
 
 
 def normalize_url(url: str) -> str:
@@ -50,13 +47,9 @@ def crawl(
     forms = []
     scripts = []
 
-    session = requests.Session()
-
-    session.headers.update(
-        {
-            "User-Agent": USER_AGENT,
-        }
-    )
+    # Shared session so crawled pages are subject to the same target
+    # policy: a page may otherwise redirect the crawler internally.
+    session = build_session()
 
     while queue and len(visited) < max_pages:
 
