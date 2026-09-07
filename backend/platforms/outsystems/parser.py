@@ -215,7 +215,9 @@ class OutSystemsModelParser:
         return Entity(
             name=name,
             module=module,
-            is_public=_bool(_get(raw, "public", "isPublic", "IsPublic")),
+            is_public=_bool(
+                _get(raw, "public", "Public", "isPublic", "IsPublic")
+            ),
             expose_read_only=_bool(
                 _get(
                     raw,
@@ -239,6 +241,7 @@ class OutSystemsModelParser:
                             "is_encrypted",
                             "IsEncrypted",
                             "encrypted",
+                            "Encrypted",
                         )
                     ),
                 )
@@ -253,9 +256,11 @@ class OutSystemsModelParser:
             _get(
                 raw,
                 "anonymous",
+                "Anonymous",
                 "isAnonymous",
                 "IsAnonymous",
                 "allowAnonymous",
+                "AllowAnonymous",
             )
         )
 

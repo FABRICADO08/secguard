@@ -216,3 +216,27 @@ def test_advanced_query_with_inline_parameters_is_reported():
     findings = OutSystemsSecurityAnalyzer(model).analyze()
 
     assert [finding["rule_id"] for finding in findings] == ["OSSEC-106"]
+
+
+def test_single_word_pascal_case_flags_are_honoured():
+    model = parse(
+        {
+            "Modules": [
+                {
+                    "Name": "Core",
+                    "Entities": [{"Name": "Customer", "Public": True}],
+                    "Screens": [{"Name": "Login", "Anonymous": True}],
+                }
+            ]
+        }
+    )
+
+    assert model.entities[0].is_public is True
+    assert model.screens[0].is_anonymous is True
+
+    findings = OutSystemsSecurityAnalyzer(model).analyze()
+
+    assert {finding["rule_id"] for finding in findings} == {
+        "OSSEC-101",
+        "OSSEC-103",
+    }
