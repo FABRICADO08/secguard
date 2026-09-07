@@ -1,11 +1,19 @@
+import socket
+import time
+
 import pytest
+import requests
 
 from backend import app as app_module
 from backend.config import settings
+from backend.discovery import crawler
+from backend.discovery.http import build_session
+from backend.security.rate_limit import RateLimiter
 from backend.security.targets import (
     BlockedTargetError,
     assert_target_allowed,
     guard_response,
+    unwrap_blocked,
 )
 from backend.storage import scans
 
@@ -19,6 +27,20 @@ def client(tmp_path, monkeypatch):
     app_module.app.config.update(TESTING=True)
 
     return app_module.app.test_client()
+
+
+@pytest.fixture
+def listening_port():
+    """A loopback listener the guarded session must refuse to talk to."""
+
+    server = socket.socket()
+
+    server.bind(("127.0.0.1", 0))
+    server.listen(1)
+
+    yield server.getsockname()[1]
+
+    server.close()
 
 
 @pytest.fixture
@@ -169,6 +191,21 @@ def test_redirect_hops_are_re_checked():
         guard_response(Response())
 
 
+def test_connections_to_internal_addresses_are_refused(listening_port):
+    """The connect-time check catches an address the policy never saw."""
+
+    session = build_session()
+
+    with pytest.raises(requests.RequestException) as caught:
+        session.get(f"http://127.0.0.1:{listening_port}/", timeout=5)
+
+    assert unwrap_blocked(caught.value) is not None
+
+
+def test_the_crawler_uses_the_guarded_session():
+    assert crawler.build_session is build_session
+
+
 def test_allowed_redirect_hops_pass(allow_local_targets):
     class Response:
         url = "http://127.0.0.1:8099/next"
@@ -217,6 +254,20 @@ def test_rate_limit_is_per_client(client, token, monkeypatch):
         headers=headers,
         environ_base=REMOTE,
     ).status_code == 400
+
+
+def test_expired_clients_are_dropped():
+    limiter = RateLimiter()
+
+    limiter.check("a:198.51.100.1", limit=5, window=1)
+
+    assert limiter.tracked_clients() == 1
+
+    time.sleep(1.05)
+
+    limiter.check("a:198.51.100.2", limit=5, window=1)
+
+    assert limiter.tracked_clients() == 1
 
 
 def test_unauthorized_calls_do_not_consume_the_budget(client, token, monkeypatch):

@@ -7,6 +7,7 @@ from urllib.parse import urljoin
 import requests
 
 from backend.config.settings import PROBE_TIMEOUT, USER_AGENT
+from backend.security.adapter import GuardedAdapter
 from backend.security.targets import guard_response
 
 
@@ -24,6 +25,13 @@ def build_session() -> requests.Session:
     # Every hop is re-checked, so a public target cannot redirect the
     # scanner onto an internal address.
     session.hooks["response"].append(guard_response)
+
+    # ...and the address each connection actually lands on is checked
+    # too, so a second DNS answer cannot point at an internal host.
+    adapter = GuardedAdapter()
+
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
 
     return session
 

@@ -62,6 +62,28 @@ def resolve_addresses(host: str) -> list[str]:
     return [info[4][0] for info in infos]
 
 
+def host_is_exempt(host: str) -> bool:
+    return (
+        host in settings.ALLOWED_TARGET_HOSTS
+        or settings.ALLOW_PRIVATE_TARGETS
+    )
+
+
+def assert_address_allowed(host: str, address: str) -> None:
+    """Reject a single resolved address for `host`."""
+
+    if host_is_exempt(host):
+        return
+
+    if _is_internal(ipaddress.ip_address(address)):
+
+        raise BlockedTargetError(
+            f"'{host}' resolves to the internal address {address}. "
+            "Set SECGUARD_ALLOW_PRIVATE_TARGETS=1 or add the host to "
+            "SECGUARD_ALLOWED_TARGET_HOSTS to scan it deliberately."
+        )
+
+
 def assert_target_allowed(url: str) -> None:
     """
     Reject targets that are not safe to scan.
@@ -84,21 +106,54 @@ def assert_target_allowed(url: str) -> None:
     if not host:
         raise BlockedTargetError("The target URL has no host.")
 
-    if host in settings.ALLOWED_TARGET_HOSTS:
-        return
-
-    if settings.ALLOW_PRIVATE_TARGETS:
+    if host_is_exempt(host):
         return
 
     for address in resolve_addresses(host):
+        assert_address_allowed(host, address)
 
-        if _is_internal(ipaddress.ip_address(address)):
 
-            raise BlockedTargetError(
-                f"'{host}' resolves to the internal address {address}. "
-                "Set SECGUARD_ALLOW_PRIVATE_TARGETS=1 or add the host to "
-                "SECGUARD_ALLOWED_TARGET_HOSTS to scan it deliberately."
+def unwrap_blocked(exc: BaseException) -> BlockedTargetError | None:
+    """
+    Find a `BlockedTargetError` inside a wrapping transport error.
+
+    A connection refused at connect time reaches the caller as a
+    `requests.ConnectionError` carrying the original error in its args,
+    which would otherwise be reported as an unreachable target.
+    """
+
+    seen: set[int] = set()
+    queue: list[BaseException] = [exc]
+
+    while queue:
+        current = queue.pop()
+
+        if current is None or id(current) in seen:
+            continue
+
+        seen.add(id(current))
+
+        if isinstance(current, BlockedTargetError):
+            return current
+
+        for arg in current.args:
+
+            # urllib3 packs the original error into a tuple argument.
+            candidates = arg if isinstance(arg, tuple) else (arg,)
+
+            queue.extend(
+                candidate
+                for candidate in candidates
+                if isinstance(candidate, BaseException)
             )
+
+        queue.extend(
+            candidate
+            for candidate in (current.__cause__, current.__context__)
+            if candidate is not None
+        )
+
+    return None
 
 
 def guard_response(response, *args, **kwargs) -> None:

@@ -23,6 +23,28 @@ class RateLimiter:
     def __init__(self) -> None:
         self._hits: dict[str, deque[float]] = defaultdict(deque)
         self._lock = threading.Lock()
+        self._last_sweep = time.monotonic()
+
+    def _sweep(self, now: float, window: int) -> None:
+        """
+        Drop callers whose hits have all expired.
+
+        Without this every source address ever seen keeps an entry, so a
+        long-running instance grows with the number of distinct clients.
+        """
+
+        if now - self._last_sweep < window:
+            return
+
+        self._last_sweep = now
+
+        for key, hits in list(self._hits.items()):
+
+            while hits and now - hits[0] >= window:
+                hits.popleft()
+
+            if not hits:
+                del self._hits[key]
 
     def check(
         self,
@@ -43,6 +65,8 @@ class RateLimiter:
         now = time.monotonic()
 
         with self._lock:
+            self._sweep(now, window)
+
             hits = self._hits[key]
 
             while hits and now - hits[0] >= window:
@@ -58,6 +82,11 @@ class RateLimiter:
     def reset(self) -> None:
         with self._lock:
             self._hits.clear()
+            self._last_sweep = time.monotonic()
+
+    def tracked_clients(self) -> int:
+        with self._lock:
+            return len(self._hits)
 
 
 limiter = RateLimiter()
