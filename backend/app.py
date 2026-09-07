@@ -38,6 +38,12 @@ from backend.platforms.mendix.findings import (
 from backend.platforms.mendix.service import (
     analyze_model,
 )
+from backend.platforms.outsystems.findings import (
+    RULE_CATALOGUE as OUTSYSTEMS_RULE_CATALOGUE,
+)
+from backend.platforms.outsystems.service import (
+    analyze_model as analyze_outsystems_model,
+)
 from backend.recommendations import (
     build_recommendations,
 )
@@ -244,17 +250,21 @@ def discover():
         # Platform detection
         # ----------------------------------------------------
 
-        mendix_detected = any(
-            technology["name"] == "Mendix"
+        detected = {
+            technology["name"]
             for technology
             in technologies
-        )
+        }
 
-        platform = (
-            "Mendix"
-            if mendix_detected
-            else "Generic"
-        )
+        platform = "Generic"
+
+        for candidate in ("Mendix", "OutSystems"):
+
+            if candidate in detected:
+
+                platform = candidate
+
+                break
 
         # ----------------------------------------------------
         # Create persistent application
@@ -464,10 +474,13 @@ def discover():
 
 
 # ============================================================
-# Mendix model analysis
+# Platform model analysis
 # ============================================================
 
-def _model_name(value: str) -> str:
+def _model_name(
+    value: str,
+    fallback: str = "model.json",
+) -> str:
     """
     Reduce an uploaded model name to a safe display label.
 
@@ -484,20 +497,24 @@ def _model_name(value: str) -> str:
         and character not in "<>\"'&"
     ).strip()
 
-    return name[:128] or "mendix-model.json"
+    return name[:128] or fallback
 
 
-def _read_model_upload() -> tuple[dict, str]:
+def _read_model_upload(
+    platform: str = "Mendix",
+) -> tuple[dict, str]:
     """
-    Accept a Mendix model as a multipart upload or a JSON body.
+    Accept a platform model as a multipart upload or a JSON body.
 
     Returns the decoded model document and the name to display for it.
     """
 
+    fallback = f"{platform.lower()}-model.json"
+
     if (request.content_length or 0) > MAX_MODEL_BYTES:
 
         raise ValueError(
-            "Mendix model exceeds the "
+            f"{platform} model exceeds the "
             f"{MAX_MODEL_BYTES // (1024 * 1024)} MB upload limit."
         )
 
@@ -512,14 +529,14 @@ def _read_model_upload() -> tuple[dict, str]:
         if len(raw) > MAX_MODEL_BYTES:
 
             raise ValueError(
-                "Mendix model exceeds the "
+                f"{platform} model exceeds the "
                 f"{MAX_MODEL_BYTES // (1024 * 1024)} MB upload limit."
             )
 
         if not raw.strip():
 
             raise ValueError(
-                "Uploaded Mendix model file is empty."
+                f"Uploaded {platform} model file is empty."
             )
 
         try:
@@ -531,11 +548,12 @@ def _read_model_upload() -> tuple[dict, str]:
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
 
             raise ValueError(
-                f"Uploaded Mendix model is not valid JSON: {exc}"
+                f"Uploaded {platform} model is not valid JSON: {exc}"
             ) from exc
 
         return document, _model_name(
-            upload.filename
+            upload.filename,
+            fallback,
         )
 
     body = request.get_json(
@@ -545,8 +563,8 @@ def _read_model_upload() -> tuple[dict, str]:
     if not isinstance(body, dict):
 
         raise ValueError(
-            "Provide a Mendix model as a 'model' file upload or a "
-            "JSON body."
+            f"Provide a {platform} model as a 'model' file upload or "
+            "a JSON body."
         )
 
     document = body.get(
@@ -558,7 +576,8 @@ def _read_model_upload() -> tuple[dict, str]:
         body.get(
             "name",
             "",
-        )
+        ),
+        fallback,
     )
 
 
@@ -662,6 +681,134 @@ def analyze_mendix_model():
 
             "model_statistics":
                 model_statistics(
+                    application.model
+                ),
+        }
+    )
+
+
+def _outsystems_statistics(
+    model: dict,
+) -> dict[str, int]:
+
+    return {
+        key:
+            len(model.get(key) or [])
+        for key in (
+            "modules",
+            "entities",
+            "screens",
+            "rest_methods",
+            "consumed_apis",
+            "site_properties",
+            "queries",
+            "roles",
+        )
+    }
+
+
+@app.post("/api/outsystems/analyze")
+@require_api_token
+@rate_limited
+def analyze_outsystems():
+
+    try:
+
+        document, name = _read_model_upload(
+            "OutSystems"
+        )
+
+        result = analyze_outsystems_model(
+            document
+        )
+
+    except ValueError as exc:
+
+        return jsonify(
+            {
+                "success":
+                    False,
+
+                "error":
+                    str(exc),
+            }
+        ), 400
+
+    except Exception as exc:
+
+        return jsonify(
+            {
+                "success":
+                    False,
+
+                "error":
+                    "OutSystems model analysis failed.",
+
+                "details":
+                    str(exc),
+            }
+        ), 500
+
+    findings = result["findings"]
+
+    application = Application.create(
+        requested_url=
+            f"outsystems-model://{name}",
+
+        final_url=
+            f"outsystems-model://{name}",
+
+        name=name,
+    )
+
+    application.set_platform(
+        "OutSystems"
+    )
+
+    application.model = result["model"]
+
+    application.security = {
+        **summarize(findings),
+
+        "findings":
+            findings,
+
+        "recommendations":
+            build_recommendations(findings),
+
+        "rules_evaluated":
+            len(OUTSYSTEMS_RULE_CATALOGUE),
+
+        "rule_errors":
+            [],
+    }
+
+    application.status = "analyzed"
+
+    application.update_timestamp()
+
+    save_application(
+        application.to_dict()
+    )
+
+    save_findings(
+        application.id,
+        findings,
+    )
+
+    return jsonify(
+        {
+            "success":
+                True,
+
+            "application_id":
+                application.id,
+
+            "application":
+                application.to_dict(),
+
+            "model_statistics":
+                _outsystems_statistics(
                     application.model
                 ),
         }

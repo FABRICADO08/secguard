@@ -1,0 +1,81 @@
+{
+  "name": "CustomerPortal",
+  "modules": [
+    {
+      "name": "CustomerPortal",
+      "kind": "Reactive",
+      "roles": ["Customer", "Agent"],
+      "entities": [
+        {
+          "name": "Customer",
+          "public": true,
+          "exposeReadOnly": false,
+          "attributes": [
+            {"name": "Id", "dataType": "Long Integer"},
+            {"name": "Email", "dataType": "Email"},
+            {
+              "name": "PasswordHash",
+              "dataType": "Text",
+              "isEncrypted": true
+            },
+            {"name": "ApiKey", "dataType": "Text"}
+          ]
+        },
+        {
+          "name": "Invoice",
+          "public": true,
+          "exposeReadOnly": true,
+          "attributes": [
+            {"name": "Id", "dataType": "Long Integer"},
+            {"name": "Total", "dataType": "Currency"}
+          ]
+        }
+      ],
+      "screens": [
+        {"name": "Login", "anonymous": true, "roles": []},
+        {"name": "Dashboard", "roles": ["Customer"]},
+        {"name": "AgentConsole", "roles": []}
+      ],
+      "exposedRestApis": [
+        {
+          "name": "CustomerApi",
+          "authentication": "None",
+          "methods": [
+            {"name": "ListCustomers", "httpMethod": "GET"},
+            {
+              "name": "UpdateCustomer",
+              "httpMethod": "PUT",
+              "authentication": "Basic",
+              "roles": ["Agent"]
+            }
+          ]
+        }
+      ],
+      "consumedRestApis": [
+        {"name": "BillingApi", "baseUrl": "http://billing.internal/api"},
+        {"name": "RatesApi", "baseUrl": "https://rates.internal/api"}
+      ],
+      "siteProperties": [
+        {
+          "name": "BillingApiKey",
+          "dataType": "Text",
+          "defaultValue": "sk-example-not-a-real-key"
+        },
+        {"name": "PageSize", "dataType": "Integer", "defaultValue": "25"}
+      ],
+      "queries": [
+        {
+          "name": "SearchCustomers",
+          "kind": "Advanced",
+          "sql": "SELECT * FROM {Customer} ORDER BY @OrderBy",
+          "expandInline": ["OrderBy"]
+        },
+        {
+          "name": "CountInvoices",
+          "kind": "Advanced",
+          "sql": "SELECT COUNT(1) FROM {Invoice} WHERE Id = @Id"
+        }
+      ]
+    }
+  ]
+}

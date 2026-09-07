@@ -179,6 +179,48 @@
     </section>
 
 
+    <section class="card">
+
+        <h2>
+            Analyze an OutSystems model
+        </h2>
+
+        <p class="muted">
+
+            Upload an OutSystems application export (JSON)
+            to analyze screen roles, exposed REST methods,
+            public entities, site properties and queries.
+
+        </p>
+
+
+        <label for="outsystemsModel">
+            OutSystems model JSON
+        </label>
+
+        <input
+            id="outsystemsModel"
+            type="file"
+            accept="application/json,.json"
+        >
+
+
+        <button
+            id="outsystemsButton"
+            class="primary"
+        >
+            Analyze Model
+        </button>
+
+
+        <div
+            id="outsystemsStatus"
+            class="status"
+        ></div>
+
+    </section>
+
+
     <section
         id="results"
         class="results hidden"
