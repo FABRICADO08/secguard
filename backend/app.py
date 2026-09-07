@@ -707,6 +707,17 @@ def _outsystems_statistics(
     }
 
 
+def _platform_model_statistics(
+    platform: str,
+    model: dict,
+) -> dict[str, int]:
+
+    if str(platform or "").lower() == "outsystems":
+        return _outsystems_statistics(model)
+
+    return model_statistics(model)
+
+
 @app.post("/api/outsystems/analyze")
 @require_api_token
 @rate_limited
@@ -873,11 +884,15 @@ def get_application(
                     application,
 
                 "model_statistics":
-                    model_statistics(
+                    _platform_model_statistics(
+                        application.get(
+                            "platform",
+                            "",
+                        ),
                         application.get(
                             "model",
                             {},
-                        )
+                        ),
                     ),
             }
         )
@@ -1061,29 +1076,73 @@ def application_finding(
 # Rule catalogue
 # ============================================================
 
+def _platform_rules(
+    platform: str,
+    catalogue: dict,
+) -> list[dict]:
+    """
+    Catalogue entries for a model analyzer.
+
+    Severity and remediation depend on the model element the rule
+    matched, so they are reported per finding rather than here.
+    """
+
+    return [
+        {
+            "id": rule_id,
+            "title": metadata["title"],
+            "severity": "",
+            "category": metadata["category"],
+            "confidence": metadata["confidence"],
+            "platform": platform,
+            "cwe": metadata["cwe"],
+            "owasp": metadata["owasp"],
+            "description": "",
+            "recommendation": "",
+        }
+        for rule_id, metadata in catalogue.items()
+    ]
+
+
 @app.get("/api/rules")
 def rules_catalogue():
+
+    rules = [
+        {
+            "id": rule.id,
+            "title": rule.title,
+            "severity": rule.severity,
+            "category": rule.category,
+            "confidence": rule.confidence,
+            "platform": rule.platform,
+            "cwe": rule.cwe,
+            "owasp": rule.owasp,
+            "description": rule.description,
+            "recommendation": rule.recommendation,
+        }
+        for rule in default_rules()
+    ]
+
+    rules.extend(
+        _platform_rules(
+            "Mendix",
+            MENDIX_RULE_CATALOGUE,
+        )
+    )
+
+    rules.extend(
+        _platform_rules(
+            "OutSystems",
+            OUTSYSTEMS_RULE_CATALOGUE,
+        )
+    )
 
     return jsonify(
         {
             "success":
                 True,
 
-            "rules": [
-                {
-                    "id": rule.id,
-                    "title": rule.title,
-                    "severity": rule.severity,
-                    "category": rule.category,
-                    "confidence": rule.confidence,
-                    "platform": rule.platform,
-                    "cwe": rule.cwe,
-                    "owasp": rule.owasp,
-                    "description": rule.description,
-                    "recommendation": rule.recommendation,
-                }
-                for rule in default_rules()
-            ],
+            "rules": rules,
         }
     )
 

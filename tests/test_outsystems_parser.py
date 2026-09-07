@@ -172,3 +172,47 @@ def test_site_property_without_a_default_value_is_not_reported():
     )
 
     assert OutSystemsSecurityAnalyzer(model).analyze() == []
+
+
+def test_aggregate_query_with_inline_parameters_is_not_reported():
+    model = parse(
+        {
+            "modules": [
+                {
+                    "name": "Core",
+                    "queries": [
+                        {
+                            "name": "GetCustomers",
+                            "kind": "Aggregate",
+                            "expandInline": ["OrderBy"],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    assert OutSystemsSecurityAnalyzer(model).analyze() == []
+
+
+def test_advanced_query_with_inline_parameters_is_reported():
+    model = parse(
+        {
+            "modules": [
+                {
+                    "name": "Core",
+                    "queries": [
+                        {
+                            "name": "SearchCustomers",
+                            "kind": "Advanced SQL",
+                            "expandInline": ["OrderBy"],
+                        }
+                    ],
+                }
+            ]
+        }
+    )
+
+    findings = OutSystemsSecurityAnalyzer(model).analyze()
+
+    assert [finding["rule_id"] for finding in findings] == ["OSSEC-106"]

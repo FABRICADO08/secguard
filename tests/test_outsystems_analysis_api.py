@@ -6,6 +6,9 @@ import pytest
 
 from backend import app as app_module
 from backend.config import settings
+from backend.platforms.outsystems.findings import (
+    RULE_CATALOGUE as OUTSYSTEMS_RULE_CATALOGUE,
+)
 from backend.storage import findings as findings_storage
 from backend.storage import scans
 
@@ -282,3 +285,31 @@ def test_endpoint_requires_the_configured_token(
 
     assert unauthenticated.status_code == 401
     assert authenticated.status_code == 200
+
+
+def test_stored_application_keeps_the_outsystems_statistics(
+    client,
+    model_document,
+):
+    created = analyze(client, model_document)
+    application_id = created.get_json()["application_id"]
+
+    reloaded = client.get(f"/api/applications/{application_id}")
+
+    assert (
+        reloaded.get_json()["model_statistics"]
+        == created.get_json()["model_statistics"]
+    )
+    assert reloaded.get_json()["model_statistics"]["screens"] == 3
+
+
+def test_rule_catalogue_includes_the_outsystems_rules(client):
+    rules = client.get("/api/rules").get_json()["rules"]
+
+    outsystems = {
+        rule["id"] for rule in rules if rule["platform"] == "OutSystems"
+    }
+
+    assert outsystems == set(OUTSYSTEMS_RULE_CATALOGUE)
+    assert any(rule["platform"] == "Mendix" for rule in rules)
+    assert any(rule["platform"] == "Generic" for rule in rules)

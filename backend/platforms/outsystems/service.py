@@ -106,7 +106,11 @@ def analyze_model(data: dict[str, Any]) -> dict[str, Any]:
     """
 
     if not isinstance(data, dict):
-        raise ValueError("OutSystems model JSON root must be an object.")
+        # ValueError so the route reports it as a 400 like every other
+        # malformed upload, rather than an unexpected failure.
+        raise ValueError(  # noqa: TRY004
+            "OutSystems model JSON root must be an object."
+        )
 
     model = OutSystemsModelParser(data).parse()
 

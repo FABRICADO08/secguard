@@ -17,6 +17,11 @@ from backend.platforms.outsystems.model import (
 # Authentication values that leave an exposed method open to anyone.
 OPEN_AUTHENTICATION = frozenset({"", "none", "anonymous", "public"})
 
+# Query kinds that run a statement; aggregates always bind their parameters.
+SQL_QUERY_KINDS = frozenset(
+    {"advanced", "advancedsql", "advanced sql", "sql", "sqlquery", "sql query"}
+)
+
 SECRET_PATTERNS = (
     r"password",
     r"passwd",
@@ -255,6 +260,11 @@ class OutSystemsSecurityAnalyzer:
 
     def _query(self, query: Query) -> list[dict[str, Any]]:
         if not query.inline_parameters:
+            return []
+
+        kind = query.kind.strip().lower()
+
+        if kind and kind not in SQL_QUERY_KINDS:
             return []
 
         return [
