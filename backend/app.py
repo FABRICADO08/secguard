@@ -26,6 +26,9 @@ from backend.discovery.fingerprint import (
 from backend.discovery.technology import (
     detect_technologies,
 )
+from backend.discovery.tls import (
+    analyze_tls,
+)
 from backend.model.application import (
     Application,
 )
@@ -247,6 +250,14 @@ def discover():
         )
 
         # ----------------------------------------------------
+        # TLS/certificate analysis
+        # ----------------------------------------------------
+
+        tls_result = analyze_tls(
+            response["final_url"]
+        )
+
+        # ----------------------------------------------------
         # Platform detection
         # ----------------------------------------------------
 
@@ -332,6 +343,9 @@ def discover():
                 crawl_result[
                     "pages_scanned"
                 ],
+
+            "tls":
+                tls_result,
         }
 
         # ----------------------------------------------------
