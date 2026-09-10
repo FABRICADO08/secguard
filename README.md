@@ -48,7 +48,9 @@ Keep `--workers 1`: the rate limiter holds its counters in process, so additiona
 
 ## Analysis pipeline
 
-`POST /api/discover` fetches the target, crawls same-origin pages, probes common API and sensitive paths, then runs the rule engine over the collected evidence.
+`POST /api/discover` fetches the target, crawls same-origin pages, probes common API and sensitive paths, inspects the TLS endpoint when the target is HTTPS, then runs the rule engine over the collected evidence.
+
+The TLS inspection handshakes with the host directly: it records the negotiated protocol and cipher, whether the chain validates, the certificate subject/issuer and its expiry, and which protocol versions the server still accepts. Each handshake goes to an address that passed the target policy, so it cannot be redirected to an internal host by a second DNS answer.
 
 - `backend/discovery/` — fetching, crawling, technology and endpoint discovery.
 - `backend/scanners/` — active path probing with soft-404 baselining.
@@ -117,7 +119,11 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 | `GEN-CORS-002` | State-changing methods allowed from any origin. |
 | `GEN-JS-001` | Credentials embedded in inline scripts, reported redacted. |
 | `GEN-JS-002` | Source map exposed to the browser. |
-| `GEN-TLS-*` | Plain HTTP, missing HTTPS redirect, mixed content. |
+| `GEN-TLS-001` to `GEN-TLS-003` | Plain HTTP, missing HTTPS redirect, mixed content. |
+| `GEN-TLS-004` | Deprecated protocol version still accepted (TLS 1.1 or below). |
+| `GEN-TLS-005` | Weak or export-grade cipher suite negotiated. |
+| `GEN-TLS-006` | Certificate expired, or expiring within 30 days. |
+| `GEN-TLS-007` | Certificate chain does not validate (self-signed, incomplete or wrong name). |
 | `GEN-SES-001` to `GEN-SES-003` | Cookies missing `Secure`, `HttpOnly` or a `SameSite` policy. |
 | `GEN-SES-004` | Session cookie persisted to disk through an expiry date. |
 | `GEN-SES-005` | Cookie scoped to a parent domain and shared with every subdomain. |
