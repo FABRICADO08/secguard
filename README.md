@@ -50,7 +50,7 @@ Keep `--workers 1`: the rate limiter holds its counters in process, so additiona
 
 `POST /api/discover` fetches the target, crawls same-origin pages, probes common API and sensitive paths, inspects the TLS endpoint when the target is HTTPS, then runs the rule engine over the collected evidence.
 
-The TLS inspection handshakes with the host directly: it records the negotiated protocol and cipher, whether the chain validates, the certificate subject/issuer and its expiry, and which protocol versions the server still accepts. Each handshake goes to an address that passed the target policy, so it cannot be redirected to an internal host by a second DNS answer.
+The TLS inspection handshakes with the host directly: it records the negotiated protocol and cipher, whether the chain validates, the certificate subject/issuer and its expiry, and which protocol versions the server still accepts. Legacy versions are offered with the local security level lowered so a current OpenSSL build does not make a server that still speaks them look clean; versions the local build cannot offer at all are listed under `untested_protocols` rather than counted as refused. Each handshake goes to an address that passed the target policy, so it cannot be redirected to an internal host by a second DNS answer.
 
 - `backend/discovery/` — fetching, crawling, technology and endpoint discovery.
 - `backend/scanners/` — active path probing with soft-404 baselining.

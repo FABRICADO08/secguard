@@ -8,6 +8,8 @@ from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import urlparse
 
+import requests.certs
+
 from backend.config.settings import PROBE_TIMEOUT
 from backend.security.targets import (
     BlockedTargetError,
@@ -19,11 +21,29 @@ from backend.security.targets import (
 # and below are deprecated (RFC 8996) and SSL 3 is broken outright.
 DEPRECATED_PROTOCOLS = ("SSLv2", "SSLv3", "TLSv1", "TLSv1.1")
 
-TESTABLE_PROTOCOLS: tuple[tuple[str, int], ...] = (
+TESTABLE_PROTOCOLS: tuple[tuple[str, ssl.TLSVersion], ...] = (
+    ("SSLv3", ssl.TLSVersion.SSLv3),
     ("TLSv1", ssl.TLSVersion.TLSv1),
     ("TLSv1.1", ssl.TLSVersion.TLSv1_1),
     ("TLSv1.2", ssl.TLSVersion.TLSv1_2),
     ("TLSv1.3", ssl.TLSVersion.TLSv1_3),
+)
+
+# Versions whose suites a current OpenSSL refuses to offer at its default
+# security level, so probing them needs the level lowered.
+LEGACY_PROTOCOLS = (
+    ssl.TLSVersion.SSLv3,
+    ssl.TLSVersion.TLSv1,
+    ssl.TLSVersion.TLSv1_1,
+)
+
+# OpenSSL reasons that mean the local build could not make the offer, as
+# opposed to the server turning it down. Treating them as "unsupported by
+# the server" would hide a server that still speaks a dead protocol.
+LOCAL_FAILURE_REASONS = (
+    "NO_PROTOCOLS_AVAILABLE",
+    "NO_CIPHERS_AVAILABLE",
+    "UNSUPPORTED_PROTOCOL",
 )
 
 # Cipher properties that mean the connection is not forward secret or
@@ -35,7 +55,11 @@ WEAK_CIPHER_MARKERS = (
     "MD5",
     "NULL",
     "EXPORT",
-    "anon",
+    # Anonymous key exchange: "anon" in IANA names, "ADH"/"AECDH" in
+    # OpenSSL names.
+    "ANON",
+    "ADH-",
+    "AECDH-",
 )
 
 # Certificates expiring sooner than this need attention before they cause
@@ -86,6 +110,12 @@ def _names(certificate: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def is_weak_cipher(name: str) -> bool:
+    upper = name.upper()
+
+    return any(marker in upper for marker in WEAK_CIPHER_MARKERS)
+
+
 def _connect(
     host: str,
     port: int,
@@ -121,10 +151,12 @@ def _connect(
         try:
             return context.wrap_socket(sock, server_hostname=host)
 
-        except (OSError, ssl.SSLError):
+        except OSError as exc:
+            # The same name can serve a healthy and an unhealthy endpoint;
+            # a failed handshake on one address says nothing about the rest.
             sock.close()
 
-            raise
+            last_error = exc
 
     raise last_error or OSError(f"Could not connect to {host}:{port}.")
 
@@ -132,6 +164,9 @@ def _connect(
 def _ca_bundle() -> str:
     """
     The CA bundle requests would use, so both agree on what is trusted.
+
+    Falling back to the OpenSSL system store instead would let the fetch
+    succeed while this inspection calls the same chain untrusted.
     """
 
     for name in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE"):
@@ -140,7 +175,9 @@ def _ca_bundle() -> str:
         if value and os.path.isfile(value):
             return value
 
-    return ""
+    bundle = requests.certs.where()
+
+    return bundle if bundle and os.path.isfile(bundle) else ""
 
 
 def _default_context(verify: bool) -> ssl.SSLContext:
@@ -155,36 +192,72 @@ def _default_context(verify: bool) -> ssl.SSLContext:
     return context
 
 
-def supported_protocols(
+def _pinned_context(version: ssl.TLSVersion) -> ssl.SSLContext | None:
+    """
+    A context that offers exactly one protocol version, or None when the
+    local OpenSSL cannot make that offer at all.
+    """
+
+    context = _default_context(verify=False)
+
+    if version in LEGACY_PROTOCOLS:
+        try:
+            # The default security level rejects the only suites these
+            # versions have, which would look like a server refusal.
+            context.set_ciphers("ALL:@SECLEVEL=0")
+
+        except ssl.SSLError:
+            return None
+
+    try:
+        with warnings.catch_warnings():
+            # Pinning a dead version is deliberate here: the point is to
+            # find out whether the server still accepts it.
+            warnings.simplefilter("ignore", DeprecationWarning)
+
+            context.minimum_version = version
+            context.maximum_version = version
+
+    except (ValueError, OSError):
+        return None
+
+    return context
+
+
+def _is_local_failure(exc: ssl.SSLError) -> bool:
+    reason = str(exc.reason or "")
+    message = str(exc)
+
+    return any(
+        marker in reason or marker in message
+        for marker in LOCAL_FAILURE_REASONS
+    )
+
+
+def probe_protocols(
     host: str,
     port: int,
     timeout: int = PROBE_TIMEOUT,
-) -> list[str]:
+) -> dict[str, list[str]]:
     """
     Report which protocol versions the server agrees to speak.
 
     Each version is offered on its own connection with certificate
     validation disabled: the question here is what the server negotiates,
-    not whether the certificate is trusted.
+    not whether the certificate is trusted. Versions the local OpenSSL
+    cannot offer are reported as untested rather than as unsupported, so
+    a silent false negative is never presented as a clean result.
     """
 
     supported: list[str] = []
+    untested: list[str] = []
 
     for label, version in TESTABLE_PROTOCOLS:
-        context = _default_context(verify=False)
+        context = _pinned_context(version)
 
-        try:
-            with warnings.catch_warnings():
-                # Pinning a legacy version is deliberate here: the point
-                # is to find out whether the server still accepts it.
-                warnings.simplefilter("ignore", DeprecationWarning)
+        if context is None:
+            untested.append(label)
 
-                context.minimum_version = version
-                context.maximum_version = version
-
-        except ValueError:
-            # The local OpenSSL build refuses to offer this version, so
-            # the server's support for it cannot be determined.
             continue
 
         try:
@@ -193,13 +266,27 @@ def supported_protocols(
         except BlockedTargetError:
             raise
 
-        except (OSError, ssl.SSLError):
+        except ssl.SSLError as exc:
+            if _is_local_failure(exc):
+                untested.append(label)
+
+            continue
+
+        except OSError:
             continue
 
         with connection:
             supported.append(label)
 
-    return supported
+    return {"supported": supported, "untested": untested}
+
+
+def supported_protocols(
+    host: str,
+    port: int,
+    timeout: int = PROBE_TIMEOUT,
+) -> list[str]:
+    return probe_protocols(host, port, timeout)["supported"]
 
 
 def inspect_certificate(
@@ -323,13 +410,14 @@ def analyze_tls(url: str, timeout: int = PROBE_TIMEOUT) -> dict[str, Any]:
             "port": port,
             **certificate,
             "protocols": [],
+            "untested_protocols": [],
             "deprecated_protocols": [],
             "weak_cipher": False,
         }
 
-    protocols = supported_protocols(host, port, timeout)
+    probe = probe_protocols(host, port, timeout)
 
-    cipher = certificate["cipher"].upper()
+    protocols = probe["supported"]
 
     return {
         "tested": True,
@@ -337,10 +425,11 @@ def analyze_tls(url: str, timeout: int = PROBE_TIMEOUT) -> dict[str, Any]:
         "port": port,
         **certificate,
         "protocols": protocols,
+        "untested_protocols": probe["untested"],
         "deprecated_protocols": [
             protocol
             for protocol in protocols
             if protocol in DEPRECATED_PROTOCOLS
         ],
-        "weak_cipher": any(marker in cipher for marker in WEAK_CIPHER_MARKERS),
+        "weak_cipher": is_weak_cipher(certificate["cipher"]),
     }

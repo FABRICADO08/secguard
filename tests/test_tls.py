@@ -9,9 +9,12 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from backend.discovery.tls import (
+    TESTABLE_PROTOCOLS,
     analyze_tls,
     inspect_certificate,
+    is_weak_cipher,
     parse_certificate_date,
+    probe_protocols,
     supported_protocols,
 )
 from tests.test_generic_rules import make_context, rule_ids, run
@@ -271,6 +274,36 @@ def test_supported_protocols_excludes_versions_the_server_refuses(tls_server):
 
     assert "TLSv1.2" in protocols or "TLSv1.3" in protocols
     assert "SSLv3" not in protocols
+
+
+def test_protocols_the_local_openssl_cannot_offer_are_reported_untested(
+    tls_server,
+):
+    probe = probe_protocols("127.0.0.1", tls_server, timeout=5)
+
+    # A version that cannot be offered locally must never be silently
+    # counted as "the server refused it".
+    assert not set(probe["supported"]) & set(probe["untested"])
+    assert set(probe["untested"]) <= {
+        label for label, _ in TESTABLE_PROTOCOLS
+    }
+
+
+@pytest.mark.parametrize(
+    "cipher",
+    [
+        "AECDH-AES256-SHA",
+        "ADH-AES128-SHA",
+        "ECDHE-RSA-DES-CBC3-SHA",
+        "EXP-RC4-MD5",
+    ],
+)
+def test_weak_ciphers_are_recognised_case_insensitively(cipher):
+    assert is_weak_cipher(cipher.lower())
+
+
+def test_modern_cipher_is_not_weak():
+    assert not is_weak_cipher("TLS_AES_256_GCM_SHA384")
 
 
 def test_analyze_tls_reports_the_endpoint(tls_server):
