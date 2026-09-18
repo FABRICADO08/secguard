@@ -9,6 +9,7 @@ import requests
 from backend.config.settings import PROBE_TIMEOUT
 from backend.discovery.crawler import is_same_origin
 from backend.discovery.http import build_session
+from backend.discovery.libraries import detect_in_source
 from backend.rules.generic.clientside import (
     SECRET_PATTERNS,
     SOURCE_MAP,
@@ -151,6 +152,7 @@ def analyze_scripts(
 
     analyzed: list[dict[str, Any]] = []
     endpoints: list[dict[str, str]] = []
+    libraries: list[dict[str, Any]] = []
     seen_paths: set[str] = set()
 
     for url in script_urls:
@@ -168,6 +170,9 @@ def analyze_scripts(
         script_endpoints = extract_endpoints(source)
         secrets = find_secrets(source)
         source_maps = SOURCE_MAP.findall(source)
+        banners = detect_in_source(url, source)
+
+        libraries.extend(banners)
 
         analyzed.append(
             {
@@ -176,6 +181,7 @@ def analyze_scripts(
                 "endpoint_count": len(script_endpoints),
                 "secrets": secrets,
                 "source_maps": source_maps[:3],
+                "libraries": banners,
             }
         )
 
@@ -202,4 +208,5 @@ def analyze_scripts(
     return {
         "scripts": analyzed,
         "endpoints": endpoints,
+        "libraries": libraries,
     }
