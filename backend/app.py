@@ -23,6 +23,9 @@ from backend.discovery.fingerprint import (
     TargetUnreachableError,
     fetch_application,
 )
+from backend.discovery.libraries import (
+    detect_libraries,
+)
 from backend.discovery.reflection import (
     probe_reflection,
 )
@@ -260,6 +263,17 @@ def discover():
         )
 
         # ----------------------------------------------------
+        # Component versions
+        # ----------------------------------------------------
+
+        libraries = detect_libraries(
+            crawl_result["scripts"],
+            response["body"],
+            response["headers"],
+            extra=script_result["libraries"],
+        )
+
+        # ----------------------------------------------------
         # Reflected input probes
         # ----------------------------------------------------
 
@@ -382,6 +396,9 @@ def discover():
                         "scripts"
                     ],
             },
+
+            "libraries":
+                libraries,
 
             "robots":
                 robots_result["robots"],
