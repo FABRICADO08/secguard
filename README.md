@@ -52,11 +52,14 @@ Keep `--workers 1`: the rate limiter holds its counters in process, so additiona
 
 The TLS inspection handshakes with the host directly: it records the negotiated protocol and cipher, whether the chain validates, the certificate subject/issuer and its expiry, and which protocol versions the server still accepts. Legacy versions are offered with the local security level lowered so a current OpenSSL build does not make a server that still speaks them look clean; versions the local build cannot offer at all are listed under `untested_protocols` rather than counted as refused. Each handshake goes to an address that passed the target policy, so it cannot be redirected to an internal host by a second DNS answer.
 
+Component versions are read from whatever the target discloses — versioned script filenames and CDN paths, the banners libraries print into the page or into a served bundle, and `Server`/`X-Powered-By` headers — and matched against `backend/knowledge/advisories.py`, a small hand-checked set where every entry names a public advisory and the release that fixed it. A version at or above the fixed release clears the advisory; a release line that no longer receives fixes at all is reported separately, because the risk there is the absence of future patches rather than a specific CVE.
+
 The reflection probe is the only active input test: it appends `"'<>` plus a random marker to a GET parameter and reports how the value comes back. It never touches POST forms, so a scan cannot create or modify data on the target.
 
 - `backend/discovery/` — fetching, crawling, robots/sitemap reading, script mining, reflection probing, technology and endpoint discovery.
 - `backend/scanners/` — active path probing with soft-404 baselining.
-- `backend/rules/` — the rule engine and the generic rule packs (transport, headers, content security policy, CORS, client-side secrets, cookies, forms, API, exposure).
+- `backend/rules/` — the rule engine and the generic rule packs (transport, headers, content security policy, CORS, client-side secrets, cookies, forms, API, exposure, dependencies).
+- `backend/knowledge/` — the advisory and end-of-life dataset component versions are matched against.
 - `backend/risk/` — severity and confidence normalisation, per-finding and aggregate scoring.
 - `backend/recommendations/` — remediation grouped per rule.
 - `backend/platforms/mendix/` — Mendix model parsing and security analysis.
@@ -138,6 +141,8 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 | `GEN-API-*` | Exposed API documentation, unauthenticated endpoints, exposed GraphQL. |
 | `GEN-INF-001`, `GEN-INF-002` | Server banner disclosure, directory listing. |
 | `GEN-INF-004` | `robots.txt` disallowing administrative or internal paths. |
+| `GEN-DEP-001` | Disclosed component version listed as vulnerable by a public advisory. |
+| `GEN-DEP-002` | Component release line that no longer receives security fixes. |
 
 ## Security configuration
 
