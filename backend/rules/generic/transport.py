@@ -131,7 +131,17 @@ class TlsCertificateExpiry(Rule):
         if record.get("expired"):
             return [self.finding(context, evidence=evidence)]
 
-        if days <= EXPIRY_WARNING_DAYS:
+        # Compare the exact interval where it is available: a floored day
+        # count of 30 can still be almost 31 days away.
+        seconds = record.get("seconds_until_expiry")
+
+        within_window = (
+            seconds <= EXPIRY_WARNING_DAYS * 86400
+            if isinstance(seconds, (int, float))
+            else days <= EXPIRY_WARNING_DAYS
+        )
+
+        if within_window:
             return [
                 self.finding(
                     context,

@@ -129,6 +129,11 @@ input[type="url"] {
     color: #147a51;
 }
 
+.status.warning {
+    background: #fff8e8;
+    color: #8a5a06;
+}
+
 .status.loading {
     background: #eefaff;
     color: #126b82;

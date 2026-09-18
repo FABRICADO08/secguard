@@ -20,8 +20,10 @@ from backend.discovery.endpoints import (
     discover_endpoints,
 )
 from backend.discovery.fingerprint import (
+    CertificateRejectedError,
     TargetUnreachableError,
     fetch_application,
+    validate_url,
 )
 from backend.discovery.technology import (
     detect_technologies,
@@ -147,6 +149,156 @@ def health():
 
             "version":
                 "0.2.0",
+        }
+    )
+
+
+def _certificate_only_scan(
+    url: str,
+    error: str,
+):
+    """
+    Record a scan for a target whose certificate failed validation.
+
+    No page can be fetched from such a target, but its certificate is
+    exactly what `GEN-TLS-006` and `GEN-TLS-007` report on, so the TLS
+    diagnosis is analysed and persisted on its own instead of being
+    thrown away with the fetch error.
+    """
+
+    requested_url = validate_url(url)
+
+    tls_result = analyze_tls(
+        requested_url
+    )
+
+    response = {
+        "requested_url":
+            requested_url,
+
+        "final_url":
+            requested_url,
+
+        "status_code":
+            None,
+
+        "https":
+            True,
+
+        "headers": {},
+
+        "cookies": [],
+
+        "body":
+            "",
+
+        "redirect_chain": [],
+
+        "http_redirect": {
+            "tested":
+                False,
+        },
+    }
+
+    application = Application.create(
+        requested_url=requested_url,
+        final_url=requested_url,
+    )
+
+    application.set_platform(
+        "Generic"
+    )
+
+    application.attack_surface = {
+        "pages": [],
+        "links": [],
+        "forms": [],
+        "scripts": [],
+        "endpoints": [],
+        "potential_api_paths": [],
+        "exposed_paths": [],
+        "pages_scanned": 0,
+
+        "tls":
+            tls_result,
+    }
+
+    analysis = analyze(
+        ScanContext(
+            application_id=
+                application.id,
+
+            requested_url=
+                application.requested_url,
+
+            final_url=
+                application.final_url,
+
+            platform=
+                "Generic",
+
+            response=
+                response,
+
+            technologies=[],
+
+            attack_surface=
+                application.attack_surface,
+        )
+    )
+
+    findings = analysis["findings"]
+
+    application.security = {
+        **summarize(findings),
+
+        "findings":
+            findings,
+
+        "recommendations":
+            build_recommendations(findings),
+
+        "rules_evaluated":
+            analysis["rules_evaluated"],
+
+        "rule_errors":
+            analysis["rule_errors"],
+    }
+
+    application.status = (
+        "certificate_rejected"
+    )
+
+    application.update_timestamp()
+
+    save_application(
+        application.to_dict()
+    )
+
+    save_findings(
+        application.id,
+        findings,
+    )
+
+    return jsonify(
+        {
+            "success":
+                True,
+
+            "partial":
+                True,
+
+            "reason":
+                "certificate_rejected",
+
+            "error":
+                error,
+
+            "application_id":
+                application.id,
+
+            "application":
+                application.to_dict(),
         }
     )
 
@@ -455,6 +607,15 @@ def discover():
                     str(exc),
             }
         ), 400
+
+    except CertificateRejectedError as exc:
+
+        # The certificate is the finding here, so the scan is recorded
+        # from the TLS diagnosis alone rather than discarded.
+        return _certificate_only_scan(
+            url,
+            str(exc),
+        )
 
     except TargetUnreachableError as exc:
 

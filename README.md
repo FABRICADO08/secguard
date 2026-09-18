@@ -52,6 +52,8 @@ Keep `--workers 1`: the rate limiter holds its counters in process, so additiona
 
 The TLS inspection handshakes with the host directly: it records the negotiated protocol and cipher, whether the chain validates, the certificate subject/issuer and its expiry, and which protocol versions the server still accepts. Legacy versions are offered with the local security level lowered so a current OpenSSL build does not make a server that still speaks them look clean; versions the local build cannot offer at all are listed under `untested_protocols` rather than counted as refused. Each handshake goes to an address that passed the target policy, so it cannot be redirected to an internal host by a second DNS answer.
 
+A target whose certificate does not validate cannot be fetched, but that failure is itself the finding, so the scan is still recorded from the TLS diagnosis alone: the application is saved with status `certificate_rejected`, carries only its `tls` attack surface, and the response reports `"partial": true` alongside the certificate error. Any other connection failure is still a `502`.
+
 - `backend/discovery/` — fetching, crawling, technology and endpoint discovery.
 - `backend/scanners/` — active path probing with soft-404 baselining.
 - `backend/rules/` — the rule engine and the generic rule packs (transport, headers, content security policy, CORS, client-side secrets, cookies, forms, API, exposure).

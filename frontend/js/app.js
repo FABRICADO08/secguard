@@ -811,12 +811,28 @@ async function startDiscovery() {
          * Success message
          */
 
-        setStatus(
-            `Discovery completed. Application ID: ${
-                data.application_id || "unknown"
-            }`,
-            "success"
-        );
+        if (data.partial) {
+
+            setStatus(
+                `${
+                    data.error ||
+                    "The target could not be fetched."
+                } Only the TLS findings were recorded. Application ID: ${
+                    data.application_id || "unknown"
+                }`,
+                "warning"
+            );
+
+        } else {
+
+            setStatus(
+                `Discovery completed. Application ID: ${
+                    data.application_id || "unknown"
+                }`,
+                "success"
+            );
+
+        }
 
 
     } catch (error) {
