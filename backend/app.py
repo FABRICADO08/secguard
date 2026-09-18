@@ -23,6 +23,15 @@ from backend.discovery.fingerprint import (
     TargetUnreachableError,
     fetch_application,
 )
+from backend.discovery.reflection import (
+    probe_reflection,
+)
+from backend.discovery.robots import (
+    discover_robots_and_sitemaps,
+)
+from backend.discovery.scripts import (
+    analyze_scripts,
+)
 from backend.discovery.technology import (
     detect_technologies,
 )
@@ -229,6 +238,35 @@ def discover():
         )
 
         # ----------------------------------------------------
+        # robots.txt and sitemaps
+        # ----------------------------------------------------
+
+        robots_result = (
+            discover_robots_and_sitemaps(
+                response["final_url"]
+            )
+        )
+
+        # ----------------------------------------------------
+        # Script analysis (endpoints, secrets, source maps)
+        # ----------------------------------------------------
+
+        script_result = analyze_scripts(
+            crawl_result["scripts"],
+            response["final_url"],
+        )
+
+        # ----------------------------------------------------
+        # Reflected input probes
+        # ----------------------------------------------------
+
+        reflection_result = probe_reflection(
+            crawl_result["forms"],
+            crawl_result["links"],
+            response["final_url"],
+        )
+
+        # ----------------------------------------------------
         # Potential API discovery
         # ----------------------------------------------------
 
@@ -321,6 +359,27 @@ def discover():
 
             "endpoints":
                 endpoints,
+
+            "script_endpoints":
+                script_result[
+                    "endpoints"
+                ],
+
+            "script_analysis": {
+                "scripts":
+                    script_result[
+                        "scripts"
+                    ],
+            },
+
+            "robots":
+                robots_result["robots"],
+
+            "sitemap":
+                robots_result["sitemap"],
+
+            "reflection":
+                reflection_result,
 
             "potential_api_paths":
                 potential_api_paths,
