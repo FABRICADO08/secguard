@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import requests.certs
 
+from backend import app as app_module
 from backend.discovery import tls
 from backend.discovery.tls import (
     TESTABLE_PROTOCOLS,
@@ -20,6 +21,7 @@ from backend.discovery.tls import (
     probe_protocols,
     supported_protocols,
 )
+from backend.storage import scans
 from tests.test_generic_rules import make_context, rule_ids, run
 
 
@@ -320,6 +322,37 @@ def test_protocols_the_local_openssl_cannot_offer_are_reported_untested(
     assert set(probe["untested"]) <= {
         label for label, _ in TESTABLE_PROTOCOLS
     }
+
+
+def test_rejected_certificate_still_records_tls_findings(
+    tls_server,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        scans, "APPLICATIONS_DIR", tmp_path / "applications"
+    )
+
+    app_module.app.config.update(TESTING=True)
+
+    response = app_module.app.test_client().post(
+        "/api/discover",
+        json={"url": f"https://localhost:{tls_server}"},
+    )
+
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["partial"]
+    assert payload["reason"] == "certificate_rejected"
+
+    findings = {
+        finding["rule_id"]
+        for finding in payload["application"]["security"]["findings"]
+    }
+
+    # The untrusted chain is the whole point of recording this scan.
+    assert "GEN-TLS-007" in findings
 
 
 def test_timeout_on_one_address_is_not_buried_by_a_later_refusal(

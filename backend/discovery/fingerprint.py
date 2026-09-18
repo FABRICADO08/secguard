@@ -15,6 +15,16 @@ class TargetUnreachableError(Exception):
     """The target refused, dropped or never answered the connection."""
 
 
+class CertificateRejectedError(TargetUnreachableError):
+    """
+    The target answered but its certificate failed validation.
+
+    Separated from a transport failure because it is exactly what the TLS
+    rules exist to report: the endpoint can still be described even
+    though no page could be fetched from it.
+    """
+
+
 def validate_url(url: str) -> str:
     url = str(url or "").strip()
 
@@ -98,6 +108,17 @@ def fetch_application(url: str) -> dict:
             "from this machine."
         ) from exc
 
+    except requests.exceptions.SSLError as exc:
+        blocked = unwrap_blocked(exc)
+
+        if blocked is not None:
+            raise blocked from exc
+
+        raise CertificateRejectedError(
+            f"The certificate presented by {url} did not validate: "
+            f"{exc}."
+        ) from exc
+
     except requests.RequestException as exc:
         blocked = unwrap_blocked(exc)
 
@@ -161,6 +182,7 @@ def fetch_application(url: str) -> dict:
 
 __all__ = [
     "USER_AGENT",
+    "CertificateRejectedError",
     "TargetUnreachableError",
     "check_http_redirect",
     "fetch_application",
