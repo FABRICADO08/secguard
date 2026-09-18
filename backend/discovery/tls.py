@@ -136,10 +136,16 @@ def _connect(
         assert_address_allowed(host, address)
 
     last_error: OSError | None = None
+    timed_out: TimeoutError | None = None
 
     for address in addresses:
         try:
             sock = socket.create_connection((address, port), timeout=timeout)
+
+        except TimeoutError as exc:
+            timed_out = exc
+
+            continue
 
         except OSError as exc:
             # A name can resolve to an address family the server does not
@@ -151,6 +157,11 @@ def _connect(
         try:
             return context.wrap_socket(sock, server_hostname=host)
 
+        except TimeoutError as exc:
+            sock.close()
+
+            timed_out = exc
+
         except OSError as exc:
             # The same name can serve a healthy and an unhealthy endpoint;
             # a failed handshake on one address says nothing about the rest.
@@ -158,7 +169,13 @@ def _connect(
 
             last_error = exc
 
-    raise last_error or OSError(f"Could not connect to {host}:{port}.")
+    # An address that never answered leaves the result inconclusive, so a
+    # refusal from another address must not bury it.
+    raise (
+        timed_out
+        or last_error
+        or OSError(f"Could not connect to {host}:{port}.")
+    )
 
 
 def _ca_bundle() -> tuple[str, str]:

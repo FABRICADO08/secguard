@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 import requests.certs
 
+from backend.discovery import tls
 from backend.discovery.tls import (
     TESTABLE_PROTOCOLS,
     _ca_bundle,
@@ -319,6 +320,28 @@ def test_protocols_the_local_openssl_cannot_offer_are_reported_untested(
     assert set(probe["untested"]) <= {
         label for label, _ in TESTABLE_PROTOCOLS
     }
+
+
+def test_timeout_on_one_address_is_not_buried_by_a_later_refusal(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        tls, "resolve_addresses", lambda host: ["192.0.2.10", "192.0.2.11"]
+    )
+    monkeypatch.setattr(tls, "assert_address_allowed", lambda host, addr: None)
+
+    def connect(address, timeout):
+        if address[0] == "192.0.2.10":
+            raise TimeoutError("timed out")
+
+        raise ConnectionRefusedError("refused")
+
+    monkeypatch.setattr(tls.socket, "create_connection", connect)
+
+    probe = tls.probe_protocols("app.test", 443, timeout=1)
+
+    assert not probe["supported"]
+    assert probe["untested"] == [label for label, _ in TESTABLE_PROTOCOLS]
 
 
 def test_ca_directory_is_passed_as_capath(tmp_path, monkeypatch):
