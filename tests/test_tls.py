@@ -7,9 +7,11 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import requests.certs
 
 from backend.discovery.tls import (
     TESTABLE_PROTOCOLS,
+    _ca_bundle,
     analyze_tls,
     inspect_certificate,
     is_weak_cipher,
@@ -146,6 +148,36 @@ def test_certificate_expiring_soon_is_low():
     expiry = [f for f in findings if f["rule_id"] == "GEN-TLS-006"]
 
     assert expiry and expiry[0]["severity"] == "low"
+
+
+def test_certificate_just_outside_the_window_is_not_reported():
+    findings = rule_ids(
+        run(
+            make_context(
+                attack_surface=tls_surface(
+                    days_until_expiry=30,
+                    seconds_until_expiry=30 * 86400 + 3600,
+                )
+            )
+        )
+    )
+
+    assert "GEN-TLS-006" not in findings
+
+
+def test_certificate_inside_the_window_is_reported():
+    findings = rule_ids(
+        run(
+            make_context(
+                attack_surface=tls_surface(
+                    days_until_expiry=30,
+                    seconds_until_expiry=30 * 86400 - 3600,
+                )
+            )
+        )
+    )
+
+    assert "GEN-TLS-006" in findings
 
 
 def test_untrusted_chain_is_reported():
@@ -287,6 +319,31 @@ def test_protocols_the_local_openssl_cannot_offer_are_reported_untested(
     assert set(probe["untested"]) <= {
         label for label, _ in TESTABLE_PROTOCOLS
     }
+
+
+def test_ca_directory_is_passed_as_capath(tmp_path, monkeypatch):
+    directory = tmp_path / "company-ca"
+    directory.mkdir()
+
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(directory))
+
+    assert _ca_bundle() == ("", str(directory))
+
+
+def test_ca_file_is_passed_as_cafile(tmp_path, monkeypatch):
+    bundle = tmp_path / "company.pem"
+    bundle.write_text("")
+
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(bundle))
+
+    assert _ca_bundle() == (str(bundle), "")
+
+
+def test_ca_bundle_defaults_to_the_one_requests_uses(monkeypatch):
+    for name in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert _ca_bundle() == (requests.certs.where(), "")
 
 
 @pytest.mark.parametrize(

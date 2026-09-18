@@ -161,29 +161,40 @@ def _connect(
     raise last_error or OSError(f"Could not connect to {host}:{port}.")
 
 
-def _ca_bundle() -> str:
+def _ca_bundle() -> tuple[str, str]:
     """
-    The CA bundle requests would use, so both agree on what is trusted.
+    The trust source requests would use, as (cafile, capath).
 
-    Falling back to the OpenSSL system store instead would let the fetch
-    succeed while this inspection calls the same chain untrusted.
+    Requests accepts either a bundle file or an OpenSSL-hashed directory,
+    so both are honoured here: falling back to the system store instead
+    would let the fetch succeed while this inspection calls the same
+    chain untrusted.
     """
 
     for name in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE"):
         value = os.environ.get(name, "").strip()
 
-        if value and os.path.isfile(value):
-            return value
+        if not value:
+            continue
+
+        if os.path.isdir(value):
+            return "", value
+
+        if os.path.isfile(value):
+            return value, ""
 
     bundle = requests.certs.where()
 
-    return bundle if bundle and os.path.isfile(bundle) else ""
+    return (bundle, "") if bundle and os.path.isfile(bundle) else ("", "")
 
 
 def _default_context(verify: bool) -> ssl.SSLContext:
-    bundle = _ca_bundle() if verify else ""
+    cafile, capath = _ca_bundle() if verify else ("", "")
 
-    context = ssl.create_default_context(cafile=bundle or None)
+    context = ssl.create_default_context(
+        cafile=cafile or None,
+        capath=capath or None,
+    )
 
     if not verify:
         context.check_hostname = False
@@ -269,6 +280,13 @@ def probe_protocols(
         except ssl.SSLError as exc:
             if _is_local_failure(exc):
                 untested.append(label)
+
+            continue
+
+        except TimeoutError:
+            # A timeout is not a refusal; reporting it as unsupported
+            # would hide a server that still speaks the version.
+            untested.append(label)
 
             continue
 
@@ -381,7 +399,10 @@ def _describe(connection: ssl.SSLSocket, result: dict[str, Any]) -> None:
     remaining = expires - datetime.now(timezone.utc)
 
     result["expires_at"] = expires.isoformat()
+    # The whole-day count is for display; the rule compares seconds so a
+    # certificate 30 days and 23 hours out is not warned about early.
     result["days_until_expiry"] = remaining.days
+    result["seconds_until_expiry"] = remaining.total_seconds()
     result["expired"] = remaining.total_seconds() <= 0
 
 
