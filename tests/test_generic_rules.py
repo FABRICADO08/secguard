@@ -1,6 +1,6 @@
 import pytest
 
-from backend.rules.base import ScanContext
+from backend.rules.base import Rule, ScanContext
 from backend.rules.engine import RuleEngine, analyze, default_rules
 
 SECURE_HEADERS = {
@@ -449,7 +449,7 @@ def test_findings_are_sorted_by_severity():
 
 
 def test_engine_isolates_a_failing_rule():
-    class BrokenRule:
+    class BrokenRule(Rule):
         id = "BROKEN-001"
 
         def evaluate(self, context):

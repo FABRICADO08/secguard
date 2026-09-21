@@ -34,6 +34,12 @@ class ScanContext:
     technologies: list[dict[str, Any]] = field(default_factory=list)
     attack_surface: dict[str, Any] = field(default_factory=dict)
 
+    # False when no HTTP response was ever received, as on a scan that
+    # stopped at certificate validation. Rules that read the response
+    # cannot tell an absent header from an unobserved one, so they are
+    # skipped rather than reporting an absence the scan never saw.
+    response_observed: bool = True
+
     @property
     def headers(self) -> dict[str, str]:
         """Response headers, lower-cased keys."""
@@ -138,6 +144,10 @@ class Rule:
     owasp: str = ""
     references: tuple[str, ...] = ()
     platform: str = "Generic"
+
+    # Set to False by rules whose evidence comes from somewhere other
+    # than the HTTP response, so they still run on a response-less scan.
+    requires_response: bool = True
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
         raise NotImplementedError
