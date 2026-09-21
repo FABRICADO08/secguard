@@ -51,6 +51,9 @@ EXPLICIT_VERSION = 0xA0
 UTC_TIME = 0x17
 GENERALIZED_TIME = 0x18
 
+# ASN.1 reads a two-digit year below 50 as 20xx and the rest as 19xx.
+UTC_TIME_PIVOT = 2050
+
 # Cipher properties that mean the connection is not forward secret or
 # relies on primitives that are no longer considered sound.
 WEAK_CIPHER_MARKERS = (
@@ -515,6 +518,11 @@ def _parse_asn1_time(tag: int, value: str) -> datetime | None:
 
     except ValueError:
         return None
+
+    if tag == UTC_TIME and parsed.year >= UTC_TIME_PIVOT:
+        # Python pivots two-digit years at 1969 instead, so everything
+        # from 50 to 68 would otherwise land a century too late.
+        parsed = parsed.replace(year=parsed.year - 100)
 
     return parsed.replace(tzinfo=timezone.utc)
 

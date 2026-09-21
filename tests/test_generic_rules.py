@@ -462,8 +462,31 @@ def test_engine_isolates_a_failing_rule():
     assert engine.errors == [{"rule_id": "BROKEN-001", "error": "boom"}]
 
 
+def test_engine_isolates_a_rule_without_the_response_metadata():
+    class LegacyRule:
+        id = "LEGACY-001"
+
+        def evaluate(self, context):
+            return []
+
+    engine = RuleEngine([LegacyRule(), *default_rules()])
+
+    findings = engine.run(make_context(response={"headers": {}}))
+
+    # A rule that cannot report whether it needs a response is recorded
+    # as an error like any other failure, never aborting the scan.
+    assert findings
+    assert [error["rule_id"] for error in engine.errors] == ["LEGACY-001"]
+
+
 def test_analyze_reports_rule_count():
     result = analyze(make_context())
 
     assert result["rules_evaluated"] == len(default_rules())
     assert result["rule_errors"] == []
+
+
+def test_analyze_counts_only_the_rules_that_ran():
+    result = analyze(make_context(response_observed=False))
+
+    assert 0 < result["rules_evaluated"] < len(default_rules())
