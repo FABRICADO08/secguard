@@ -23,6 +23,7 @@ from backend.discovery.tls import (
     probe_protocols,
     supported_protocols,
 )
+from backend.rules.engine import default_rules
 from backend.storage import scans
 from tests.test_generic_rules import make_context, rule_ids, run
 
@@ -339,6 +340,31 @@ def test_undecodable_certificates_yield_no_expiry(der):
     assert certificate_expiry(der) is None
 
 
+@pytest.mark.parametrize(
+    "value,year",
+    [
+        ("490101000000Z", 2049),
+        ("500101000000Z", 1950),
+        ("680101000000Z", 1968),
+        ("690101000000Z", 1969),
+    ],
+)
+def test_two_digit_years_follow_the_asn1_pivot(value, year):
+    # ASN.1 splits at 50, Python at 69, so the years between them would
+    # otherwise decode a century late and hide an expired certificate.
+    parsed = tls._parse_asn1_time(tls.UTC_TIME, value)
+
+    assert parsed is not None
+    assert parsed.year == year
+
+
+def test_four_digit_years_are_not_shifted():
+    parsed = tls._parse_asn1_time(tls.GENERALIZED_TIME, "20600101000000Z")
+
+    assert parsed is not None
+    assert parsed.year == 2060
+
+
 def test_supported_protocols_excludes_versions_the_server_refuses(tls_server):
     protocols = supported_protocols("127.0.0.1", tls_server, timeout=5)
 
@@ -396,6 +422,11 @@ def test_rejected_certificate_still_records_tls_findings(
         for rule_id in findings
         if not rule_id.startswith("GEN-TLS-")
     ]
+
+    security = payload["application"]["security"]
+
+    # The scan must not claim coverage of the rules it never ran.
+    assert security["rules_evaluated"] < len(default_rules())
 
 
 def test_a_certificate_rejected_on_redirect_inspects_the_failing_host(

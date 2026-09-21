@@ -14,6 +14,7 @@ class RuleEngine:
     def __init__(self, rules: Sequence[Rule] | None = None) -> None:
         self.rules: list[Rule] = list(rules or [])
         self.errors: list[dict[str, str]] = []
+        self.evaluated: int = 0
 
     def register(self, rule: Rule) -> None:
         self.rules.append(rule)
@@ -31,14 +32,19 @@ class RuleEngine:
         """
 
         self.errors = []
+        self.evaluated = 0
 
         findings: list[Finding] = []
 
         for rule in self.rules:
-            if rule.requires_response and not context.response_observed:
-                continue
-
             try:
+                # Inside the boundary so a rule that cannot report its
+                # own metadata is isolated like any other failure.
+                if rule.requires_response and not context.response_observed:
+                    continue
+
+                self.evaluated += 1
+
                 findings.extend(rule.evaluate(context) or [])
 
             except Exception as exc:
@@ -78,6 +84,8 @@ def analyze(context: ScanContext) -> dict[str, Any]:
 
     return {
         "findings": findings,
-        "rules_evaluated": len(engine.rules),
+        # Rules that actually ran, which is fewer than the catalog on a
+        # scan where part of the evidence was never collected.
+        "rules_evaluated": engine.evaluated,
         "rule_errors": engine.errors,
     }
