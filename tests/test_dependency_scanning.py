@@ -38,6 +38,35 @@ def test_jquery_ui_is_not_reported_as_jquery():
     assert [entry["name"] for entry in detected] == ["jQuery UI"]
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "/assets/notjquery-1.12.4.js",
+        "/assets/react-bootstrap-1.6.0.js",
+        "/assets/my-lodash-wrapper-1.0.0.js",
+        "/assets/bootstrap.bundle.min.js",
+    ],
+)
+def test_a_filename_that_merely_contains_a_library_name_is_ignored(url):
+    assert detect_libraries([url], "", {}) == []
+
+
+def test_angular_is_not_reported_as_angularjs():
+    modern = detect_libraries(["/static/angular-17.0.1.js"], "", {})
+    legacy = detect_libraries(["/static/angular-1.8.2.min.js"], "", {})
+
+    assert modern[0]["name"] == "Angular"
+    assert legacy[0]["name"] == "AngularJS"
+
+
+def test_angular_carries_no_angularjs_advisories():
+    assert advisories_for("Angular", "17.0.1") == []
+    assert end_of_life_for("Angular", "17.0.1") is None
+
+    assert advisories_for("AngularJS", "1.8.2")
+    assert end_of_life_for("AngularJS", "1.8.2") is not None
+
+
 def test_page_banner_supplies_a_version_when_the_filename_does_not():
     detected = detect_libraries(
         ["/static/bundle.js"],
@@ -171,7 +200,7 @@ def test_a_branch_specific_advisory_does_not_reach_another_branch():
 
 def test_names_are_normalised_before_lookup():
     assert normalize_name("jQuery UI") == "jquery-ui"
-    assert normalize_name("Angular") == "angularjs"
+    assert normalize_name("AngularJS") == "angularjs"
     assert advisories_for("jquery-ui", "1.12.1")
 
 
