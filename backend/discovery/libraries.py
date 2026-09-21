@@ -14,21 +14,35 @@ from urllib.parse import unquote, urlparse
 
 VERSION = r"(\d+(?:\.\d+){1,3})"
 
+
+def _filename_pattern(token: str) -> re.Pattern[str]:
+    """
+    A versioned filename for `token` and nothing else.
+
+    Anchored at the start of the filename and followed immediately by
+    the version, so neither a package that merely ends in the token
+    (`notjquery-1.12.4.js`) nor one that merely starts with it
+    (`react-bootstrap-1.6.0.js`) is mistaken for the library itself.
+    """
+
+    return re.compile(rf"\A{token}[.\-]v?{VERSION}", re.IGNORECASE)
+
+
 # Script URLs of the form .../jquery-3.4.1.min.js or /jquery/3.4.1/...
 FILENAME_LIBRARIES: tuple[tuple[str, re.Pattern[str]], ...] = (
-    ("jQuery UI", re.compile(rf"jquery[.\-]ui[.\-]{VERSION}", re.IGNORECASE)),
-    ("jQuery", re.compile(rf"jquery[.\-]{VERSION}", re.IGNORECASE)),
-    ("Bootstrap", re.compile(rf"bootstrap[.\-]{VERSION}", re.IGNORECASE)),
-    ("AngularJS", re.compile(rf"angular[.\-]{VERSION}", re.IGNORECASE)),
-    ("Lodash", re.compile(rf"lodash[.\-]{VERSION}", re.IGNORECASE)),
-    ("Underscore", re.compile(rf"underscore[.\-]{VERSION}", re.IGNORECASE)),
-    ("Moment", re.compile(rf"moment[.\-]{VERSION}", re.IGNORECASE)),
-    ("Handlebars", re.compile(rf"handlebars[.\-]{VERSION}", re.IGNORECASE)),
-    ("Axios", re.compile(rf"axios[.\-]{VERSION}", re.IGNORECASE)),
-    ("DOMPurify", re.compile(rf"purify[.\-]{VERSION}", re.IGNORECASE)),
-    ("CKEditor", re.compile(rf"ckeditor[.\-]{VERSION}", re.IGNORECASE)),
-    ("React", re.compile(rf"react[.\-]{VERSION}", re.IGNORECASE)),
-    ("Vue", re.compile(rf"vue[.\-]{VERSION}", re.IGNORECASE)),
+    ("jQuery UI", _filename_pattern(r"jquery[.\-]ui")),
+    ("jQuery", _filename_pattern("jquery")),
+    ("Bootstrap", _filename_pattern("bootstrap")),
+    ("AngularJS", _filename_pattern("angular")),
+    ("Lodash", _filename_pattern("lodash")),
+    ("Underscore", _filename_pattern("underscore")),
+    ("Moment", _filename_pattern("moment")),
+    ("Handlebars", _filename_pattern("handlebars")),
+    ("Axios", _filename_pattern("axios")),
+    ("DOMPurify", _filename_pattern("purify")),
+    ("CKEditor", _filename_pattern("ckeditor")),
+    ("React", _filename_pattern("react")),
+    ("Vue", _filename_pattern("vue")),
 )
 
 # CDN layouts put the version in a path segment: /ajax/libs/jquery/3.4.1/
@@ -86,6 +100,20 @@ def _record(
     }
 
 
+def _split_angular(name: str, version: str) -> str:
+    """
+    AngularJS never left 1.x; anything above it is the other framework.
+
+    They share the `angular` filename token but not a version line, so
+    calling Angular 17 "AngularJS" would hand it AngularJS advisories.
+    """
+
+    if name != "AngularJS" or version.startswith("1."):
+        return name
+
+    return "Angular"
+
+
 def _from_url(url: str) -> tuple[str, str, str] | None:
     parsed = urlparse(url)
     path = unquote(parsed.path)
@@ -94,7 +122,11 @@ def _from_url(url: str) -> tuple[str, str, str] | None:
         match = pattern.search(path)
 
         if match:
-            return name, match.group(1), "script-path"
+            return (
+                _split_angular(name, match.group(1)),
+                match.group(1),
+                "script-path",
+            )
 
     filename = path.rsplit("/", 1)[-1]
 
@@ -102,7 +134,11 @@ def _from_url(url: str) -> tuple[str, str, str] | None:
         match = pattern.search(filename)
 
         if match:
-            return name, match.group(1), "script-filename"
+            return (
+                _split_angular(name, match.group(1)),
+                match.group(1),
+                "script-filename",
+            )
 
     return None
 

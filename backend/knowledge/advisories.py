@@ -288,8 +288,10 @@ def normalize_name(name: str) -> str:
 
     lowered = lowered.replace(" ", "-").replace("_", "-").replace(".js", "")
 
+    # "angular" is deliberately absent: Angular 2+ is a different
+    # framework on its own version line, so aliasing it here would apply
+    # AngularJS advisories and end-of-life to, say, Angular 17.
     return {
-        "angular": "angularjs",
         "apache-httpd": "apache",
         "httpd": "apache",
         "jqueryui": "jquery-ui",
