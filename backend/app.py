@@ -49,6 +49,9 @@ from backend.platforms.outsystems.findings import (
 from backend.platforms.outsystems.service import (
     analyze_model as analyze_outsystems_model,
 )
+from backend.portfolio.summary import (
+    portfolio_summary,
+)
 from backend.recommendations import (
     build_recommendations,
 )
@@ -1053,6 +1056,26 @@ def applications():
 
             "applications":
                 list_applications(),
+        }
+    )
+
+
+# ============================================================
+# Portfolio summary
+# ============================================================
+
+@app.get("/api/portfolio/summary")
+def portfolio():
+
+    return jsonify(
+        {
+            "success":
+                True,
+
+            **portfolio_summary(
+                list_applications(),
+                load_findings,
+            ),
         }
     )
 

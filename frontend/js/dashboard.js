@@ -1,304 +1,272 @@
-const applicationsContainer =
-    document.getElementById(
-        "applications"
-    );
+/*
+|--------------------------------------------------------------------------
+| Portfolio overview
+|--------------------------------------------------------------------------
+*/
+
+const view = renderShell({
+    scope: "portfolio",
+    active: "overview",
+    period: false,
+    breadcrumbs: [
+        { text: "Portfolio", href: "/dashboard.html" },
+        { text: "Overview" },
+    ],
+    tools: `
+        <a class="button" href="/index.html">New scan</a>
+    `,
+});
 
 
-function renderSummary(
-    applications
-) {
+function systemRow(system) {
+    const link = `/system-security.html?application=${encodeURIComponent(
+        system.id
+    )}`;
 
-    const findingTotal =
-        applications.reduce(
-            (total, application) =>
-                total + (application.total_findings || 0),
-            0
-        );
+    return `
+        <tr class="row-${
+            system.severity_counts.critical
+                ? "critical"
+                : system.severity_counts.high
+                    ? "high"
+                    : "low"
+        }">
 
-    const highestRisk =
-        applications.reduce(
-            (highest, application) =>
-                Math.max(
-                    highest,
-                    application.risk_score || 0
-                ),
-            0
-        );
-
-    const criticalTotal =
-        applications.reduce(
-            (total, application) => {
-
-                const counts =
-                    application.severity_counts || {};
-
-                return (
-                    total +
-                    (counts.critical || 0) +
-                    (counts.high || 0)
-                );
-            },
-            0
-        );
-
-
-    document.getElementById(
-        "applicationCount"
-    ).textContent =
-        applications.length;
-
-    document.getElementById(
-        "findingTotal"
-    ).textContent =
-        findingTotal;
-
-    document.getElementById(
-        "highestRisk"
-    ).textContent =
-        highestRisk;
-
-    document.getElementById(
-        "criticalTotal"
-    ).textContent =
-        criticalTotal;
-}
-
-
-function renderApplications(
-    applications
-) {
-
-    if (!applications.length) {
-
-        applicationsContainer.innerHTML =
-            `
-            <p class="muted">
-                No applications analyzed yet. Start a scan on the
-                <a href="/index.html">discovery page</a>.
-            </p>
-            `;
-
-        return;
-    }
-
-
-    applicationsContainer.innerHTML =
-        applications
-            .map(
-                application => `
-                  <div class="application-row">
-                    <a
-                        class="application"
-                        href="/findings.html?application=${
-                            encodeURIComponent(
-                                application.id || ""
-                            )
-                        }"
-                    >
-
-                        <div class="risk-grade grade-${
-                            String(
-                                application.risk_grade || "a"
-                            ).toLowerCase()
-                        }">
-                            ${escapeHtml(
-                                application.risk_grade || "-"
-                            )}
-                        </div>
-
-                        <div>
-
-                            <strong>
-                                ${escapeHtml(
-                                    application.url ||
-                                    application.name
-                                )}
-                            </strong>
-
-                            <small>
-                                ${escapeHtml(
-                                    application.platform
-                                )}
-
-                                ·
-
-                                risk ${escapeHtml(
-                                    application.risk_score ?? 0
-                                )}
-
-                                ·
-
-                                ${escapeHtml(
-                                    application.total_findings ?? 0
-                                )} findings
-
-                                ·
-
-                                ${escapeHtml(
-                                    application.updated_at
-                                )}
-                            </small>
-
-                            <div class="severity-counts">
-                                ${severityCounts(
-                                    application.severity_counts
-                                )}
-                            </div>
-
-                        </div>
-
+            <td data-label="System">
+                <div>
+                    <a class="row-title" href="${link}">
+                        ${escapeHtml(system.name)}
                     </a>
+                    <div class="row-meta mono">
+                        ${escapeHtml(system.url || "")}
+                    </div>
+                </div>
+            </td>
 
-                    <button
-                        class="danger"
-                        type="button"
-                        data-delete="${escapeHtml(
-                            application.id || ""
-                        )}"
-                    >
-                        Delete
-                    </button>
+            <td data-label="Platform">
+                <span class="pill">${escapeHtml(system.platform)}</span>
+            </td>
 
-                  </div>
-                `
-            )
-            .join("");
-}
+            <td data-label="Last scan">
+                ${escapeHtml(formatDate(system.scan_date))}
+            </td>
 
+            <td data-label="Rating">
+                ${ratingMarkup(system.rating)}
+            </td>
 
-async function deleteApplication(
-    applicationId
-) {
-
-    const confirmed =
-        window.confirm(
-            "Delete this application and all of its findings?"
-        );
-
-    if (!confirmed) {
-        return;
-    }
-
-
-    try {
-
-        const response =
-            await apiFetch(
-                `/api/applications/${
-                    encodeURIComponent(
-                        applicationId
+            <td data-label="Findings">
+                <strong>${system.total_findings}</strong>
+                ${deltaMarkup(
+                    Object.values(system.severity_deltas || {}).reduce(
+                        (sum, value) => sum + value,
+                        0
                     )
-                }`,
-                {
-                    method: "DELETE"
-                }
-            );
-
-        const data =
-            await response.json();
-
-        if (!response.ok || !data.success) {
-
-            throw new Error(
-                data.error ||
-                "Could not delete the application."
-            );
-
-        }
-
-    } catch (error) {
-
-        window.alert(
-            error.message ||
-            "Could not delete the application."
-        );
-
-        return;
-    }
-
-
-    /*
-     * Findings and detail pages remember the last application, so
-     * a deleted one must not stay selected.
-     */
-
-    if (
-        localStorage.getItem(
-            "currentApplicationId"
-        ) === applicationId
-    ) {
-
-        localStorage.removeItem(
-            "currentApplicationId"
-        );
-
-    }
-
-
-    await initialize();
-}
-
-
-async function initialize() {
-
-    try {
-
-        const data =
-            await getJson(
-                "/api/applications"
-            );
-
-        const applications =
-            data.applications || [];
-
-        renderSummary(
-            applications
-        );
-
-        renderApplications(
-            applications
-        );
-
-    } catch (error) {
-
-        applicationsContainer.innerHTML =
-            `
-            <p class="status error">
-                ${escapeHtml(
-                    error.message
                 )}
-            </p>
-            `;
+            </td>
 
-    }
+            <td data-label="Severity">
+                ${severityChips(system.severity_counts)}
+            </td>
+
+            <td data-label="Actions">
+                <button
+                    class="button button--danger"
+                    data-delete="${escapeHtml(system.id)}"
+                    type="button"
+                >
+                    Delete
+                </button>
+            </td>
+
+        </tr>
+    `;
 }
 
 
-applicationsContainer.addEventListener(
-    "click",
-    event => {
+function render(summary) {
+    const totals = summary.totals;
 
-        const button =
-            event.target.closest(
-                "[data-delete]"
-            );
+    const acute =
+        totals.severity_counts.critical + totals.severity_counts.high;
+
+    view.innerHTML = `
+        <div class="kpi-grid">
+
+            <section class="card span-3">
+                <p class="card__title">Systems</p>
+                <div class="kpi">
+                    <div>
+                        <div class="kpi__value">${totals.systems}</div>
+                        <div class="kpi__label">analyzed</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card span-3">
+                <p class="card__title">Findings</p>
+                <div class="kpi">
+                    <div>
+                        <div class="kpi__value">${totals.findings}</div>
+                        <div class="kpi__label">open</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card span-3">
+                <p class="card__title">Critical + High</p>
+                <div class="kpi">
+                    <div>
+                        <div class="kpi__value">${acute}</div>
+                        <div class="kpi__label">need attention</div>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card span-3">
+                <p class="card__title">Portfolio rating</p>
+                <div class="kpi">
+                    <div>
+                        ${ratingMarkup(totals.rating)}
+                        <div class="kpi__label">average of all systems</div>
+                    </div>
+                </div>
+            </section>
+
+        </div>
+
+        <section class="card">
+
+            <div class="card__head">
+                <h2>Systems</h2>
+                <div class="toolbar">
+                    <input
+                        type="search"
+                        id="systemSearch"
+                        placeholder="Search by system name"
+                        aria-label="Search by system name"
+                    >
+                    <a class="chip" href="/portfolio-security.html">
+                        Security view
+                    </a>
+                </div>
+            </div>
+
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr>
+                            <th>System</th>
+                            <th>Platform</th>
+                            <th>Last scan</th>
+                            <th>Rating</th>
+                            <th>Findings</th>
+                            <th>Severity</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="systemRows"></tbody>
+                </table>
+            </div>
+
+            <div id="systemEmpty" class="empty hidden"></div>
+
+        </section>
+    `;
+
+    const rows = document.getElementById("systemRows");
+    const search = document.getElementById("systemSearch");
+
+    const paint = () => {
+        const term = search.value.trim().toLowerCase();
+
+        const matching = summary.systems.filter(
+            system =>
+                !term ||
+                String(system.name).toLowerCase().includes(term) ||
+                String(system.url || "").toLowerCase().includes(term)
+        );
+
+        rows.innerHTML = matching.length
+            ? matching.map(systemRow).join("")
+            : `
+                <tr>
+                    <td colspan="7" class="empty">
+                        No system matches this search.
+                    </td>
+                </tr>
+            `;
+    };
+
+    search.addEventListener("input", paint);
+
+    rows.addEventListener("click", async event => {
+        const button = event.target.closest("[data-delete]");
 
         if (!button) {
             return;
         }
 
-        event.preventDefault();
+        const identifier = button.dataset.delete;
 
-        deleteApplication(
-            button.dataset.delete
-        ).catch(
-            error => window.alert(
-                error.message ||
-                "Could not delete the application."
-            )
-        );
+        if (!window.confirm("Delete this system and its findings?")) {
+            return;
+        }
+
+        button.disabled = true;
+
+        try {
+            const response = await apiFetch(
+                `/api/applications/${encodeURIComponent(identifier)}`,
+                { method: "DELETE" }
+            );
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Delete failed.");
+            }
+
+            load();
+        } catch (error) {
+            button.disabled = false;
+
+            window.alert(error.message || "Delete failed.");
+        }
+    });
+
+    paint();
+}
+
+
+async function load() {
+    view.innerHTML = '<div class="card empty">Loading portfolio…</div>';
+
+    try {
+        const summary = await getJson("/api/portfolio/summary");
+
+        if (!summary.systems.length) {
+            view.innerHTML = `
+                <section class="card empty">
+                    <p>No system has been analyzed yet.</p>
+                    <p><a class="button" href="/index.html">
+                        Run the first scan
+                    </a></p>
+                </section>
+            `;
+
+            return;
+        }
+
+        render(summary);
+    } catch (error) {
+        view.innerHTML = `
+            <div class="notice notice--error">
+                ${escapeHtml(error.message || "Could not load portfolio.")}
+            </div>
+        `;
     }
-);
+}
 
 
-initialize();
+load();
