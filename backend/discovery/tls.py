@@ -46,6 +46,11 @@ LOCAL_FAILURE_REASONS = (
     "UNSUPPORTED_PROTOCOL",
 )
 
+# DER tags used while reading a certificate's validity window.
+EXPLICIT_VERSION = 0xA0
+UTC_TIME = 0x17
+GENERALIZED_TIME = 0x18
+
 # Cipher properties that mean the connection is not forward secret or
 # relies on primitives that are no longer considered sound.
 WEAK_CIPHER_MARKERS = (
@@ -397,8 +402,14 @@ def _describe(connection: ssl.SSLSocket, result: dict[str, Any]) -> None:
 
     if not certificate:
         # Python only decodes the peer certificate when the connection
-        # verified it, so an untrusted chain yields protocol and cipher
-        # detail but no certificate fields.
+        # verified it, so an untrusted chain yields no dictionary. An
+        # expired certificate is a common reason for that failure, so
+        # the expiry is read out of the DER the server still sent.
+        _record_expiry(
+            certificate_expiry(connection.getpeercert(binary_form=True)),
+            result,
+        )
+
         return
 
     result.update(_names(certificate))
@@ -408,8 +419,16 @@ def _describe(connection: ssl.SSLSocket, result: dict[str, Any]) -> None:
         and result["subject"] == result["issuer"]
     )
 
-    expires = parse_certificate_date(str(certificate.get("notAfter") or ""))
+    _record_expiry(
+        parse_certificate_date(str(certificate.get("notAfter") or "")),
+        result,
+    )
 
+
+def _record_expiry(
+    expires: datetime | None,
+    result: dict[str, Any],
+) -> None:
     if expires is None:
         return
 
@@ -421,6 +440,83 @@ def _describe(connection: ssl.SSLSocket, result: dict[str, Any]) -> None:
     result["days_until_expiry"] = remaining.days
     result["seconds_until_expiry"] = remaining.total_seconds()
     result["expired"] = remaining.total_seconds() <= 0
+
+
+def _read_der(data: bytes, index: int) -> tuple[int, bytes, int]:
+    """Read one DER tag-length-value, returning the tag, value and end."""
+
+    tag = data[index]
+    length = data[index + 1]
+    index += 2
+
+    if length & 0x80:
+        count = length & 0x7F
+        length = int.from_bytes(data[index:index + count], "big")
+        index += count
+
+    end = index + length
+
+    if end > len(data):
+        raise ValueError("truncated DER value")
+
+    return tag, data[index:end], end
+
+
+def certificate_expiry(der: bytes | None) -> datetime | None:
+    """
+    The `notAfter` of a DER certificate, or None if it cannot be read.
+
+    Only the validity window is decoded, walking the fixed field order of
+    `TBSCertificate`: the optional version, serial, signature algorithm
+    and issuer come before it.
+    """
+
+    if not der:
+        return None
+
+    try:
+        _, certificate, _ = _read_der(der, 0)
+        _, tbs, _ = _read_der(certificate, 0)
+
+        tag, _, index = _read_der(tbs, 0)
+
+        if tag == EXPLICIT_VERSION:
+            _, _, index = _read_der(tbs, index)
+
+        for _ in range(2):  # signature algorithm, issuer
+            _, _, index = _read_der(tbs, index)
+
+        _, validity, _ = _read_der(tbs, index)
+
+        _, _, index = _read_der(validity, 0)  # notBefore
+        tag, value, _ = _read_der(validity, index)
+
+        return _parse_asn1_time(tag, value.decode("ascii"))
+
+    except (IndexError, ValueError, UnicodeDecodeError):
+        return None
+
+
+def _parse_asn1_time(tag: int, value: str) -> datetime | None:
+    formats = {
+        UTC_TIME: "%y%m%d%H%M%SZ",
+        GENERALIZED_TIME: "%Y%m%d%H%M%SZ",
+    }
+
+    if tag not in formats:
+        return None
+
+    try:
+        # Both formats end in Z, so the value is UTC.
+        parsed = datetime.strptime(  # noqa: DTZ007
+            value,
+            formats[tag],
+        )
+
+    except ValueError:
+        return None
+
+    return parsed.replace(tzinfo=timezone.utc)
 
 
 def analyze_tls(url: str, timeout: int = PROBE_TIMEOUT) -> dict[str, Any]:

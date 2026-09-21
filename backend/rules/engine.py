@@ -35,6 +35,9 @@ class RuleEngine:
         findings: list[Finding] = []
 
         for rule in self.rules:
+            if rule.requires_response and not context.response_observed:
+                continue
+
             try:
                 findings.extend(rule.evaluate(context) or [])
 

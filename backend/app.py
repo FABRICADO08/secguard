@@ -156,6 +156,7 @@ def health():
 def _certificate_only_scan(
     url: str,
     error: str,
+    rejected_url: str = "",
 ):
     """
     Record a scan for a target whose certificate failed validation.
@@ -164,12 +165,28 @@ def _certificate_only_scan(
     exactly what `GEN-TLS-006` and `GEN-TLS-007` report on, so the TLS
     diagnosis is analysed and persisted on its own instead of being
     thrown away with the fetch error.
+
+    The rejected request is the one inspected: a target that redirects
+    to another host before the handshake fails would otherwise have a
+    healthy first hop described in place of the failing one.
     """
 
     requested_url = validate_url(url)
 
+    final_url = (
+        validate_url(rejected_url)
+        if rejected_url
+        else requested_url
+    )
+
+    # The redirect hop was checked when it was followed; it is checked
+    # again here because this handshake is a fresh connection.
+    assert_target_allowed(
+        final_url
+    )
+
     tls_result = analyze_tls(
-        requested_url
+        final_url
     )
 
     response = {
@@ -177,7 +194,7 @@ def _certificate_only_scan(
             requested_url,
 
         "final_url":
-            requested_url,
+            final_url,
 
         "status_code":
             None,
@@ -202,7 +219,7 @@ def _certificate_only_scan(
 
     application = Application.create(
         requested_url=requested_url,
-        final_url=requested_url,
+        final_url=final_url,
     )
 
     application.set_platform(
@@ -244,6 +261,9 @@ def _certificate_only_scan(
 
             attack_surface=
                 application.attack_surface,
+
+            response_observed=
+                False,
         )
     )
 
@@ -612,10 +632,28 @@ def discover():
 
         # The certificate is the finding here, so the scan is recorded
         # from the TLS diagnosis alone rather than discarded.
-        return _certificate_only_scan(
-            url,
-            str(exc),
-        )
+        try:
+
+            return _certificate_only_scan(
+                url,
+                str(exc),
+                exc.url,
+            )
+
+        except BlockedTargetError as blocked:
+
+            return jsonify(
+                {
+                    "success":
+                        False,
+
+                    "error":
+                        str(blocked),
+
+                    "reason":
+                        "blocked_target",
+                }
+            ), 403
 
     except TargetUnreachableError as exc:
 

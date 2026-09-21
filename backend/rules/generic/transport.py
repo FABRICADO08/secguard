@@ -40,6 +40,9 @@ class DeprecatedTlsProtocol(Rule):
         "https://datatracker.ietf.org/doc/html/rfc8996",
     )
 
+    # Read from the handshake, not the response.
+    requires_response = False
+
     def evaluate(self, context: ScanContext) -> list[Finding]:
         record = tls_record(context)
 
@@ -79,6 +82,8 @@ class WeakTlsCipher(Rule):
         "(ECDHE with AES-GCM or ChaCha20-Poly1305)."
     )
 
+    requires_response = False
+
     def evaluate(self, context: ScanContext) -> list[Finding]:
         record = tls_record(context)
 
@@ -112,6 +117,8 @@ class TlsCertificateExpiry(Rule):
     recommendation = (
         "Renew the certificate and automate renewal so it cannot lapse."
     )
+
+    requires_response = False
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
         record = tls_record(context)
@@ -177,6 +184,8 @@ class UntrustedTlsCertificate(Rule):
         "Serve a certificate from a trusted authority for the hostname in "
         "use, including any intermediate certificates in the chain."
     )
+
+    requires_response = False
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
         record = tls_record(context)

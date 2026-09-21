@@ -22,7 +22,15 @@ class CertificateRejectedError(TargetUnreachableError):
     Separated from a transport failure because it is exactly what the TLS
     rules exist to report: the endpoint can still be described even
     though no page could be fetched from it.
+
+    `url` is the request that was rejected, which is not the scanned URL
+    when the rejection happened on a redirect hop.
     """
+
+    def __init__(self, message: str, url: str = "") -> None:
+        super().__init__(message)
+
+        self.url = url
 
 
 def validate_url(url: str) -> str:
@@ -114,9 +122,12 @@ def fetch_application(url: str) -> dict:
         if blocked is not None:
             raise blocked from exc
 
+        rejected = str(getattr(exc.request, "url", "") or url)
+
         raise CertificateRejectedError(
-            f"The certificate presented by {url} did not validate: "
-            f"{exc}."
+            f"The certificate presented by {rejected} did not validate: "
+            f"{exc}.",
+            rejected,
         ) from exc
 
     except requests.RequestException as exc:
