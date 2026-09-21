@@ -264,3 +264,27 @@ def test_delete_rejects_ids_outside_the_storage_directory(
 
     assert scans.delete_application("") is False
     assert scans.application_exists("app-1") is True
+
+
+def test_portfolio_summary_describes_each_stored_system(
+    client,
+    stored_application,
+):
+    payload = client.get("/api/portfolio/summary").get_json()
+
+    assert payload["success"] is True
+
+    system = payload["systems"][0]
+
+    assert system["id"] == "app-1"
+    assert system["total_findings"] == 2
+    assert system["rating"] == 1.9
+    assert system["activity"] == {"new": 2, "existing": 0, "resolved": 0}
+    assert len(payload["trend"]) == 12
+
+
+def test_portfolio_summary_is_empty_without_scans(client):
+    payload = client.get("/api/portfolio/summary").get_json()
+
+    assert payload["systems"] == []
+    assert payload["totals"]["findings"] == 0

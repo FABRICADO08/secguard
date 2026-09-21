@@ -10,9 +10,15 @@ description: How to run and end-to-end test the SecGuard application security pl
 ```bash
 cd <repo>
 python -m venv .venv && .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m flask --app backend.app run --port 8010
+SECGUARD_ALLOW_PRIVATE_TARGETS=1 .venv/bin/python -m flask --app backend.app run --port 8010
 ```
 
+- **`SECGUARD_ALLOW_PRIVATE_TARGETS=1` is mandatory for local fixture testing.**
+  `assert_target_allowed` (`backend/security/targets.py`) rejects loopback and RFC1918 targets
+  outright, so without it every fixture scan fails on an allow-list error rather than reaching the
+  scanner. `SECGUARD_ALLOWED_TARGET_HOSTS=127.0.0.1` is the narrower alternative, but the env flag
+  is what the TLS tests use. If a scan fails with a blocked/forbidden target message, check this
+  first — it looks like a scanner bug but is not.
 - The frontend is served from the Flask root (`/`); the API lives under `/api`.
 - `backend/app.py`'s `__main__` block hardcodes port 8000, but `flask --app backend.app run --port N`
   works and is preferable — port 8000 has been flaky on test boxes.
@@ -35,13 +41,22 @@ triggers most `GEN-*` rules should serve, on `127.0.0.1:8099`:
   and a `<script src>`
 - 200 responses for `/.env`, `/swagger.json`, `/api/v1`; 404 for everything else
 
-Against that fixture the rule engine should evaluate 23 rules, produce **17** findings
-(`critical:1, high:2, medium:8, low:3, informational:3`), `risk_score` 100, `risk_grade` "E",
-and `rule_errors: []`. Use those numbers as a regression baseline.
+Against that fixture the rule engine should produce `risk_score` 100, `risk_grade` "E" and
+`rule_errors: []`. **Do not hardcode the finding/rule counts from this file** — the generic catalog
+grows most PRs. Measured baselines by revision:
 
-Note the baseline changed from 18/`medium:9` to 17/`medium:8` once `GEN-INF-002` was narrowed (see
-"Directory-listing rule" below): the fixture body has `<h1>Index of /</h1>` but no `<a href=`, so the
-rule correctly no longer fires. If you see 18 findings, you are probably on an older revision.
+| revision | rules evaluated | findings | severity split |
+|---|---|---|---|
+| findings-UI era | 23 | 17 | `1/2/8/3/3` |
+| `ca4e4d8` (TLS partial-scan) | 37 | 25 | `1/3/11/6/4` |
+
+Re-measure at the start of a run with
+`curl -s http://127.0.0.1:8010/api/rules | python3 -c "import json,sys;print(len(json.load(sys.stdin)['rules']))"`
+rather than trusting the table, and use *that* as the run's baseline.
+
+Note the finding baseline dropped by one once `GEN-INF-002` was narrowed (see "Directory-listing
+rule" below): the fixture body has `<h1>Index of /</h1>` but no `<a href=`, so the rule correctly no
+longer fires.
 
 ## Directory-listing rule (GEN-INF-002) — falsifiable fixture pair
 
@@ -56,10 +71,55 @@ AND at least one `<a href=`. Testing it properly needs two fixtures, otherwise a
 A helper serving both is at `/home/ubuntu/listing_fixtures.py`. Always assert both halves; a
 no-false-positive result alone does not prove the rule still detects real listings.
 
+## TLS / certificate-rejected scans
+
+A target whose certificate fails validation does **not** error out: `/api/discover` returns HTTP
+**200** with `success: true`, `partial: true`, `reason: "certificate_rejected"`, and persists the
+application with `status: "certificate_rejected"`. The frontend (`app.js`, the `data.partial`
+branch) renders an **amber warning** reading `"<cert error> Only the TLS findings were recorded.
+Application ID: …"` — not the green `Discovery completed.` line. Asserting "a 502" or "a success
+line" here is wrong on both counts.
+
+On such a scan only rules with `requires_response = False` run — currently exactly
+`GEN-TLS-004/005/006/007` — because `ScanContext.response_observed=False` gates every rule that
+reads the HTTP response. So expect **4** rules evaluated and **only** `GEN-TLS-*` findings. Any
+`GEN-HDR-*`, `GEN-CSP-*`, `GEN-SES-*` or `GEN-CFG-*` finding on a certificate-rejected scan is a
+regression: the scanner never saw a response and cannot know a header is absent.
+
+### Minting TLS fixtures
+
+OpenSSL 3.0's `req` rejects `-not_before`/`-not_after`, and `faketime` is usually unavailable, so
+mint certificates programmatically with `cryptography` (`.venv/bin/pip install cryptography`;
+it is not in `requirements.txt`). Give each cert a
+`SubjectAlternativeName([x509.IPAddress(ip_address("127.0.0.1"))])` or the failure is a hostname
+mismatch rather than the trust failure you meant to test. A ready-made four-server script lives at
+`/home/ubuntu/tls_pr18_fixtures.py`:
+
+| target | certificate | exercises |
+|---|---|---|
+| `https://127.0.0.1:8443` | self-signed, valid dates | `GEN-TLS-007` only |
+| `https://127.0.0.1:8444` | self-signed, expired 2021 | `GEN-TLS-006` + `007`, risk 94/E |
+| `https://127.0.0.1:8445` | self-signed, `notAfter` UTCTime `600101000000Z` | ASN.1 century pivot |
+| `http://127.0.0.1:8446` | plain HTTP, 302 → `https://127.0.0.1:8443` | redirect-hop diagnosis |
+
+**The 1960 cert is the only falsifiable expiry test.** ASN.1 UTCTime pivots at 50 (50-99 → 19xx)
+but Python's `%y` pivots at 69, so the two disagree *only* for years 50-68. A cert expiring in
+2021 or the 1990s passes under both the correct and the broken parser. Assert the detail-page
+evidence shows `expires_at: "1960-…"` with a negative `days_until_expiry`; a 2060 date means the
+pivot is broken.
+
+For the redirect fixture, the failing hop — not the healthy first hop — must be named in the
+warning and in the `GEN-TLS-007` evidence `port`. The application keeps `requested_url:
+http://127.0.0.1:8446` and `final_url: https://127.0.0.1:8443`. Note the **UI only ever displays
+`final_url`** (dashboard row, findings header, detail location), so check `requested_url`
+preservation via `curl /api/applications/<id>`.
+
 ## Mendix model analysis (`POST /api/mendix/analyze`)
 
-There is **no UI upload control**, so drive the upload over the API and verify the persisted
-Application through the existing dashboard / findings / detail pages.
+The discovery page has a **"Analyze a Mendix model" card** (`#mendixModel` file input,
+`#mendixButton`, `#mendixStatus`) that posts multipart field `model` and reuses `showResults()`;
+prefer it for UI testing. To set a file in the picker, focus it and use `ctrl+l` to type the path.
+The API is still the faster path for bulk adversarial cases:
 
 ```bash
 # multipart
@@ -94,21 +154,36 @@ header, and that `document.querySelectorAll('img').length === 0`.
 
 ## Frontend pages (check which exist on the branch under test)
 
-The frontend has historically lagged the backend, so always confirm page state before planning UI
-steps. As of the findings-UI work these are functional:
+Every page is an empty `<body>` filled by `js/shell.js` (`renderShell()` writes the icon rail,
+navigation drawer, breadcrumbs and the `#view` container) plus one page script. Shared helpers,
+formatting, severity/rating components, grouping and the inline-SVG charts live in `js/common.js`;
+styling is `css/shell.css` (layout, responsiveness) and `css/views.css` (components).
 
-- `/index.html` — scan form plus result cards: application metrics (`HTTP <code>`, response time),
-  risk score + grade, severity counts, top 10 findings (each links to finding-detail),
-  grouped recommendations, technology, attack surface, endpoints.
-- `/dashboard.html` — all analyzed apps ranked by risk; summary tiles are app count, total findings,
-  highest risk score, critical+high total. Each row links to that app's findings page.
-- `/findings.html?application=<id>` — full findings list with severity and category dropdowns that
-  forward to the API query params.
-- `/finding-detail.html?application=<id>&finding=<id>` — severity, risk, confidence, category,
-  platform, CWE/OWASP, description, recommendation, evidence JSON.
-- Shared helpers live in `/js/common.js`.
+Portfolio scope:
 
-`application.html`, `attack-path.html` and `attack-surface.html` may still be placeholders.
+- `/dashboard.html` — KPI tiles (systems, findings, critical+high, average rating) and the systems
+  table with search and per-system delete.
+- `/portfolio-security.html` — findings-per-month trend (new/existing/resolved), severity split and
+  the systems ranking with CSV export. The topbar period chip (3/6/12 months) redraws the trend.
+- `/index.html` — scan form (URL + authorization checkbox) and the Mendix/OutSystems model upload
+  cards; the result card links into the system security view.
+- `/settings.html` — API token (stored as `secguardApiToken`, sent as `X-API-Key`) and `/api/health`.
+
+System scope (all take `?application=<id>`, falling back to `currentApplicationId` in localStorage):
+
+- `/application.html` — metadata, scan metrics, attack-surface counts, technologies, scan history.
+- `/system-security.html` — findings/latest-scan KPI, rating stars, severity split with deltas,
+  new/existing/resolved activity against the previous scan, findings-by-category chart and the
+  grouped table (OWASP / category / severity / platform) whose rows drill into the findings page.
+- `/findings.html` — all findings, or one group with `&grouping=<key>&group=<name>`; Severity,
+  Category and Platform dropdowns persist in the query string.
+- `/finding-detail.html?...&finding=<id>` — severity, risk, confidence, CWE/OWASP, description,
+  recommendation, references, evidence JSON.
+- `/attack-surface.html` — pages, endpoints, forms, scripts, exposed paths, disclosed libraries.
+
+Responsiveness is part of the product: below 1024px the drawer becomes an overlay opened by the
+topbar menu button (Escape or the scrim closes it), and below 720px the data tables restack as
+cards using each cell's `data-label`. Test at phone, tablet and desktop widths.
 
 ## Cross-checking the UI against the API
 
@@ -116,13 +191,20 @@ The fastest high-signal check is to compare filter counts. For the standard fixt
 
 ```bash
 B=http://127.0.0.1:8010/api/applications
-curl -s "$B/<id>/findings"                               # 17 (was 18 before GEN-INF-002 narrowed)
+curl -s "$B/<id>/findings"                               # all findings (re-measure per revision)
 curl -s "$B/<id>/findings?severity=critical"             # 1  (GEN-CFG-001, /.env)
-curl -s "$B/<id>/findings?category=session"              # 3  (GEN-SES-001/002/003)
-curl -s "$B/<id>/findings?severity=medium&category=session"  # 2
+curl -s "$B/<id>/findings?category=session"              # GEN-SES-*
+curl -s "$B/<id>/findings?severity=medium&category=session"
+curl -s "$B/<id>/findings?platform=Nonsense"             # 0 — negative control
 curl -s "$B/<id>/findings/does-not-exist"                # 404 "Finding not found."
-curl -s http://127.0.0.1:8010/api/rules                  # 23 GEN-* rules
+curl -s http://127.0.0.1:8010/api/rules                  # current GEN-* rule count
 ```
+
+When checking the Platform filter, confirm the value is genuinely sent by looking for
+`?platform=<value>` in the Flask access log, and use a nonsense value as a negative control so you
+are not just observing a permissive filter. `findings.html` is per-application, so one page only
+ever offers a single real platform (Mendix **or** Generic) — Mendix and URL findings never share a
+dropdown.
 
 Dashboard tiles should equal the aggregate over `/api/applications`: app count, sum of
 `total_findings`, max `risk_score`, and sum of `critical + high`. Note each scan appends a new
@@ -161,13 +243,20 @@ is visible as literal text, `document.querySelectorAll('img').length === 0`, and
   via `data.error`. Older revisions returned a generic 500 "Application discovery failed.".
 - The detected technology name is the raw concatenated `Server` header, e.g.
   `basehttp/0.6 python/3.10.12, testserver/1.2.3`, rendered verbatim.
-- The findings UI has **no platform filter control**, even though the API supports
-  `?platform=<name>` on the findings endpoint. Platform filtering is therefore API-only and cannot
-  be asserted through the UI; flag it as a gap rather than reporting it as tested.
-- Aggregate `security.recommendations` are deduplicated per `rule_id`, so when one rule fires more
-  than once with different guidance (e.g. `MXSEC-101` for delete-only vs create-only access) only
-  the first recommendation survives and the count is lower than the finding count. Per-finding
-  recommendations on the detail page are still correct — check there if an aggregate looks short.
+- Findings-page filter selections are preserved across in-page option re-renders but **not across a
+  real browser refresh** (`findings.js` has no localStorage/sessionStorage/URL-history code). If a
+  PR claims "preserved across reloads", press F5 and check rather than assuming.
+- Aggregate `security.recommendations` are grouped by `(rule_id, recommendation)`, so one rule
+  firing with two different texts (e.g. `MXSEC-101` delete-only vs create-only) keeps **both**
+  entries, while identical texts collapse into one carrying a `finding_count` ("N finding(s)").
+  Test both directions — "keep both" alone would also pass a never-deduplicate implementation.
+  `/home/ubuntu/multi_exposure_fixture.py` (8095) emits three identical `GEN-CFG-001` findings and
+  is the collapse half of that pair.
+- Mendix/OutSystems applications render `HTTP -`, `- ms` and `0 Pages/Endpoints/Technologies`
+  because no HTTP request is made for a model upload. Cosmetic, not a regression.
+- TLS evidence can read `"self_signed": false` alongside `"trust_error": "self-signed
+  certificate"` — the boolean comes from a subject/issuer comparison that is empty on the
+  unverified retry. Judge the trust failure by `trusted`/`trust_error`, not `self_signed`.
 - Aggregate recommendations are only rendered on `index.html` right after a direct URL scan; they
   are not shown for persisted applications opened from the dashboard (including Mendix uploads).
 - Historical bugs that were fixed but are worth re-checking on new branches: `HTTP -` / `- ms`

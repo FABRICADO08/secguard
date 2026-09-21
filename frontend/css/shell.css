@@ -1,0 +1,406 @@
+/*
+|--------------------------------------------------------------------------
+| Application shell: icon rail, navigation drawer, top bar, layout tokens
+|--------------------------------------------------------------------------
+| The shell is rendered by js/shell.js on every page, so the rules below
+| are the only place that decides how the product adapts from a phone to
+| a desktop monitor.
+*/
+
+:root {
+    --rail-width: 56px;
+    --nav-width: 260px;
+    --topbar-height: 56px;
+
+    --surface: #ffffff;
+    --surface-muted: #f1f3f7;
+    --surface-sunken: #e9edf3;
+    --border: #d7dce5;
+    --border-strong: #b9c2d0;
+
+    --ink: #16202e;
+    --ink-muted: #5b6878;
+    --ink-faint: #8b97a6;
+
+    --accent: #1665d8;
+    --accent-dark: #0f4ba8;
+    --accent-soft: #e7f0fd;
+
+    --critical: #9d1c20;
+    --high: #e0553b;
+    --medium: #f0a202;
+    --low: #f4c95d;
+    --informational: #7b8794;
+    --resolved: #2e9e5b;
+
+    --radius: 10px;
+    --shadow: 0 1px 2px rgba(22, 32, 46, 0.08),
+        0 4px 14px rgba(22, 32, 46, 0.06);
+
+    --font: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+html,
+body {
+    margin: 0;
+    padding: 0;
+}
+
+body {
+    background: var(--surface-muted);
+    color: var(--ink);
+    font-family: var(--font);
+    font-size: 14px;
+    line-height: 1.45;
+    -webkit-text-size-adjust: 100%;
+}
+
+a {
+    color: var(--accent);
+    text-decoration: none;
+}
+
+a:hover {
+    text-decoration: underline;
+}
+
+button {
+    font: inherit;
+}
+
+/* ---------------------------------------------------------------- rail */
+
+.app {
+    display: flex;
+    min-height: 100vh;
+    min-height: 100dvh;
+}
+
+.rail {
+    width: var(--rail-width);
+    flex: 0 0 var(--rail-width);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 0;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100dvh;
+    z-index: 30;
+}
+
+.rail__brand {
+    width: 34px;
+    height: 34px;
+    border-radius: 8px;
+    background: var(--accent-dark);
+    color: #fff;
+    display: grid;
+    place-items: center;
+    font-weight: 700;
+    margin-bottom: 10px;
+}
+
+.rail__brand:hover {
+    text-decoration: none;
+}
+
+.rail__item {
+    width: 46px;
+    padding: 8px 0 6px;
+    border: 0;
+    border-radius: 8px;
+    background: none;
+    color: var(--ink-muted);
+    display: grid;
+    justify-items: center;
+    gap: 2px;
+    font-size: 9px;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+}
+
+.rail__item svg {
+    width: 18px;
+    height: 18px;
+}
+
+.rail__item:hover {
+    background: var(--surface-muted);
+    color: var(--ink);
+    text-decoration: none;
+}
+
+.rail__item.is-active {
+    background: var(--accent-soft);
+    color: var(--accent-dark);
+}
+
+.rail__spacer {
+    flex: 1;
+}
+
+/* ----------------------------------------------------------------- nav */
+
+.nav {
+    width: var(--nav-width);
+    flex: 0 0 var(--nav-width);
+    background: var(--surface);
+    border-right: 1px solid var(--border);
+    padding: 14px 12px 24px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100dvh;
+    overflow-y: auto;
+    z-index: 25;
+}
+
+.nav__head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 6px 10px;
+}
+
+.nav__title {
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.nav__close {
+    border: 0;
+    background: none;
+    color: var(--ink-muted);
+    font-size: 20px;
+    line-height: 1;
+    cursor: pointer;
+    padding: 4px 8px;
+}
+
+.nav__search {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 14px;
+}
+
+.nav__group {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--ink-faint);
+    padding: 14px 8px 6px;
+}
+
+.nav__link {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    color: var(--ink);
+    border-left: 3px solid transparent;
+}
+
+.nav__link:hover {
+    background: var(--surface-muted);
+    text-decoration: none;
+}
+
+.nav__link.is-active {
+    background: var(--accent-soft);
+    border-left-color: var(--accent);
+    color: var(--accent-dark);
+    font-weight: 600;
+}
+
+.nav__link.is-disabled {
+    color: var(--ink-faint);
+    pointer-events: none;
+}
+
+.nav__link svg {
+    width: 16px;
+    height: 16px;
+    flex: 0 0 16px;
+}
+
+/* -------------------------------------------------------------- topbar */
+
+.main {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+}
+
+.topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    min-height: var(--topbar-height);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 16px;
+    flex-wrap: wrap;
+}
+
+.topbar__menu {
+    display: none;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 6px 10px;
+    cursor: pointer;
+}
+
+.breadcrumbs {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex: 1;
+    min-width: 0;
+    flex-wrap: wrap;
+    font-size: 13px;
+    color: var(--ink-muted);
+}
+
+.breadcrumbs span[aria-current] {
+    color: var(--ink);
+    font-weight: 600;
+}
+
+.breadcrumbs .sep {
+    color: var(--ink-faint);
+}
+
+.topbar__tools {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    border-radius: 6px;
+    padding: 6px 10px;
+    color: var(--ink);
+    font-size: 13px;
+    cursor: pointer;
+}
+
+.chip:hover {
+    background: var(--surface-muted);
+    text-decoration: none;
+}
+
+.content {
+    padding: 16px;
+    display: grid;
+    gap: 16px;
+    align-content: start;
+}
+
+.scrim {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: rgba(12, 20, 32, 0.45);
+    z-index: 24;
+}
+
+body.nav-open .scrim {
+    display: block;
+}
+
+/* ------------------------------------------------------- responsiveness */
+
+/* Desktop can hold the drawer open; below that it overlays on demand. */
+@media (max-width: 1024px) {
+    .nav {
+        position: fixed;
+        left: var(--rail-width);
+        top: 0;
+        transform: translateX(-110%);
+        transition: transform 0.18s ease-out;
+        box-shadow: var(--shadow);
+    }
+
+    body.nav-open .nav {
+        transform: translateX(0);
+    }
+
+    .topbar__menu {
+        display: inline-flex;
+    }
+}
+
+@media (max-width: 640px) {
+    :root {
+        --rail-width: 48px;
+    }
+
+    body {
+        font-size: 13px;
+    }
+
+    .rail__item span {
+        display: none;
+    }
+
+    .nav {
+        left: 0;
+        width: min(300px, 88vw);
+        flex-basis: min(300px, 88vw);
+    }
+
+    .content {
+        padding: 12px;
+        gap: 12px;
+    }
+
+    .topbar {
+        padding: 8px 10px;
+    }
+
+    .topbar__tools {
+        width: 100%;
+        justify-content: space-between;
+    }
+}
+
+/* Touch targets on coarse pointers (phones, tablets). */
+@media (pointer: coarse) {
+    .nav__link,
+    .chip,
+    .rail__item {
+        min-height: 40px;
+    }
+}
+
+@media print {
+    .rail,
+    .nav,
+    .topbar__tools,
+    .scrim {
+        display: none;
+    }
+}

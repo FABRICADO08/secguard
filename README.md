@@ -44,7 +44,26 @@ Keep `--workers 1`: the rate limiter holds its counters in process, so additiona
 | `GET /api/applications/<id>` | Full application record. |
 | `GET /api/applications/<id>/findings` | Findings, filterable by `severity`, `category`, `platform` and `rule_id`. |
 | `GET /api/applications/<id>/findings/<finding_id>` | A single finding. |
+| `GET /api/portfolio/summary` | Systems, severity deltas, new/existing/resolved activity and the monthly trend across all scans. |
 | `GET /api/rules` | Catalogue of the rules the engine evaluates. |
+
+## Interface
+
+The frontend is a static application served from the Flask root. Every page renders the same shell — an icon rail for the Portfolio and System scopes, a contextual navigation drawer, breadcrumbs and a reporting-period selector — and adapts from a phone to a desktop monitor: the drawer becomes an overlay below 1024px and data tables restack as cards below 720px.
+
+| Page | Description |
+| --- | --- |
+| `/dashboard.html` | Portfolio overview: system count, findings, critical+high and the average rating, plus the systems table. |
+| `/portfolio-security.html` | Findings per month (new, existing, resolved), the portfolio severity split and the systems ranking with CSV export. |
+| `/index.html` | Start a scan or upload a Mendix/OutSystems model export. |
+| `/application.html` | System overview: metadata, scan metrics, attack-surface counts, technologies and scan history. |
+| `/system-security.html` | System security: rating, severity split with deltas against the previous scan, activity, and findings grouped by OWASP Top 10, category, severity or platform. |
+| `/findings.html` | All findings of a system, or one group of the chosen grouping. |
+| `/finding-detail.html` | A single finding with its evidence, recommendation and references. |
+| `/attack-surface.html` | Pages, endpoints, forms, scripts, exposed paths and disclosed libraries. |
+| `/settings.html` | API token used for the authenticated endpoints, and service health. |
+
+Repeated scans of the same target are separate records; the portfolio views fold them into one system so the latest scan can be compared with its predecessor.
 
 ## Analysis pipeline
 
