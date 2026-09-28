@@ -69,6 +69,48 @@ def test_a_trailing_slash_does_not_split_a_system_in_two():
     assert len(summarize(applications, {})["systems"]) == 1
 
 
+def test_the_host_is_case_insensitive_but_the_path_is_not():
+    applications = [
+        scan("a", "https://APP.test/Admin", "2026-08-01T00:00:00+00:00"),
+        scan("b", "https://app.test/Admin", "2026-09-01T00:00:00+00:00"),
+        scan("c", "https://app.test/admin", "2026-09-02T00:00:00+00:00"),
+    ]
+
+    result = summarize(applications, {})
+
+    assert len(result["systems"]) == 2
+    assert sorted(
+        system["scan_count"] for system in result["systems"]
+    ) == [1, 2]
+
+
+def test_a_default_port_does_not_split_a_system_in_two():
+    applications = [
+        scan("a", "https://app.test:443/", "2026-08-01T00:00:00+00:00"),
+        scan("b", "https://app.test", "2026-09-01T00:00:00+00:00"),
+    ]
+
+    assert len(summarize(applications, {})["systems"]) == 1
+
+
+def test_a_changed_redirect_target_keeps_one_system():
+    applications = [
+        {
+            **scan("a", "https://old.test", "2026-08-01T00:00:00+00:00"),
+            "requested_url": "http://app.test",
+        },
+        {
+            **scan("b", "https://new.test", "2026-09-01T00:00:00+00:00"),
+            "requested_url": "http://app.test",
+        },
+    ]
+
+    result = summarize(applications, {})
+
+    assert len(result["systems"]) == 1
+    assert result["systems"][0]["scan_count"] == 2
+
+
 def test_activity_compares_the_latest_scan_with_its_predecessor():
     applications = [
         scan("first", "https://app.test", "2026-08-01T00:00:00+00:00"),

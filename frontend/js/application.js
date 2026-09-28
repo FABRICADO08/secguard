@@ -222,25 +222,21 @@ function render(application, statistics, system) {
     document
         .getElementById("deleteSystem")
         .addEventListener("click", async event => {
-            if (!window.confirm("Delete this system and its findings?")) {
+            const scans = system ? system.scan_count : 1;
+
+            const confirmation =
+                scans > 1
+                    ? `Delete this system and all ${scans} of its scans?`
+                    : "Delete this system and its findings?";
+
+            if (!window.confirm(confirmation)) {
                 return;
             }
 
             event.target.disabled = true;
 
             try {
-                const response = await apiFetch(
-                    `/api/applications/${encodeURIComponent(
-                        application.id
-                    )}`,
-                    { method: "DELETE" }
-                );
-
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || "Delete failed.");
-                }
+                await deleteSystem(system || { id: application.id });
 
                 localStorage.removeItem("currentApplicationId");
 

@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 from datetime import datetime, timezone
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 from backend.risk.severity import (
     empty_severity_counts,
@@ -16,6 +17,8 @@ BEST_RATING = 5.0
 WORST_RATING = 0.5
 
 TREND_MONTHS = 12
+
+DEFAULT_PORTS = {"http": 80, "https": 443}
 
 
 def rating_for(score: Any) -> float:
@@ -33,19 +36,53 @@ def rating_for(score: Any) -> float:
     return round(BEST_RATING - (value / 100.0) * span, 1)
 
 
+def _normalize_target(value: str) -> str:
+    """
+    Normalise a URL for comparison.
+
+    Scheme and host are case-insensitive, the rest of a URL is not, so
+    only those are lowercased; a default port and a trailing slash carry
+    no meaning either and are dropped.
+    """
+
+    parts = urlsplit(value)
+
+    if not parts.netloc:
+        return value.rstrip("/")
+
+    host = parts.hostname or ""
+
+    port = parts.port
+
+    if port and port != DEFAULT_PORTS.get(parts.scheme.lower()):
+        host = f"{host}:{port}"
+
+    return urlunsplit(
+        (
+            parts.scheme.lower(),
+            host,
+            parts.path.rstrip("/"),
+            parts.query,
+            "",
+        )
+    )
+
+
 def lineage_key(application: dict[str, Any]) -> str:
     """
     Identify the system a scan belongs to.
 
     Every scan writes its own application record, so repeated scans of
-    one target are only recognisable by the target they addressed.
+    one target are only recognisable by the target they addressed. The
+    requested URL is what the analyst keeps re-scanning, so it decides
+    the system even when a redirect sends the scan somewhere else.
     """
 
-    for field in ("url", "final_url", "requested_url", "name"):
-        value = str(application.get(field) or "").strip().lower()
+    for field in ("requested_url", "url", "final_url", "name"):
+        value = str(application.get(field) or "").strip()
 
         if value:
-            return value.rstrip("/")
+            return _normalize_target(value)
 
     return str(application.get("id") or "")
 

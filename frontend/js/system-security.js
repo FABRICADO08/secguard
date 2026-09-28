@@ -98,15 +98,21 @@ function render(application, findings, system) {
 
     const counts = countBySeverity(findings);
 
-    const deltas = (system && system.severity_deltas) || {};
+    /*
+     * Deltas and activity are computed for the latest scan of a system,
+     * so they do not describe an older scan opened from the history.
+     */
+    const current = Boolean(system) && system.id === application.id;
 
-    const activity = (system && system.activity) || {
+    const deltas = (current && system.severity_deltas) || {};
+
+    const activity = (current && system.activity) || {
         new: findings.length,
         existing: 0,
         resolved: 0,
     };
 
-    const rating = system
+    const rating = current
         ? system.rating
         : ratingFromScore(security.risk_score);
 
@@ -150,7 +156,9 @@ function render(application, findings, system) {
                         )}
                     </div>
                     <div>
-                        <p class="card__title">Latest scan</p>
+                        <p class="card__title">
+                            ${current ? "Latest scan" : "Selected scan"}
+                        </p>
                         <div class="row-title">
                             ${escapeHtml(
                                 formatDateTime(
@@ -325,8 +333,8 @@ async function load() {
             getJson("/api/portfolio/summary"),
         ]);
 
-        const system = summary.systems.find(
-            entry => entry.id === applicationId
+        const system = summary.systems.find(entry =>
+            entry.history.some(scan => scan.id === applicationId)
         );
 
         render(

@@ -581,3 +581,35 @@ function barChart(series, categories, options) {
         </div>
     `;
 }
+
+/*
+|--------------------------------------------------------------------------
+| System deletion
+|--------------------------------------------------------------------------
+| A system is the whole lineage of scans of one target, so deleting it
+| has to remove every scan record: dropping only the latest one would
+| promote its predecessor and leave the system on the portfolio.
+*/
+
+async function deleteSystem(system) {
+    const identifiers = (system.history || [])
+        .map(scan => scan.id)
+        .filter(Boolean);
+
+    if (!identifiers.includes(system.id)) {
+        identifiers.push(system.id);
+    }
+
+    for (const identifier of identifiers) {
+        const response = await apiFetch(
+            `/api/applications/${encodeURIComponent(identifier)}`,
+            { method: "DELETE" }
+        );
+
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "Delete failed.");
+        }
+    }
+}
