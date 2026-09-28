@@ -93,6 +93,25 @@ def test_a_default_port_does_not_split_a_system_in_two():
     assert len(summarize(applications, {})["systems"]) == 1
 
 
+def test_a_model_upload_name_is_not_read_as_a_host_and_port():
+    applications = [
+        scan(
+            "a",
+            "mendix-model://report:2026.json",
+            "2026-08-01T00:00:00+00:00",
+        ),
+        scan(
+            "b",
+            "mendix-model://report:2027.json",
+            "2026-09-01T00:00:00+00:00",
+        ),
+    ]
+
+    result = summarize(applications, {})
+
+    assert len(result["systems"]) == 2
+
+
 def test_a_changed_redirect_target_keeps_one_system():
     applications = [
         {

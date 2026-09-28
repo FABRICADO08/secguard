@@ -589,6 +589,10 @@ function barChart(series, categories, options) {
 | A system is the whole lineage of scans of one target, so deleting it
 | has to remove every scan record: dropping only the latest one would
 | promote its predecessor and leave the system on the portfolio.
+|
+| Every scan is attempted even when one of them fails, and a scan that
+| is already gone counts as deleted, so retrying a partial deletion
+| resumes instead of stopping on the first record it removed.
 */
 
 async function deleteSystem(system) {
@@ -600,16 +604,24 @@ async function deleteSystem(system) {
         identifiers.push(system.id);
     }
 
+    let failure = "";
+
     for (const identifier of identifiers) {
         const response = await apiFetch(
             `/api/applications/${encodeURIComponent(identifier)}`,
             { method: "DELETE" }
         );
 
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || "Delete failed.");
+        if (response.ok || response.status === 404) {
+            continue;
         }
+
+        const data = await response.json().catch(() => ({}));
+
+        failure = data.error || "Delete failed.";
+    }
+
+    if (failure) {
+        throw new Error(failure);
     }
 }

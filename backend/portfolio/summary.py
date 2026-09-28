@@ -43,16 +43,23 @@ def _normalize_target(value: str) -> str:
     Scheme and host are case-insensitive, the rest of a URL is not, so
     only those are lowercased; a default port and a trailing slash carry
     no meaning either and are dropped.
+
+    Only HTTP authorities work that way. A model upload is identified by
+    a synthetic ``mendix-model://<filename>`` URL whose "host" is a file
+    name, so it is compared verbatim.
     """
 
-    parts = urlsplit(value)
+    try:
+        parts = urlsplit(value)
 
-    if not parts.netloc:
+        if not parts.netloc or parts.scheme.lower() not in DEFAULT_PORTS:
+            return value.rstrip("/")
+
+        host = parts.hostname or ""
+
+        port = parts.port
+    except ValueError:
         return value.rstrip("/")
-
-    host = parts.hostname or ""
-
-    port = parts.port
 
     if port and port != DEFAULT_PORTS.get(parts.scheme.lower()):
         host = f"{host}:{port}"
