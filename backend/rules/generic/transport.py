@@ -40,6 +40,9 @@ class DeprecatedTlsProtocol(Rule):
         "https://datatracker.ietf.org/doc/html/rfc8996",
     )
 
+    # Read from the handshake, not the response.
+    requires_response = False
+
     def evaluate(self, context: ScanContext) -> list[Finding]:
         record = tls_record(context)
 
@@ -79,6 +82,8 @@ class WeakTlsCipher(Rule):
         "(ECDHE with AES-GCM or ChaCha20-Poly1305)."
     )
 
+    requires_response = False
+
     def evaluate(self, context: ScanContext) -> list[Finding]:
         record = tls_record(context)
 
@@ -113,6 +118,8 @@ class TlsCertificateExpiry(Rule):
         "Renew the certificate and automate renewal so it cannot lapse."
     )
 
+    requires_response = False
+
     def evaluate(self, context: ScanContext) -> list[Finding]:
         record = tls_record(context)
 
@@ -131,7 +138,17 @@ class TlsCertificateExpiry(Rule):
         if record.get("expired"):
             return [self.finding(context, evidence=evidence)]
 
-        if days <= EXPIRY_WARNING_DAYS:
+        # Compare the exact interval where it is available: a floored day
+        # count of 30 can still be almost 31 days away.
+        seconds = record.get("seconds_until_expiry")
+
+        within_window = (
+            seconds <= EXPIRY_WARNING_DAYS * 86400
+            if isinstance(seconds, (int, float))
+            else days <= EXPIRY_WARNING_DAYS
+        )
+
+        if within_window:
             return [
                 self.finding(
                     context,
@@ -167,6 +184,8 @@ class UntrustedTlsCertificate(Rule):
         "Serve a certificate from a trusted authority for the hostname in "
         "use, including any intermediate certificates in the chain."
     )
+
+    requires_response = False
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
         record = tls_record(context)

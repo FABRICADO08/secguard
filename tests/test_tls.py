@@ -7,16 +7,24 @@ import threading
 from datetime import datetime, timedelta, timezone
 
 import pytest
+import requests.certs
 
+from backend import app as app_module
+from backend.discovery import tls
+from backend.discovery.fingerprint import CertificateRejectedError
 from backend.discovery.tls import (
     TESTABLE_PROTOCOLS,
+    _ca_bundle,
     analyze_tls,
+    certificate_expiry,
     inspect_certificate,
     is_weak_cipher,
     parse_certificate_date,
     probe_protocols,
     supported_protocols,
 )
+from backend.rules.engine import default_rules
+from backend.storage import scans
 from tests.test_generic_rules import make_context, rule_ids, run
 
 
@@ -148,6 +156,36 @@ def test_certificate_expiring_soon_is_low():
     assert expiry and expiry[0]["severity"] == "low"
 
 
+def test_certificate_just_outside_the_window_is_not_reported():
+    findings = rule_ids(
+        run(
+            make_context(
+                attack_surface=tls_surface(
+                    days_until_expiry=30,
+                    seconds_until_expiry=30 * 86400 + 3600,
+                )
+            )
+        )
+    )
+
+    assert "GEN-TLS-006" not in findings
+
+
+def test_certificate_inside_the_window_is_reported():
+    findings = rule_ids(
+        run(
+            make_context(
+                attack_surface=tls_surface(
+                    days_until_expiry=30,
+                    seconds_until_expiry=30 * 86400 - 3600,
+                )
+            )
+        )
+    )
+
+    assert "GEN-TLS-006" in findings
+
+
 def test_untrusted_chain_is_reported():
     findings = run(
         make_context(
@@ -269,6 +307,64 @@ def test_self_signed_server_is_reported_as_untrusted(tls_server):
     assert result["protocol"].startswith("TLS")
 
 
+def test_an_untrusted_certificate_still_yields_its_expiry(tls_server):
+    # Python decodes no certificate dictionary on an unverified
+    # connection, so without reading the DER the expiry of an expired
+    # certificate — the very reason it was rejected — would be lost.
+    result = inspect_certificate("127.0.0.1", tls_server, timeout=5)
+
+    assert not result["trusted"]
+    assert result["expires_at"]
+    assert result["days_until_expiry"] in (4, 5)
+    assert not result["expired"]
+
+
+def test_certificate_expiry_reads_the_validity_window(
+    self_signed_certificate,
+):
+    certificate, _ = self_signed_certificate
+
+    der = ssl.PEM_cert_to_DER_cert(certificate.read_text())
+
+    expires = certificate_expiry(der)
+
+    assert expires is not None
+    assert 3 < (expires - datetime.now(timezone.utc)).days < 6
+
+
+@pytest.mark.parametrize(
+    "der",
+    [b"", b"not a certificate", b"\x30\x82\x01"],
+)
+def test_undecodable_certificates_yield_no_expiry(der):
+    assert certificate_expiry(der) is None
+
+
+@pytest.mark.parametrize(
+    "value,year",
+    [
+        ("490101000000Z", 2049),
+        ("500101000000Z", 1950),
+        ("680101000000Z", 1968),
+        ("690101000000Z", 1969),
+    ],
+)
+def test_two_digit_years_follow_the_asn1_pivot(value, year):
+    # ASN.1 splits at 50, Python at 69, so the years between them would
+    # otherwise decode a century late and hide an expired certificate.
+    parsed = tls._parse_asn1_time(tls.UTC_TIME, value)
+
+    assert parsed is not None
+    assert parsed.year == year
+
+
+def test_four_digit_years_are_not_shifted():
+    parsed = tls._parse_asn1_time(tls.GENERALIZED_TIME, "20600101000000Z")
+
+    assert parsed is not None
+    assert parsed.year == 2060
+
+
 def test_supported_protocols_excludes_versions_the_server_refuses(tls_server):
     protocols = supported_protocols("127.0.0.1", tls_server, timeout=5)
 
@@ -287,6 +383,139 @@ def test_protocols_the_local_openssl_cannot_offer_are_reported_untested(
     assert set(probe["untested"]) <= {
         label for label, _ in TESTABLE_PROTOCOLS
     }
+
+
+def test_rejected_certificate_still_records_tls_findings(
+    tls_server,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        scans, "APPLICATIONS_DIR", tmp_path / "applications"
+    )
+
+    app_module.app.config.update(TESTING=True)
+
+    response = app_module.app.test_client().post(
+        "/api/discover",
+        json={"url": f"https://localhost:{tls_server}"},
+    )
+
+    payload = response.get_json()
+
+    assert response.status_code == 200
+    assert payload["partial"]
+    assert payload["reason"] == "certificate_rejected"
+
+    findings = {
+        finding["rule_id"]
+        for finding in payload["application"]["security"]["findings"]
+    }
+
+    # The untrusted chain is the whole point of recording this scan.
+    assert "GEN-TLS-007" in findings
+
+    # No HTTP response was ever received, so nothing may be reported
+    # about headers, cookies or content that the scan never saw.
+    assert not [
+        rule_id
+        for rule_id in findings
+        if not rule_id.startswith("GEN-TLS-")
+    ]
+
+    security = payload["application"]["security"]
+
+    # The scan must not claim coverage of the rules it never ran.
+    assert security["rules_evaluated"] < len(default_rules())
+
+
+def test_a_certificate_rejected_on_redirect_inspects_the_failing_host(
+    tls_server,
+    tmp_path,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        scans, "APPLICATIONS_DIR", tmp_path / "applications"
+    )
+
+    requested = f"https://127.0.0.1:{tls_server}"
+    rejected = f"https://localhost:{tls_server}"
+
+    def redirected_to_a_bad_certificate(url):
+        raise CertificateRejectedError(
+            f"The certificate presented by {rejected} did not validate.",
+            rejected,
+        )
+
+    monkeypatch.setattr(
+        app_module,
+        "fetch_application",
+        redirected_to_a_bad_certificate,
+    )
+
+    app_module.app.config.update(TESTING=True)
+
+    response = app_module.app.test_client().post(
+        "/api/discover",
+        json={"url": requested},
+    )
+
+    payload = response.get_json()
+    application = payload["application"]
+
+    assert response.status_code == 200
+    assert application["requested_url"] == requested
+
+    # The handshake must describe the host that actually failed.
+    assert application["final_url"] == rejected
+    assert application["attack_surface"]["tls"]["host"] == "localhost"
+
+
+def test_timeout_on_one_address_is_not_buried_by_a_later_refusal(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        tls, "resolve_addresses", lambda host: ["192.0.2.10", "192.0.2.11"]
+    )
+    monkeypatch.setattr(tls, "assert_address_allowed", lambda host, addr: None)
+
+    def connect(address, timeout):
+        if address[0] == "192.0.2.10":
+            raise TimeoutError("timed out")
+
+        raise ConnectionRefusedError("refused")
+
+    monkeypatch.setattr(tls.socket, "create_connection", connect)
+
+    probe = tls.probe_protocols("app.test", 443, timeout=1)
+
+    assert not probe["supported"]
+    assert probe["untested"] == [label for label, _ in TESTABLE_PROTOCOLS]
+
+
+def test_ca_directory_is_passed_as_capath(tmp_path, monkeypatch):
+    directory = tmp_path / "company-ca"
+    directory.mkdir()
+
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(directory))
+
+    assert _ca_bundle() == ("", str(directory))
+
+
+def test_ca_file_is_passed_as_cafile(tmp_path, monkeypatch):
+    bundle = tmp_path / "company.pem"
+    bundle.write_text("")
+
+    monkeypatch.setenv("REQUESTS_CA_BUNDLE", str(bundle))
+
+    assert _ca_bundle() == (str(bundle), "")
+
+
+def test_ca_bundle_defaults_to_the_one_requests_uses(monkeypatch):
+    for name in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE"):
+        monkeypatch.delenv(name, raising=False)
+
+    assert _ca_bundle() == (requests.certs.where(), "")
 
 
 @pytest.mark.parametrize(

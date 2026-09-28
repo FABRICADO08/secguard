@@ -20,8 +20,10 @@ from backend.discovery.endpoints import (
     discover_endpoints,
 )
 from backend.discovery.fingerprint import (
+    CertificateRejectedError,
     TargetUnreachableError,
     fetch_application,
+    validate_url,
 )
 from backend.discovery.libraries import (
     detect_libraries,
@@ -58,6 +60,9 @@ from backend.platforms.outsystems.findings import (
 )
 from backend.platforms.outsystems.service import (
     analyze_model as analyze_outsystems_model,
+)
+from backend.portfolio.summary import (
+    portfolio_summary,
 )
 from backend.recommendations import (
     build_recommendations,
@@ -159,6 +164,176 @@ def health():
 
             "version":
                 "0.2.0",
+        }
+    )
+
+
+def _certificate_only_scan(
+    url: str,
+    error: str,
+    rejected_url: str = "",
+):
+    """
+    Record a scan for a target whose certificate failed validation.
+
+    No page can be fetched from such a target, but its certificate is
+    exactly what `GEN-TLS-006` and `GEN-TLS-007` report on, so the TLS
+    diagnosis is analysed and persisted on its own instead of being
+    thrown away with the fetch error.
+
+    The rejected request is the one inspected: a target that redirects
+    to another host before the handshake fails would otherwise have a
+    healthy first hop described in place of the failing one.
+    """
+
+    requested_url = validate_url(url)
+
+    final_url = (
+        validate_url(rejected_url)
+        if rejected_url
+        else requested_url
+    )
+
+    # The redirect hop was checked when it was followed; it is checked
+    # again here because this handshake is a fresh connection.
+    assert_target_allowed(
+        final_url
+    )
+
+    tls_result = analyze_tls(
+        final_url
+    )
+
+    response = {
+        "requested_url":
+            requested_url,
+
+        "final_url":
+            final_url,
+
+        "status_code":
+            None,
+
+        "https":
+            True,
+
+        "headers": {},
+
+        "cookies": [],
+
+        "body":
+            "",
+
+        "redirect_chain": [],
+
+        "http_redirect": {
+            "tested":
+                False,
+        },
+    }
+
+    application = Application.create(
+        requested_url=requested_url,
+        final_url=final_url,
+    )
+
+    application.set_platform(
+        "Generic"
+    )
+
+    application.attack_surface = {
+        "pages": [],
+        "links": [],
+        "forms": [],
+        "scripts": [],
+        "endpoints": [],
+        "potential_api_paths": [],
+        "exposed_paths": [],
+        "pages_scanned": 0,
+
+        "tls":
+            tls_result,
+    }
+
+    analysis = analyze(
+        ScanContext(
+            application_id=
+                application.id,
+
+            requested_url=
+                application.requested_url,
+
+            final_url=
+                application.final_url,
+
+            platform=
+                "Generic",
+
+            response=
+                response,
+
+            technologies=[],
+
+            attack_surface=
+                application.attack_surface,
+
+            response_observed=
+                False,
+        )
+    )
+
+    findings = analysis["findings"]
+
+    application.security = {
+        **summarize(findings),
+
+        "findings":
+            findings,
+
+        "recommendations":
+            build_recommendations(findings),
+
+        "rules_evaluated":
+            analysis["rules_evaluated"],
+
+        "rule_errors":
+            analysis["rule_errors"],
+    }
+
+    application.status = (
+        "certificate_rejected"
+    )
+
+    application.update_timestamp()
+
+    save_application(
+        application.to_dict()
+    )
+
+    save_findings(
+        application.id,
+        findings,
+    )
+
+    return jsonify(
+        {
+            "success":
+                True,
+
+            "partial":
+                True,
+
+            "reason":
+                "certificate_rejected",
+
+            "error":
+                error,
+
+            "application_id":
+                application.id,
+
+            "application":
+                application.to_dict(),
         }
     )
 
@@ -531,6 +706,33 @@ def discover():
                     str(exc),
             }
         ), 400
+
+    except CertificateRejectedError as exc:
+
+        # The certificate is the finding here, so the scan is recorded
+        # from the TLS diagnosis alone rather than discarded.
+        try:
+
+            return _certificate_only_scan(
+                url,
+                str(exc),
+                exc.url,
+            )
+
+        except BlockedTargetError as blocked:
+
+            return jsonify(
+                {
+                    "success":
+                        False,
+
+                    "error":
+                        str(blocked),
+
+                    "reason":
+                        "blocked_target",
+                }
+            ), 403
 
     except TargetUnreachableError as exc:
 
@@ -930,6 +1132,26 @@ def applications():
 
             "applications":
                 list_applications(),
+        }
+    )
+
+
+# ============================================================
+# Portfolio summary
+# ============================================================
+
+@app.get("/api/portfolio/summary")
+def portfolio():
+
+    return jsonify(
+        {
+            "success":
+                True,
+
+            **portfolio_summary(
+                list_applications(),
+                load_findings,
+            ),
         }
     )
 

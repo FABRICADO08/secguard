@@ -46,6 +46,14 @@ LOCAL_FAILURE_REASONS = (
     "UNSUPPORTED_PROTOCOL",
 )
 
+# DER tags used while reading a certificate's validity window.
+EXPLICIT_VERSION = 0xA0
+UTC_TIME = 0x17
+GENERALIZED_TIME = 0x18
+
+# ASN.1 reads a two-digit year below 50 as 20xx and the rest as 19xx.
+UTC_TIME_PIVOT = 2050
+
 # Cipher properties that mean the connection is not forward secret or
 # relies on primitives that are no longer considered sound.
 WEAK_CIPHER_MARKERS = (
@@ -136,10 +144,16 @@ def _connect(
         assert_address_allowed(host, address)
 
     last_error: OSError | None = None
+    timed_out: TimeoutError | None = None
 
     for address in addresses:
         try:
             sock = socket.create_connection((address, port), timeout=timeout)
+
+        except TimeoutError as exc:
+            timed_out = exc
+
+            continue
 
         except OSError as exc:
             # A name can resolve to an address family the server does not
@@ -151,6 +165,11 @@ def _connect(
         try:
             return context.wrap_socket(sock, server_hostname=host)
 
+        except TimeoutError as exc:
+            sock.close()
+
+            timed_out = exc
+
         except OSError as exc:
             # The same name can serve a healthy and an unhealthy endpoint;
             # a failed handshake on one address says nothing about the rest.
@@ -158,32 +177,49 @@ def _connect(
 
             last_error = exc
 
-    raise last_error or OSError(f"Could not connect to {host}:{port}.")
+    # An address that never answered leaves the result inconclusive, so a
+    # refusal from another address must not bury it.
+    raise (
+        timed_out
+        or last_error
+        or OSError(f"Could not connect to {host}:{port}.")
+    )
 
 
-def _ca_bundle() -> str:
+def _ca_bundle() -> tuple[str, str]:
     """
-    The CA bundle requests would use, so both agree on what is trusted.
+    The trust source requests would use, as (cafile, capath).
 
-    Falling back to the OpenSSL system store instead would let the fetch
-    succeed while this inspection calls the same chain untrusted.
+    Requests accepts either a bundle file or an OpenSSL-hashed directory,
+    so both are honoured here: falling back to the system store instead
+    would let the fetch succeed while this inspection calls the same
+    chain untrusted.
     """
 
     for name in ("REQUESTS_CA_BUNDLE", "CURL_CA_BUNDLE", "SSL_CERT_FILE"):
         value = os.environ.get(name, "").strip()
 
-        if value and os.path.isfile(value):
-            return value
+        if not value:
+            continue
+
+        if os.path.isdir(value):
+            return "", value
+
+        if os.path.isfile(value):
+            return value, ""
 
     bundle = requests.certs.where()
 
-    return bundle if bundle and os.path.isfile(bundle) else ""
+    return (bundle, "") if bundle and os.path.isfile(bundle) else ("", "")
 
 
 def _default_context(verify: bool) -> ssl.SSLContext:
-    bundle = _ca_bundle() if verify else ""
+    cafile, capath = _ca_bundle() if verify else ("", "")
 
-    context = ssl.create_default_context(cafile=bundle or None)
+    context = ssl.create_default_context(
+        cafile=cafile or None,
+        capath=capath or None,
+    )
 
     if not verify:
         context.check_hostname = False
@@ -269,6 +305,13 @@ def probe_protocols(
         except ssl.SSLError as exc:
             if _is_local_failure(exc):
                 untested.append(label)
+
+            continue
+
+        except TimeoutError:
+            # A timeout is not a refusal; reporting it as unsupported
+            # would hide a server that still speaks the version.
+            untested.append(label)
 
             continue
 
@@ -362,8 +405,14 @@ def _describe(connection: ssl.SSLSocket, result: dict[str, Any]) -> None:
 
     if not certificate:
         # Python only decodes the peer certificate when the connection
-        # verified it, so an untrusted chain yields protocol and cipher
-        # detail but no certificate fields.
+        # verified it, so an untrusted chain yields no dictionary. An
+        # expired certificate is a common reason for that failure, so
+        # the expiry is read out of the DER the server still sent.
+        _record_expiry(
+            certificate_expiry(connection.getpeercert(binary_form=True)),
+            result,
+        )
+
         return
 
     result.update(_names(certificate))
@@ -373,16 +422,109 @@ def _describe(connection: ssl.SSLSocket, result: dict[str, Any]) -> None:
         and result["subject"] == result["issuer"]
     )
 
-    expires = parse_certificate_date(str(certificate.get("notAfter") or ""))
+    _record_expiry(
+        parse_certificate_date(str(certificate.get("notAfter") or "")),
+        result,
+    )
 
+
+def _record_expiry(
+    expires: datetime | None,
+    result: dict[str, Any],
+) -> None:
     if expires is None:
         return
 
     remaining = expires - datetime.now(timezone.utc)
 
     result["expires_at"] = expires.isoformat()
+    # The whole-day count is for display; the rule compares seconds so a
+    # certificate 30 days and 23 hours out is not warned about early.
     result["days_until_expiry"] = remaining.days
+    result["seconds_until_expiry"] = remaining.total_seconds()
     result["expired"] = remaining.total_seconds() <= 0
+
+
+def _read_der(data: bytes, index: int) -> tuple[int, bytes, int]:
+    """Read one DER tag-length-value, returning the tag, value and end."""
+
+    tag = data[index]
+    length = data[index + 1]
+    index += 2
+
+    if length & 0x80:
+        count = length & 0x7F
+        length = int.from_bytes(data[index:index + count], "big")
+        index += count
+
+    end = index + length
+
+    if end > len(data):
+        raise ValueError("truncated DER value")
+
+    return tag, data[index:end], end
+
+
+def certificate_expiry(der: bytes | None) -> datetime | None:
+    """
+    The `notAfter` of a DER certificate, or None if it cannot be read.
+
+    Only the validity window is decoded, walking the fixed field order of
+    `TBSCertificate`: the optional version, serial, signature algorithm
+    and issuer come before it.
+    """
+
+    if not der:
+        return None
+
+    try:
+        _, certificate, _ = _read_der(der, 0)
+        _, tbs, _ = _read_der(certificate, 0)
+
+        tag, _, index = _read_der(tbs, 0)
+
+        if tag == EXPLICIT_VERSION:
+            _, _, index = _read_der(tbs, index)
+
+        for _ in range(2):  # signature algorithm, issuer
+            _, _, index = _read_der(tbs, index)
+
+        _, validity, _ = _read_der(tbs, index)
+
+        _, _, index = _read_der(validity, 0)  # notBefore
+        tag, value, _ = _read_der(validity, index)
+
+        return _parse_asn1_time(tag, value.decode("ascii"))
+
+    except (IndexError, ValueError, UnicodeDecodeError):
+        return None
+
+
+def _parse_asn1_time(tag: int, value: str) -> datetime | None:
+    formats = {
+        UTC_TIME: "%y%m%d%H%M%SZ",
+        GENERALIZED_TIME: "%Y%m%d%H%M%SZ",
+    }
+
+    if tag not in formats:
+        return None
+
+    try:
+        # Both formats end in Z, so the value is UTC.
+        parsed = datetime.strptime(  # noqa: DTZ007
+            value,
+            formats[tag],
+        )
+
+    except ValueError:
+        return None
+
+    if tag == UTC_TIME and parsed.year >= UTC_TIME_PIVOT:
+        # Python pivots two-digit years at 1969 instead, so everything
+        # from 50 to 68 would otherwise land a century too late.
+        parsed = parsed.replace(year=parsed.year - 100)
+
+    return parsed.replace(tzinfo=timezone.utc)
 
 
 def analyze_tls(url: str, timeout: int = PROBE_TIMEOUT) -> dict[str, Any]:

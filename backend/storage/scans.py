@@ -217,6 +217,11 @@ def list_applications() -> list[dict[str, Any]]:
                             "final_url"
                         ),
 
+                    "requested_url":
+                        data.get(
+                            "requested_url"
+                        ),
+
                     "platform":
                         data.get(
                             "platform",
