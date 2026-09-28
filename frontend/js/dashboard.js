@@ -207,25 +207,28 @@ function render(summary) {
             return;
         }
 
-        const identifier = button.dataset.delete;
+        const system = summary.systems.find(
+            entry => entry.id === button.dataset.delete
+        );
 
-        if (!window.confirm("Delete this system and its findings?")) {
+        if (!system) {
+            return;
+        }
+
+        const confirmation =
+            system.scan_count > 1
+                ? `Delete this system and all ${system.scan_count} of its` +
+                  " scans?"
+                : "Delete this system and its findings?";
+
+        if (!window.confirm(confirmation)) {
             return;
         }
 
         button.disabled = true;
 
         try {
-            const response = await apiFetch(
-                `/api/applications/${encodeURIComponent(identifier)}`,
-                { method: "DELETE" }
-            );
-
-            const data = await response.json();
-
-            if (!response.ok) {
-                throw new Error(data.error || "Delete failed.");
-            }
+            await deleteSystem(system);
 
             load();
         } catch (error) {
