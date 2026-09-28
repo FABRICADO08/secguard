@@ -67,15 +67,20 @@ Repeated scans of the same target are separate records; the portfolio views fold
 
 ## Analysis pipeline
 
-`POST /api/discover` fetches the target, crawls same-origin pages, probes common API and sensitive paths, inspects the TLS endpoint when the target is HTTPS, then runs the rule engine over the collected evidence.
+`POST /api/discover` fetches the target, crawls same-origin pages, reads `robots.txt` and any sitemap it declares, mines same-origin JavaScript for endpoints and secrets, probes common API and sensitive paths, sends an inert reflection marker through GET parameters, inspects the TLS endpoint when the target is HTTPS, then runs the rule engine over the collected evidence.
 
 The TLS inspection handshakes with the host directly: it records the negotiated protocol and cipher, whether the chain validates, the certificate subject/issuer and its expiry, and which protocol versions the server still accepts. Legacy versions are offered with the local security level lowered so a current OpenSSL build does not make a server that still speaks them look clean; versions the local build cannot offer at all are listed under `untested_protocols` rather than counted as refused. Each handshake goes to an address that passed the target policy, so it cannot be redirected to an internal host by a second DNS answer.
 
+Component versions are read from whatever the target discloses — versioned script filenames and CDN paths, the banners libraries print into the page or into a served bundle, and `Server`/`X-Powered-By` headers — and matched against `backend/knowledge/advisories.py`, a small hand-checked set where every entry names a public advisory and the release that fixed it. A version at or above the fixed release clears the advisory; a release line that no longer receives fixes at all is reported separately, because the risk there is the absence of future patches rather than a specific CVE.
+
+The reflection probe is the only active input test: it appends `"'<>` plus a random marker to a GET parameter and reports how the value comes back. It never touches POST forms, so a scan cannot create or modify data on the target.
+
 A target whose certificate does not validate cannot be fetched, but that failure is itself the finding, so the scan is still recorded from the TLS diagnosis alone: the application is saved with status `certificate_rejected`, carries only its `tls` attack surface, and the response reports `"partial": true` alongside the certificate error. Any other connection failure is still a `502`.
 
-- `backend/discovery/` — fetching, crawling, technology and endpoint discovery.
+- `backend/discovery/` — fetching, crawling, robots/sitemap reading, script mining, reflection probing, technology and endpoint discovery.
 - `backend/scanners/` — active path probing with soft-404 baselining.
-- `backend/rules/` — the rule engine and the generic rule packs (transport, headers, content security policy, CORS, client-side secrets, cookies, forms, API, exposure).
+- `backend/rules/` — the rule engine and the generic rule packs (transport, headers, content security policy, CORS, client-side secrets, cookies, forms, API, exposure, dependencies).
+- `backend/knowledge/` — the advisory and end-of-life dataset component versions are matched against.
 - `backend/risk/` — severity and confidence normalisation, per-finding and aggregate scoring.
 - `backend/recommendations/` — remediation grouped per rule.
 - `backend/platforms/mendix/` — Mendix model parsing and security analysis.
@@ -139,7 +144,10 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 | `GEN-CORS-001` | `Access-Control-Allow-Origin: null`. |
 | `GEN-CORS-002` | State-changing methods allowed from any origin. |
 | `GEN-JS-001` | Credentials embedded in inline scripts, reported redacted. |
-| `GEN-JS-002` | Source map exposed to the browser. |
+| `GEN-JS-002` | Source map referenced by the page. |
+| `GEN-JS-003` | Credentials found in a served JavaScript file, reported redacted. |
+| `GEN-JS-004` | Source map referenced by a served JavaScript bundle. |
+| `GEN-INP-001` | GET parameter reflected with its quotes and angle brackets intact. |
 | `GEN-TLS-001` to `GEN-TLS-003` | Plain HTTP, missing HTTPS redirect, mixed content. |
 | `GEN-TLS-004` | Deprecated protocol version still accepted (TLS 1.1 or below). |
 | `GEN-TLS-005` | Weak or export-grade cipher suite negotiated. |
@@ -152,7 +160,10 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 | `GEN-AUTH-004` | HTTP Basic authentication challenge. |
 | `GEN-AUTHZ-001`, `GEN-CFG-001` | Unauthenticated admin interfaces and exposed sensitive paths. |
 | `GEN-API-*` | Exposed API documentation, unauthenticated endpoints, exposed GraphQL. |
-| `GEN-INF-*` | Server banner disclosure, directory listing. |
+| `GEN-INF-001`, `GEN-INF-002` | Server banner disclosure, directory listing. |
+| `GEN-INF-004` | `robots.txt` disallowing administrative or internal paths. |
+| `GEN-DEP-001` | Disclosed component version listed as vulnerable by a public advisory. |
+| `GEN-DEP-002` | Component release line that no longer receives security fixes. |
 
 ## Security configuration
 

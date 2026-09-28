@@ -58,13 +58,13 @@ SOURCE_MAP = re.compile(
 )
 
 
-def _is_placeholder(value: str) -> bool:
+def is_placeholder(value: str) -> bool:
     lowered = value.lower()
 
     return any(marker in lowered for marker in PLACEHOLDER_MARKERS)
 
 
-def _redact(value: str) -> str:
+def redact(value: str) -> str:
     """Keep enough of a match to locate it without leaking the secret."""
 
     stripped = value.strip()
@@ -105,7 +105,7 @@ class ClientSideSecret(Rule):
             for label, pattern in SECRET_PATTERNS:
                 match = pattern.search(script)
 
-                if not match or _is_placeholder(match.group(0)):
+                if not match or is_placeholder(match.group(0)):
                     continue
 
                 findings.append(
@@ -114,7 +114,7 @@ class ClientSideSecret(Rule):
                         title=f"{label} is embedded in client-side code",
                         evidence={
                             "kind": label,
-                            "match": _redact(match.group(0)),
+                            "match": redact(match.group(0)),
                         },
                     )
                 )
