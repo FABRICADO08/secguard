@@ -231,14 +231,16 @@ def portfolio_summary(
             scan["_findings"] = findings
             scan["_activity"] = activity
             scan["_previous"] = history
+            scan["_deltas"] = _deltas(
+                _counts(findings),
+                _counts(history) if history is not None else None,
+            )
 
             history = findings
 
         latest = scans[-1]
 
         counts = _counts(latest["_findings"])
-
-        previous = latest["_previous"]
 
         systems.append(
             {
@@ -254,10 +256,7 @@ def portfolio_summary(
                 "rating": rating_for(latest.get("risk_score", 0)),
                 "total_findings": len(latest["_findings"]),
                 "severity_counts": counts,
-                "severity_deltas": _deltas(
-                    counts,
-                    _counts(previous) if previous is not None else None,
-                ),
+                "severity_deltas": latest["_deltas"],
                 "activity": latest["_activity"],
                 "history": [
                     {
@@ -265,6 +264,8 @@ def portfolio_summary(
                         "scan_date": _scan_moment(scan),
                         "risk_score": scan.get("risk_score", 0),
                         "total_findings": len(scan["_findings"]),
+                        "severity_deltas": scan["_deltas"],
+                        "activity": scan["_activity"],
                     }
                     for scan in scans
                 ],
