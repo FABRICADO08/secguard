@@ -44,6 +44,8 @@ def _list_env(name: str) -> frozenset[str]:
         if item.strip()
     )
 
+db_url = os.environ.get("POSTGRES_URL") 
+
 
 # Shared secret required by the scanning and delete endpoints. When it is
 # empty those endpoints only answer requests from the loopback interface,
