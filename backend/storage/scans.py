@@ -272,6 +272,18 @@ def list_applications() -> list[dict[str, Any]]:
                             "severity_counts",
                             {},
                         ),
+
+                    "repository":
+                        (
+                            (data.get("repository") or {})
+                            .get("repository")
+                            or {}
+                        ).get("name", ""),
+
+                    "health":
+                        (data.get("repository") or {})
+                        .get("health")
+                        or {},
                 }
             )
 

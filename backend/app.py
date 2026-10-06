@@ -67,6 +67,16 @@ from backend.portfolio.summary import (
 from backend.recommendations import (
     build_recommendations,
 )
+from backend.repository.findings import (
+    RULE_CATALOGUE as REPOSITORY_RULE_CATALOGUE,
+)
+from backend.repository.ingest import (
+    application_from_report,
+)
+from backend.repository.sbom import (
+    cyclonedx,
+    spdx,
+)
 from backend.risk.scoring import (
     summarize,
 )
@@ -1449,12 +1459,166 @@ def rules_catalogue():
         )
     )
 
+    rules.extend(
+        _platform_rules(
+            "Repository",
+            {
+                rule_id: {**metadata, "confidence": ""}
+                for rule_id, metadata in REPOSITORY_RULE_CATALOGUE.items()
+            },
+        )
+    )
+
     return jsonify(
         {
             "success":
                 True,
 
             "rules": rules,
+        }
+    )
+
+
+# ============================================================
+# Repository scans
+# ============================================================
+
+@app.post("/api/repository/scans")
+@require_api_token
+@rate_limited
+def ingest_repository_scan():
+    """Store a report produced by the SecGuard repository scanner."""
+
+    if (request.content_length or 0) > MAX_MODEL_BYTES:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Repository report exceeds the upload limit.",
+            }
+        ), 413
+
+    try:
+
+        application, findings = application_from_report(
+            request.get_json(silent=True)
+        )
+
+    except ValueError as exc:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), 400
+
+    application.update_timestamp()
+
+    save_application(
+        application.to_dict()
+    )
+
+    save_findings(
+        application.id,
+        findings,
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "application_id": application.id,
+            "health": application.repository.get("health"),
+            "summary": {
+                key: value
+                for key, value in application.security.items()
+                if key not in ("findings", "recommendations")
+            },
+        }
+    ), 201
+
+
+def _repository_report(
+    application_id: str,
+) -> dict | None:
+
+    if not application_exists(application_id):
+        return None
+
+    application = load_application(application_id)
+
+    report = application.get("repository") or {}
+
+    if not report:
+        return None
+
+    return {
+        **report,
+        "findings": application.get("security", {}).get("findings", []),
+    }
+
+
+@app.get("/api/applications/<application_id>/sbom")
+def repository_sbom(
+    application_id: str,
+):
+
+    report = _repository_report(application_id)
+
+    if report is None:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "No repository scan found for this application.",
+            }
+        ), 404
+
+    sbom_format = request.args.get("format", "cyclonedx").lower()
+
+    if sbom_format not in ("cyclonedx", "spdx"):
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "format must be 'cyclonedx' or 'spdx'.",
+            }
+        ), 400
+
+    document = cyclonedx(report) if sbom_format == "cyclonedx" else spdx(report)
+
+    name = str((report.get("repository") or {}).get("name") or application_id).replace("/", "_")
+
+    response = jsonify(document)
+
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="{name}.{sbom_format}.json"'
+    )
+
+    return response
+
+
+@app.get("/api/applications/<application_id>/quality")
+def repository_quality(
+    application_id: str,
+):
+
+    report = _repository_report(application_id)
+
+    if report is None:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "No repository scan found for this application.",
+            }
+        ), 404
+
+    return jsonify(
+        {
+            "success": True,
+            "quality": report.get("quality") or {},
+            "health": report.get("health") or {},
         }
     )
 
