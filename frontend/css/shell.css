@@ -315,6 +315,7 @@ button {
 .content {
     padding: 16px;
     display: grid;
+    grid-template-columns: minmax(0, 1fr);
     gap: 16px;
     align-content: start;
 }
@@ -367,9 +368,8 @@ body.nav-open .scrim {
     }
 
     .nav {
-        left: 0;
-        width: min(300px, 88vw);
-        flex-basis: min(300px, 88vw);
+        width: min(300px, calc(100vw - var(--rail-width) - 16px));
+        flex-basis: min(300px, calc(100vw - var(--rail-width) - 16px));
     }
 
     .content {

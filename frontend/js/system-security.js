@@ -98,15 +98,20 @@ function render(application, findings, system) {
 
     const counts = countBySeverity(findings);
 
-    /*
-     * Deltas and activity are computed for the latest scan of a system,
-     * so they do not describe an older scan opened from the history.
-     */
     const current = Boolean(system) && system.id === application.id;
 
-    const deltas = (current && system.severity_deltas) || {};
+    /*
+     * Every scan in a system's history carries its own comparison with
+     * the scan before it, so an older scan shows its own activity.
+     */
+    const scan =
+        (system &&
+            system.history.find(entry => entry.id === application.id)) ||
+        {};
 
-    const activity = (current && system.activity) || {
+    const deltas = scan.severity_deltas || {};
+
+    const activity = scan.activity || {
         new: findings.length,
         existing: 0,
         resolved: 0,

@@ -44,7 +44,11 @@
 .kpi-grid {
     display: grid;
     gap: 16px;
-    grid-template-columns: repeat(12, 1fr);
+    grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.kpi-grid > * {
+    min-width: 0;
 }
 
 .kpi-grid > .span-3 {
@@ -88,6 +92,7 @@
 
 .kpi {
     display: flex;
+    flex-wrap: wrap;
     justify-content: space-around;
     gap: 12px;
     text-align: center;
@@ -392,6 +397,8 @@ table.data tr.row-low td:first-child {
 
     table.data td > * {
         text-align: right;
+        min-width: 0;
+        overflow-wrap: anywhere;
     }
 
     table.data tr.row-critical td:first-child,
@@ -550,8 +557,14 @@ a:focus-visible {
 
 .toolbar .field {
     margin: 0;
-    min-width: 170px;
+    min-width: min(170px, 100%);
     flex: 1 1 170px;
+}
+
+.toolbar .field select,
+.toolbar .field input {
+    width: 100%;
+    max-width: 100%;
 }
 
 /* ------------------------------------------------------------- notices */
@@ -598,18 +611,18 @@ a:focus-visible {
 .grid-two {
     display: grid;
     gap: 16px;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 @media (max-width: 900px) {
     .grid-two {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
     }
 }
 
 dl.pairs {
     display: grid;
-    grid-template-columns: 180px 1fr;
+    grid-template-columns: 180px minmax(0, 1fr);
     gap: 8px 16px;
     margin: 0;
 }
@@ -621,11 +634,13 @@ dl.pairs dt {
 
 dl.pairs dd {
     margin: 0;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 @media (max-width: 640px) {
     dl.pairs {
-        grid-template-columns: 1fr;
+        grid-template-columns: minmax(0, 1fr);
         gap: 2px;
     }
 

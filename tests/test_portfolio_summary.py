@@ -146,6 +146,31 @@ def test_activity_compares_the_latest_scan_with_its_predecessor():
     assert activity == {"new": 1, "existing": 1, "resolved": 1}
 
 
+def test_every_scan_in_the_history_carries_its_own_comparison():
+    applications = [
+        scan("first", "https://app.test", "2026-07-01T00:00:00+00:00"),
+        scan("second", "https://app.test", "2026-08-01T00:00:00+00:00"),
+        scan("third", "https://app.test", "2026-09-01T00:00:00+00:00"),
+    ]
+
+    findings = {
+        "first": [finding("GEN-HDR-001")],
+        "second": [finding("GEN-HDR-001"), finding("GEN-CSP-001", "low")],
+        "third": [finding("GEN-CSP-001", "low")],
+    }
+
+    history = summarize(applications, findings)["systems"][0]["history"]
+
+    assert [entry["activity"] for entry in history] == [
+        {"new": 1, "existing": 0, "resolved": 0},
+        {"new": 1, "existing": 1, "resolved": 0},
+        {"new": 0, "existing": 1, "resolved": 1},
+    ]
+    assert history[0]["severity_deltas"]["high"] == 0
+    assert history[1]["severity_deltas"]["low"] == 1
+    assert history[2]["severity_deltas"]["high"] == -1
+
+
 def test_a_first_scan_reports_every_finding_as_new():
     applications = [
         scan("only", "https://app.test", "2026-09-01T00:00:00+00:00")
