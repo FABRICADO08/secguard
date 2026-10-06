@@ -268,3 +268,46 @@ is visible as literal text, `document.querySelectorAll('img').length === 0`, and
 
 When navigating between API URLs that share a prefix, Chrome inline-autocompletes to the previously
 visited URL (e.g. re-adding `?severity=critical`). Press `Delete` after typing and before `Return`.
+
+## Responsive testing in an isolated browser (preferred over resizing the shared window)
+
+The shared Chrome on :0 may be re-maximised or clicked by someone watching the desktop
+stream; `wmctrl` resizes do not stick and pages can change under you. You can check for
+navigations you did not make with `grep "GET /.*\.html" /tmp/flask.log`.
+Run viewport checks in a private Playwright context instead:
+
+```bash
+python3 -m venv /tmp/pwvenv && /tmp/pwvenv/bin/pip install -q playwright
+# reuse the box's Chrome for Testing - no `playwright install` needed
+p.chromium.launch(executable_path="/home/ubuntu/.local/bin/google-chrome", headless=True, args=["--no-sandbox"])
+ctx = b.new_context(viewport={"width": 390, "height": 844})   # also 820x1180, 1440x900
+```
+
+What to measure on each page (dashboard, portfolio-security, system-security, findings, application):
+- `documentElement.scrollWidth > clientWidth`, and which `main *` elements extend past `clientWidth`.
+- Below 1024px: click `.topbar__menu` -> `body.nav-open`, then Escape closes it; reopen, then click
+  the scrim to the right of `.nav` closes it (check each close path separately).
+- Below 720px: `table.data thead` should be `display:none` and `td::before` should equal `data-label`.
+- Drawer occlusion at ≤640px: `document.elementFromPoint(link.left + 6, link.midY)` should land
+  inside `.nav`. If it lands on `.rail`, the rail (z-index 30) is covering the drawer (z-index 25).
+- Period: `.topbar select` is persisted in `localStorage.secguardPeriod`. Filters on findings.html
+  are written to the query string (`&severity=critical`) and survive a reload.
+- CSV: use `page.expect_download()` around the "Export as CSV" button. The file is
+  `secguard-portfolio.csv` and has no Informational column.
+
+## Fixture restarts
+- `pkill -f fixture_server.py` can kill the shell that runs it. Kill by the PID shown by `ss -ltnp` instead.
+- Start fixtures with the repo venv python (`/home/ubuntu/repos/secguard/.venv/bin/python`).
+- Model upload names are sanitised server-side (`<img ...>.json` -> `img src=x onerror=alert(1).json`).
+  To test escaping, use the 8098 cookie/Server-header payloads, which reach the UI unsanitised.
+
+## Changing-fixture activity and the API-token path
+- `/home/ubuntu/fixture_server.py` serves a critical `/.env` only when `FIXTURE_ENV=1`. Scanning
+  with the flag off, then on, then off gives a 3-scan system with activity
+  28 New -> 1 New / 28 Existing (critical +1) -> 1 Resolved (critical -1). Each history entry in
+  `/api/portfolio/summary` carries its own `activity` and `severity_deltas`.
+- Token path: restart Flask with `SECGUARD_API_TOKEN=<any>`. Reads (`/api/portfolio/summary`) stay
+  open. A scan without a token shows a red "Unauthorized. Set SECGUARD_API_TOKEN..." banner on
+  index.html. Save the token in settings.html (localStorage `secguardApiToken`, sent as `X-API-Key`).
+- A headed Playwright Chromium on DISPLAY=:0 (its own context) shows up in screen recordings and
+  is not affected by someone clicking the shared Chrome window.

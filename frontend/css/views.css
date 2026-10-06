@@ -401,6 +401,20 @@ table.data tr.row-low td:first-child {
         overflow-wrap: anywhere;
     }
 
+    /* The first cell heads the card, so its title and meta lines stack. */
+    table.data td:first-child {
+        display: block;
+    }
+
+    table.data td:first-child::before {
+        display: block;
+        margin-bottom: 4px;
+    }
+
+    table.data td:first-child > * {
+        text-align: left;
+    }
+
     table.data tr.row-critical td:first-child,
     table.data tr.row-high td:first-child,
     table.data tr.row-medium td:first-child,
