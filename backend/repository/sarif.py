@@ -24,8 +24,14 @@ def split_location(location: str) -> tuple[str, int]:
     return location or "", 0
 
 
-def _result(finding: dict[str, Any], rule_index: dict[str, int]) -> dict[str, Any]:
+def _result(finding: dict[str, Any], rule_index: dict[str, int], fallback: str) -> dict[str, Any]:
     path, line = split_location(str(finding.get("location") or ""))
+
+    # Code scanning rejects results without a location, so repository-wide
+    # findings are anchored to the project's main manifest or README.
+    if not path or path == "repository":
+        path, line = fallback, 0
+
     severity = str(finding.get("severity") or "low")
 
     message = str(finding.get("description") or finding.get("title") or "")
@@ -46,20 +52,24 @@ def _result(finding: dict[str, Any], rule_index: dict[str, int]) -> dict[str, An
         "properties": {"severity": severity, "confidence": finding.get("confidence", "")},
     }
 
-    if path and path != "repository":
-        physical: dict[str, Any] = {"artifactLocation": {"uri": path}}
+    physical: dict[str, Any] = {"artifactLocation": {"uri": path}}
 
-        end = (finding.get("evidence") or {}).get("end_line") or line
+    end = (finding.get("evidence") or {}).get("end_line") or line
 
-        if line:
-            physical["region"] = {"startLine": line, "endLine": max(end, line)}
+    if line:
+        physical["region"] = {"startLine": line, "endLine": max(end, line)}
 
-        result["locations"] = [{"physicalLocation": physical}]
+    result["locations"] = [{"physicalLocation": physical}]
 
     return result
 
 
 def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
+    fallback = next(
+        (str(dependency.get("manifest")) for dependency in report.get("dependencies") or [] if dependency.get("manifest")),
+        "README.md",
+    )
+
     findings = [*(report.get("findings") or []), *((report.get("quality") or {}).get("findings") or [])]
 
     rule_ids = sorted({finding["rule_id"] for finding in findings})
@@ -111,7 +121,7 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
                         "rules": rules,
                     }
                 },
-                "results": [_result(finding, rule_index) for finding in findings],
+                "results": [_result(finding, rule_index, fallback) for finding in findings],
             }
         ],
     }

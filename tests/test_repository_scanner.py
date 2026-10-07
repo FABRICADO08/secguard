@@ -267,6 +267,7 @@ def test_sbom_and_sarif(report):
     sarif = to_sarif(report)
     run = sarif["runs"][0]
     assert run["results"] and all(result["ruleIndex"] < len(run["tool"]["driver"]["rules"]) for result in run["results"])
+    assert all(result["locations"][0]["physicalLocation"]["artifactLocation"]["uri"] for result in run["results"])
 
 
 def test_pull_request_suggestions(report, repo):

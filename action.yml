@@ -24,6 +24,9 @@ inputs:
   review-pull-requests:
     description: "Post inline review comments and upgrade suggestions on pull requests (needs `pull-requests: write`)."
     default: "true"
+  review-min-severity:
+    description: Lowest severity that gets an inline pull-request comment.
+    default: "medium"
   fail-on:
     description: Fail the job on findings at or above this severity (none, informational, low, medium, high, critical).
     default: "none"
@@ -85,7 +88,8 @@ runs:
       env:
         PYTHONPATH: ${{ github.action_path }}
         GITHUB_TOKEN: ${{ inputs.github-token }}
-      run: python -m backend.repository review --report "$RUNNER_TEMP/secguard/report.json" --root .
+        SECGUARD_REVIEW_MIN_SEVERITY: ${{ inputs.review-min-severity }}
+      run: python -m backend.repository review --report "$RUNNER_TEMP/secguard/report.json" --root . --min-severity "$SECGUARD_REVIEW_MIN_SEVERITY"
 
     - name: Keep SBOM and report
       if: ${{ always() }}
