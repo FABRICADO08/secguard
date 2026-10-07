@@ -26,7 +26,6 @@ from flask import (
     request,
     send_from_directory,
     session,
-    url_for,
 )
 
 from backend.config import settings
@@ -164,7 +163,14 @@ def visible(applications: list[dict[str, Any]]) -> list[dict[str, Any]]:
 
 
 def _callback_url() -> str:
-    return settings.GITHUB_CALLBACK_URL or url_for("github_auth.callback", _external=True)
+    """
+    The redirect_uri sent to GitHub. It must match the callback URL
+    registered on the OAuth app exactly, so it is always the fixed
+    /auth/github/callback route; SECGUARD_GITHUB_CALLBACK_URL overrides
+    the public address when it cannot be derived from the request.
+    """
+
+    return settings.GITHUB_CALLBACK_URL or f"{request.host_url.rstrip('/')}/auth/github/callback"
 
 
 def safe_next(value: str) -> str:

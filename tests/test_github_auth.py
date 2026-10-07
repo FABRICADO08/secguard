@@ -78,6 +78,47 @@ def sign_in(client):
     return query
 
 
+def test_login_redirect_uri_is_the_registered_callback(client, github):
+    login = client.get("/auth/github/login", base_url="https://secguard.example")
+    query = parse_qs(urlparse(login.headers["Location"]).query)
+    assert query["redirect_uri"] == ["https://secguard.example/auth/github/callback"]
+
+    callback = client.get(
+        f"/auth/github/callback?code=abc&state={query['state'][0]}",
+        base_url="https://secguard.example",
+    )
+    assert callback.status_code == 302
+    exchange = next(kwargs for _, url, kwargs in github if url.endswith("/access_token"))
+    assert exchange["data"]["redirect_uri"] == "https://secguard.example/auth/github/callback"
+
+
+def test_configured_callback_url_wins(client, github, monkeypatch):
+    monkeypatch.setattr(settings, "GITHUB_CALLBACK_URL", "https://secguard.example/auth/github/callback")
+    login = client.get("/auth/github/login")
+    query = parse_qs(urlparse(login.headers["Location"]).query)
+    assert query["redirect_uri"] == ["https://secguard.example/auth/github/callback"]
+
+
+def test_forwarded_headers_decide_the_derived_callback(client, github, monkeypatch):
+    monkeypatch.setattr(settings, "PROXY_DEPTH", 1)
+    from werkzeug.middleware.proxy_fix import ProxyFix
+
+    proxied = ProxyFix(app_module.app.wsgi_app, x_for=1, x_proto=1, x_host=1, x_port=1)
+    proxied_client = app_module.app.test_client()
+    app_module.app.wsgi_app = proxied
+    try:
+        login = proxied_client.get(
+            "/auth/github/login",
+            base_url="http://10.0.0.2:8000",
+            headers={"X-Forwarded-Proto": "https", "X-Forwarded-Host": "secguard.example"},
+        )
+    finally:
+        app_module.app.wsgi_app = proxied.app
+
+    query = parse_qs(urlparse(login.headers["Location"]).query)
+    assert query["redirect_uri"] == ["https://secguard.example/auth/github/callback"]
+
+
 def test_login_requires_matching_state(client, github):
     client.get("/auth/github/login")
     assert client.get("/auth/github/callback?code=abc&state=forged").status_code == 400

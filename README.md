@@ -218,11 +218,14 @@ Each application has its own name, as in Sigrid, independent of the GitHub repos
 | `SECGUARD_GITHUB_CLIENT_ID` / `SECGUARD_GITHUB_CLIENT_SECRET` | OAuth app credentials. Sign-in, and repository filtering, are off while either is empty. |
 | `SECGUARD_SECRET_KEY` | Signs the session cookie. Without it users are signed out on every restart. |
 | `SECGUARD_SECURE_COOKIES` | `1` when served over HTTPS. |
-| `SECGUARD_GITHUB_CALLBACK_URL` | Optional; must match the OAuth app when SecGuard sits behind a proxy. |
+| `SECGUARD_GITHUB_CALLBACK_URL` | Optional; the exact callback URL registered on the OAuth app when it cannot be derived from the request. |
+| `SECGUARD_PROXY_DEPTH` | Number of proxies in front of SecGuard; their `X-Forwarded-*` headers then decide the public scheme and host used for the OAuth callback (default 0). |
 | `SECGUARD_GITHUB_WORKFLOW` | Workflow file **Run scan** starts (default `secguard.yml`). |
 | `SECGUARD_SESSION_HOURS` | Session lifetime (default 8). |
 
 The login uses the authorization-code flow with `state` and PKCE; the GitHub token stays in server memory and the cookie only carries a random session id.
+
+GitHub answers "The redirect_uri is not associated with this application" when the callback SecGuard sends differs from the one registered on the OAuth app. SecGuard always sends `<public-address>/auth/github/callback`; behind a proxy, set `SECGUARD_PROXY_DEPTH` so the public address comes from the proxy's `X-Forwarded-*` headers, or set `SECGUARD_GITHUB_CALLBACK_URL` to the registered URL.
 
 ## Security configuration
 
