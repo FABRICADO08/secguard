@@ -7,6 +7,7 @@ import re
 import threading
 from pathlib import Path
 
+from backend.storage import db
 from backend.storage import scans
 
 MAX_LENGTH = 80
@@ -47,6 +48,9 @@ def clean_name(value: object) -> str:
 
 
 def _load() -> dict[str, str]:
+    if db.use_database():
+        return db.all_names()
+
     path = _path()
 
     if not path.exists():
@@ -66,6 +70,11 @@ def name_for(repository: str) -> str:
 
 def set_name(repository: str, name: str) -> None:
     with _lock:
+        if db.use_database():
+            db.set_name(repository, name)
+
+            return
+
         names = _load()
         names[repository.lower()] = name
         path = _path()

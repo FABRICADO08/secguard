@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.storage import db
 from backend.storage.scans import (
     application_directory,
     load_json,
@@ -13,6 +14,11 @@ def save_findings(
     application_id: str,
     findings: list[dict[str, Any]],
 ) -> None:
+
+    if db.use_database():
+        db.save_findings(application_id, findings)
+
+        return
 
     path = (
         application_directory(
@@ -36,6 +42,9 @@ def save_findings(
 def load_findings(
     application_id: str,
 ) -> list[dict[str, Any]]:
+
+    if db.use_database():
+        return db.load_findings(application_id)
 
     path = (
         application_directory(
