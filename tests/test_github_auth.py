@@ -181,7 +181,9 @@ def test_pages_send_signed_out_users_to_the_sign_in_page(client, github):
         assert response.status_code == 302
         assert response.headers["Location"].startswith("/login.html?next=")
 
-    assert client.get("/login.html").status_code == 200
+    login_page = client.get("/login.html")
+    assert login_page.status_code == 302
+    assert login_page.headers["Location"].startswith("/auth/github/login?next=")
     assert client.get("/css/views.css").status_code == 200
     assert client.get("/js/login.js").status_code == 200
 
@@ -189,6 +191,19 @@ def test_pages_send_signed_out_users_to_the_sign_in_page(client, github):
 
     assert client.get("/applications.html").status_code == 200
     assert client.get("/login.html").headers["Location"] == "/applications.html"
+
+
+def test_login_page_starts_oauth_and_preserves_safe_return_page(client, github):
+    response = client.get(
+        "/login.html?next=/application-health.html%3Fid%3Dabc123"
+    )
+
+    assert response.status_code == 302
+    location = urlparse(response.headers["Location"])
+    assert location.path == "/auth/github/login"
+    assert parse_qs(location.query)["next"] == [
+        "/application-health.html?id=abc123"
+    ]
 
 
 def test_pages_stay_open_without_github_sign_in(client):

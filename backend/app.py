@@ -186,7 +186,14 @@ def _sign_in_gate(page: str):
     signed_in = github_auth.current_user() is not None
 
     if page == github_auth.LOGIN_PAGE:
-        return redirect(github_auth.DEFAULT_LANDING) if signed_in else None
+        if signed_in:
+            return redirect(github_auth.DEFAULT_LANDING)
+
+        next_page = github_auth.safe_next(request.args.get("next", ""))
+
+        return redirect(
+            "/auth/github/login?" + urlencode({"next": next_page})
+        )
 
     if signed_in:
         return None
