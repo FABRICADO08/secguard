@@ -7,14 +7,21 @@ connection string is present and fall back to the JSON-file store otherwise.
 
 Rows are stored as JSONB so the document shape stays identical to the
 file-based store and no per-field migration is needed when the payload grows.
+
+The driver is pg8000 (pure Python, BSD-licensed), which takes connection
+parameters rather than a URL, so the configured URL is parsed here. Neon
+connection strings carry ``sslmode=require``; that maps to a default TLS
+context.
 """
 
 from __future__ import annotations
 
 import json
+import ssl
 import threading
 from contextlib import contextmanager
 from typing import Any
+from urllib.parse import parse_qsl, unquote, urlsplit
 
 from backend.config import settings
 
@@ -35,13 +42,34 @@ def use_database() -> bool:
     return bool(settings.DATABASE_URL)
 
 
+def _connection_kwargs(url: str) -> dict[str, Any]:
+    parts = urlsplit(url)
+
+    query = dict(parse_qsl(parts.query))
+
+    kwargs: dict[str, Any] = {
+        "user": unquote(parts.username or ""),
+        "password": unquote(parts.password or ""),
+        "host": parts.hostname or "localhost",
+        "port": parts.port or 5432,
+        "database": parts.path.lstrip("/") or None,
+    }
+
+    sslmode = query.get("sslmode", "")
+
+    if sslmode and sslmode != "disable":
+        kwargs["ssl_context"] = ssl.create_default_context()
+
+    return kwargs
+
+
 def _connect():
     if _connector is not None:
         return _connector()
 
-    import psycopg
+    import pg8000
 
-    return psycopg.connect(settings.DATABASE_URL)
+    return pg8000.connect(**_connection_kwargs(settings.DATABASE_URL))
 
 
 @contextmanager
@@ -133,7 +161,7 @@ def save_application(application: dict[str, Any]) -> None:
                 VALUES (%s, %s)
                 ON CONFLICT (id) DO UPDATE SET data = EXCLUDED.data
                 """,
-                (application["id"], json.dumps(application, ensure_ascii=False)),
+                (application["id"], application),
             )
 
 
@@ -245,7 +273,7 @@ def save_findings(application_id: str, findings: list[dict[str, Any]]) -> None:
                 VALUES (%s, %s)
                 ON CONFLICT (application_id) DO UPDATE SET data = EXCLUDED.data
                 """,
-                (application_id, json.dumps(payload, ensure_ascii=False)),
+                (application_id, payload),
             )
 
 
