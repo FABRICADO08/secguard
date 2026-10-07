@@ -625,3 +625,80 @@ async function deleteSystem(system) {
         throw new Error(failure);
     }
 }
+
+
+/* ----------------------------------------------------- repository health */
+
+function gradeBadge(grade, small) {
+    const letter = /^[A-F]$/.test(String(grade || "")) ? grade : "";
+
+    return `
+        <span
+            class="grade ${small ? "grade--small" : ""} grade-${letter || "none"}"
+            title="${letter ? `Health grade ${letter}` : "Not scanned"}"
+        >${letter || "–"}</span>
+    `;
+}
+
+
+async function currentUser() {
+    try {
+        return await getJson("/api/auth/me");
+    } catch (error) {
+        return { github_enabled: false, authenticated: false, user: null };
+    }
+}
+
+
+function userChipMarkup(me) {
+    if (!me.github_enabled) {
+        return "";
+    }
+
+    if (!me.authenticated) {
+        return '<a class="button" href="/auth/github/login">Sign in with GitHub</a>';
+    }
+
+    return `
+        <span class="user-chip">
+            ${me.user.avatar_url
+                ? `<img src="${escapeHtml(me.user.avatar_url)}" alt="">`
+                : ""}
+            <span>${escapeHtml(me.user.login)}</span>
+            <button class="button button--ghost" id="signOut" type="button">
+                Sign out
+            </button>
+        </span>
+    `;
+}
+
+
+function bindSignOut() {
+    const button = document.getElementById("signOut");
+
+    if (button) {
+        button.addEventListener("click", async () => {
+            await apiFetch("/auth/logout", { method: "POST" });
+
+            window.location.href = "/repositories.html";
+        });
+    }
+}
+
+
+async function triggerRepositoryScan(fullName) {
+    const [owner, name] = String(fullName).split("/");
+
+    const response = await apiFetch(
+        `/api/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/scan`,
+        { method: "POST" }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.error || "Could not start the scan.");
+    }
+
+    return data;
+}

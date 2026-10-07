@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from pathlib import Path
 
 from flask import (
@@ -90,6 +91,8 @@ from backend.rules.engine import (
 from backend.scanners.configuration import (
     scan_exposed_paths,
 )
+from backend.config import settings
+from backend.security import github_auth
 from backend.security.auth import require_api_token
 from backend.security.rate_limit import rate_limited
 from backend.security.targets import (
@@ -122,6 +125,36 @@ FRONTEND = ROOT / "frontend"
 app = Flask(
     __name__
 )
+
+app.secret_key = settings.SECRET_KEY or secrets.token_hex(32)
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=settings.SESSION_COOKIE_SECURE,
+)
+
+app.register_blueprint(github_auth.blueprint)
+
+
+@app.before_request
+def hide_inaccessible_applications():
+    """Treat a repository the signed-in user cannot read as nonexistent."""
+
+    application_id = (request.view_args or {}).get("application_id")
+
+    if not application_id or not application_exists(application_id):
+        return None
+
+    if github_auth.can_view(load_application(application_id)):
+        return None
+
+    return jsonify(
+        {
+            "success": False,
+            "error": "Application not found.",
+        }
+    ), 404
 
 
 # ============================================================
@@ -1141,7 +1174,9 @@ def applications():
                 True,
 
             "applications":
-                list_applications(),
+                github_auth.visible(
+                    list_applications()
+                ),
         }
     )
 
@@ -1159,7 +1194,9 @@ def portfolio():
                 True,
 
             **portfolio_summary(
-                list_applications(),
+                github_auth.visible(
+                    list_applications()
+                ),
                 load_findings,
             ),
         }
@@ -1621,6 +1658,209 @@ def repository_quality(
             "health": report.get("health") or {},
         }
     )
+
+
+def _latest_repository_scans() -> dict[str, dict]:
+
+    latest: dict[str, dict] = {}
+
+    for application in list_applications():
+
+        if application.get("platform") != "Repository":
+            continue
+
+        key = github_auth.repository_name(application).lower()
+
+        if key and str(application.get("updated_at") or "") >= str((latest.get(key) or {}).get("updated_at") or ""):
+            latest[key] = application
+
+    return latest
+
+
+def _scan_summary(application: dict | None) -> dict | None:
+
+    if not application:
+        return None
+
+    return {
+        key: application.get(key)
+        for key in ("id", "updated_at", "health", "severity_counts", "total_findings", "risk_grade")
+    }
+
+
+@app.get("/api/repositories")
+def repositories():
+    """Repositories the user can open, each with its latest scan."""
+
+    latest = _latest_repository_scans()
+
+    if not github_auth.enabled():
+
+        items = [
+            {
+                "name": application.get("repository") or application.get("name"),
+                "private": None,
+                "html_url": "",
+                "default_branch": "",
+                "description": "",
+                "can_trigger": False,
+                "latest_scan": _scan_summary(application),
+            }
+            for application in latest.values()
+        ]
+
+    else:
+
+        user = github_auth.current_user()
+
+        if user is None:
+
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Sign in with GitHub to see your repositories.",
+                }
+            ), 401
+
+        items = [
+            {
+                **repository,
+                "latest_scan": _scan_summary(latest.get(key)),
+            }
+            for key, repository in user.repositories.items()
+        ]
+
+    items.sort(
+        key=lambda item: (
+            item["latest_scan"] is None,
+            str(item["name"]).lower(),
+        )
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "github_enabled": github_auth.enabled(),
+            "repositories": items,
+        }
+    )
+
+
+@app.post("/api/repositories/refresh")
+def refresh_repositories():
+
+    user = github_auth.current_user()
+
+    if user is None:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Sign in with GitHub first.",
+            }
+        ), 401
+
+    try:
+        github_auth.refresh_repositories(user)
+
+    except (github_auth.requests.RequestException, ValueError):
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Could not reach GitHub.",
+            }
+        ), 502
+
+    return jsonify(
+        {
+            "success": True,
+            "repositories": len(user.repositories),
+        }
+    )
+
+
+@app.post("/api/repositories/<owner>/<name>/scan")
+def trigger_repository_scan(
+    owner: str,
+    name: str,
+):
+    """Start the repository's SecGuard workflow (the manual "Run workflow")."""
+
+    user = github_auth.current_user()
+
+    if user is None:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Sign in with GitHub to start a scan.",
+            }
+        ), 401
+
+    repository = user.repositories.get(f"{owner}/{name}".lower())
+
+    if repository is None:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Repository not found.",
+            }
+        ), 404
+
+    if not repository["can_trigger"]:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Starting a scan needs write access to the repository.",
+            }
+        ), 403
+
+    try:
+        response = github_auth.dispatch_workflow(user, repository)
+
+    except github_auth.requests.RequestException:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Could not reach GitHub.",
+            }
+        ), 502
+
+    actions_url = (
+        f"{repository['html_url']}/actions/workflows/{settings.GITHUB_WORKFLOW}"
+    )
+
+    if response.status_code == 204:
+
+        return jsonify(
+            {
+                "success": True,
+                "actions_url": actions_url,
+            }
+        ), 202
+
+    if response.status_code == 404:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": (
+                    f"The repository has no .github/workflows/{settings.GITHUB_WORKFLOW} "
+                    "on its default branch. Add the SecGuard workflow first."
+                ),
+            }
+        ), 409
+
+    return jsonify(
+        {
+            "success": False,
+            "error": f"GitHub refused to start the workflow (HTTP {response.status_code}).",
+        }
+    ), 502
 
 
 # ============================================================
