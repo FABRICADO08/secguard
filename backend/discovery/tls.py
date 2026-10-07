@@ -213,13 +213,26 @@ def _ca_bundle() -> tuple[str, str]:
     return (bundle, "") if bundle and os.path.isfile(bundle) else ("", "")
 
 
-def _default_context(verify: bool) -> ssl.SSLContext:
+def _default_context(
+    verify: bool,
+    allow_deprecated: bool = False,
+) -> ssl.SSLContext:
     cafile, capath = _ca_bundle() if verify else ("", "")
 
     context = ssl.create_default_context(
         cafile=cafile or None,
         capath=capath or None,
     )
+
+    if allow_deprecated:
+        # The protocol probe re-pins the version itself; the floor is
+        # lifted here so the deprecated offers remain possible.
+        context.minimum_version = ssl.TLSVersion.MINIMUM_SUPPORTED
+
+    else:
+        # A connection that is not deliberately probing a version must
+        # never negotiate TLS 1.1 or below (RFC 8996).
+        context.minimum_version = ssl.TLSVersion.TLSv1_2
 
     if not verify:
         context.check_hostname = False
@@ -234,7 +247,7 @@ def _pinned_context(version: ssl.TLSVersion) -> ssl.SSLContext | None:
     local OpenSSL cannot make that offer at all.
     """
 
-    context = _default_context(verify=False)
+    context = _default_context(verify=False, allow_deprecated=True)
 
     if version in LEGACY_PROTOCOLS:
         try:
