@@ -1,28 +1,28 @@
 /*
 |--------------------------------------------------------------------------
-| My repositories
+| My applications
 |--------------------------------------------------------------------------
-| Repositories the signed-in GitHub user can read, each with its latest
-| SecGuard scan. Results for other repositories are never returned.
+| Applications whose GitHub repository the signed-in user can read, each
+| with its latest SecGuard scan. Other applications are never returned.
 */
 
 let view = null;
 
 
-function repositoryRow(repository) {
+function applicationRow(repository) {
     const scan = repository.latest_scan;
 
     const health = scan && scan.health ? scan.health.overall || {} : {};
 
     const title = scan
-        ? `<a class="row-title" href="/repository.html?application=${encodeURIComponent(scan.id)}">
-               ${escapeHtml(repository.name)}
+        ? `<a class="row-title" href="/application-health.html?application=${encodeURIComponent(scan.id)}">
+               ${escapeHtml(systemName(repository.name))}
            </a>`
-        : `<span class="row-title">${escapeHtml(repository.name)}</span>`;
+        : `<span class="row-title">${escapeHtml(systemName(repository.name))}</span>`;
 
     return `
         <tr>
-            <td data-label="Repository">
+            <td data-label="Application">
                 <div>
                     ${title}
                     <div class="row-meta">
@@ -78,43 +78,42 @@ function render(data) {
         <section class="card">
 
             <div class="card__head">
-                <h2>Repositories (${data.repositories.length})</h2>
+                <h2>Applications (${data.repositories.length})</h2>
                 <div class="toolbar">
                     <input
                         type="search"
-                        id="repositorySearch"
-                        placeholder="Search repositories"
-                        aria-label="Search repositories"
+                        id="applicationSearch"
+                        placeholder="Search applications"
+                        aria-label="Search applications"
                     >
                 </div>
             </div>
 
             <p class="card__subtitle">
                 ${scanned.length} of ${data.repositories.length} scanned.
-                Scans run daily at 06:00 UTC from each repository's
-                SecGuard workflow; use Run scan to start one now.
+                Scans run daily at 06:00 UTC; use Run scan to start one now.
             </p>
 
             <div class="table-wrap">
                 <table class="data">
                     <thead>
                         <tr>
-                            <th>Repository</th>
+                            <th>Application</th>
                             <th>Health</th>
                             <th>Findings</th>
                             <th>Last scan</th>
                             <th></th>
                         </tr>
                     </thead>
-                    <tbody id="repositoryRows"></tbody>
+                    <tbody id="applicationRows"></tbody>
                 </table>
             </div>
 
         </section>
     `;
 
-    const rows = document.getElementById("repositoryRows");
-    const search = document.getElementById("repositorySearch");
+    const rows = document.getElementById("applicationRows");
+    const search = document.getElementById("applicationSearch");
 
     const paint = () => {
         const term = search.value.trim().toLowerCase();
@@ -124,11 +123,11 @@ function render(data) {
         );
 
         rows.innerHTML = matching.length
-            ? matching.map(repositoryRow).join("")
+            ? matching.map(applicationRow).join("")
             : `<tr><td colspan="5" class="empty">${
                 data.repositories.length
-                    ? "No repository matches this search."
-                    : "No repository scans yet."
+                    ? "No application matches this search."
+                    : "No application scans yet."
             }</td></tr>`;
     };
 
@@ -177,11 +176,11 @@ async function load() {
 
     view = renderShell({
         scope: "portfolio",
-        active: "repositories",
+        active: "applications",
         period: false,
         breadcrumbs: [
             { text: "Portfolio", href: "/dashboard.html" },
-            { text: "My Repositories" },
+            { text: "My Applications" },
         ],
         tools: userChipMarkup(me),
     });
@@ -191,9 +190,9 @@ async function load() {
     if (me.github_enabled && !me.authenticated) {
         view.innerHTML = `
             <section class="card signin">
-                <h2>Sign in to see your repositories</h2>
+                <h2>Sign in to see your applications</h2>
                 <p class="muted">
-                    SecGuard shows scan results only for repositories your
+                    SecGuard shows scan results only for applications your
                     GitHub account can access.
                 </p>
                 <p>
@@ -207,14 +206,14 @@ async function load() {
         return;
     }
 
-    view.innerHTML = '<div class="card empty">Loading repositories…</div>';
+    view.innerHTML = '<div class="card empty">Loading applications…</div>';
 
     try {
         render(await getJson("/api/repositories"));
     } catch (error) {
         view.innerHTML = `
             <div class="notice notice--error">
-                ${escapeHtml(error.message || "Could not load repositories.")}
+                ${escapeHtml(error.message || "Could not load applications.")}
             </div>
         `;
     }

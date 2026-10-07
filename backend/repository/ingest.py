@@ -80,7 +80,7 @@ def application_from_report(report: Any) -> tuple[Application, list[dict[str, An
     application = Application.create(
         requested_url=f"{provider}://{name}",
         final_url=str(repository.get("url") or f"{provider}://{name}"),
-        name=name,
+        name=name.rsplit("/", 1)[-1],
     )
 
     application.platform = PLATFORM

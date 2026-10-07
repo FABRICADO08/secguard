@@ -391,7 +391,7 @@ const GROUPINGS = {
     },
     platform: {
         label: "Platform",
-        of: finding => String(finding.platform || "Generic"),
+        of: finding => platformLabel(finding.platform),
         all: () => [],
     },
 };
@@ -627,7 +627,17 @@ async function deleteSystem(system) {
 }
 
 
-/* ----------------------------------------------------- repository health */
+/* ---------------------------------------------------- application health */
+
+function systemName(fullName) {
+    return String(fullName || "").split("/").pop();
+}
+
+
+function platformLabel(platform) {
+    return platform === "Repository" ? "GitHub" : String(platform || "Generic");
+}
+
 
 function gradeBadge(grade, small) {
     const letter = /^[A-F]$/.test(String(grade || "")) ? grade : "";
@@ -680,7 +690,7 @@ function bindSignOut() {
         button.addEventListener("click", async () => {
             await apiFetch("/auth/logout", { method: "POST" });
 
-            window.location.href = "/repositories.html";
+            window.location.href = "/applications.html";
         });
     }
 }

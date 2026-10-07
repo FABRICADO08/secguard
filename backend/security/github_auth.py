@@ -238,7 +238,7 @@ def callback():
     session.clear()
     session["sid"] = session_id
 
-    return redirect("/repositories.html")
+    return redirect("/applications.html")
 
 
 @blueprint.post("/auth/logout")

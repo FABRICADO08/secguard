@@ -93,7 +93,7 @@ function findingRow(finding) {
 
             <td data-label="Platform">
                 <span class="pill">
-                    ${escapeHtml(finding.platform || "Generic")}
+                    ${escapeHtml(platformLabel(finding.platform))}
                 </span>
             </td>
 
@@ -118,7 +118,7 @@ function optionsFor(findings, key, selected) {
                 <option
                     value="${escapeHtml(value)}"
                     ${value === selected ? "selected" : ""}
-                >${escapeHtml(titleCase(value))}</option>
+                >${escapeHtml(key === "platform" ? platformLabel(value) : titleCase(value))}</option>
             `
         ),
     ].join("");
@@ -269,7 +269,7 @@ function render(findings) {
                         finding.cwe,
                         finding.location,
                         finding.confidence,
-                        finding.platform,
+                        platformLabel(finding.platform),
                         finding.detected_at,
                     ]),
                 ]

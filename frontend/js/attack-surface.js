@@ -77,7 +77,7 @@ function render(application) {
             <div class="card__head">
                 <h2>${escapeHtml(application.name)}</h2>
                 <span class="pill">
-                    ${escapeHtml(application.platform)}
+                    ${escapeHtml(platformLabel(application.platform))}
                 </span>
             </div>
             <div class="kpi">

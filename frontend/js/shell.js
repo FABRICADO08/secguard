@@ -105,8 +105,8 @@ function navigationFor(scope, active, applicationId) {
                         {
                             id: "health",
                             icon: "repository",
-                            text: "Repository Health",
-                            href: `/repository.html${suffix}`,
+                            text: "Application Health",
+                            href: `/application-health.html${suffix}`,
                         },
                         {
                             id: "security",
@@ -150,10 +150,10 @@ function navigationFor(scope, active, applicationId) {
                         href: "/dashboard.html",
                     },
                     {
-                        id: "repositories",
+                        id: "applications",
                         icon: "repository",
-                        text: "My Repositories",
-                        href: "/repositories.html",
+                        text: "My Applications",
+                        href: "/applications.html",
                     },
                 ],
             },

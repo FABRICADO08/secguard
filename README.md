@@ -194,7 +194,7 @@ Copy `integrations/github/secguard.yml` to `.github/workflows/secguard.yml` in e
 
 ### Sign in with GitHub
 
-With GitHub sign-in configured, **My Repositories** lists every repository the signed-in account can read, each with its latest scan and health grade; selecting one opens its health page (vulnerable dependencies with the minimum fixing version, licences, freshness, code quality, SBOM downloads). Scans of repositories the user cannot read are hidden from every application, findings, SBOM and portfolio endpoint. **Run scan** starts the repository's SecGuard workflow and needs write access.
+With GitHub sign-in configured, **My Applications** lists every application whose repository the signed-in account can read, named like a Sigrid system (the repository name without its owner), each with its latest scan and health grade; selecting one opens its **Application Health** page (vulnerable dependencies with the minimum fixing version, licences, freshness, code quality, SBOM downloads). Scans of repositories the user cannot read are hidden from every application, findings, SBOM and portfolio endpoint. **Run scan** starts the repository's SecGuard workflow and needs write access.
 
 1. Create an OAuth app (GitHub > Settings > Developer settings > OAuth Apps) with the callback URL `https://<your-secguard-host>/auth/github/callback`.
 2. Set:

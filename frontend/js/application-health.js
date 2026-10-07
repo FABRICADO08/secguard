@@ -1,8 +1,8 @@
 /*
 |--------------------------------------------------------------------------
-| Repository health
+| Application health
 |--------------------------------------------------------------------------
-| Latest repository scan: health grades, vulnerable dependencies with the
+| Latest application scan: health grades, vulnerable dependencies with the
 | minimum fixing version, licences, freshness and code quality.
 */
 
@@ -201,7 +201,7 @@ function render(application, canTrigger) {
 
         <section class="card">
             <div class="card__head">
-                <h2>${escapeHtml(meta.name || application.name)}</h2>
+                <h2>${escapeHtml(systemName(meta.name || application.name))}</h2>
                 <div class="toolbar">
                     ${canTrigger
                         ? '<button class="button" id="runScan" type="button">Run scan</button>'
@@ -375,8 +375,8 @@ async function load() {
         period: false,
         applicationId,
         breadcrumbs: [
-            { text: "My Repositories", href: "/repositories.html" },
-            { text: "Repository Health" },
+            { text: "My Applications", href: "/applications.html" },
+            { text: "Application Health" },
         ],
         tools: userChipMarkup(me),
     });
@@ -386,7 +386,7 @@ async function load() {
     if (!applicationId) {
         view.innerHTML = `
             <div class="card empty">
-                Pick a repository from <a href="/repositories.html">My Repositories</a>.
+                Pick an application from <a href="/applications.html">My Applications</a>.
             </div>
         `;
 
@@ -395,7 +395,7 @@ async function load() {
 
     rememberApplication(applicationId);
 
-    view.innerHTML = '<div class="card empty">Loading repository…</div>';
+    view.innerHTML = '<div class="card empty">Loading application…</div>';
 
     try {
         const data = await getJson(
@@ -414,7 +414,7 @@ async function load() {
     } catch (error) {
         view.innerHTML = `
             <div class="notice notice--error">
-                ${escapeHtml(error.message || "Could not load repository.")}
+                ${escapeHtml(error.message || "Could not load application.")}
                 ${me.github_enabled && !me.authenticated
                     ? ' <a href="/auth/github/login">Sign in with GitHub</a>'
                     : ""}

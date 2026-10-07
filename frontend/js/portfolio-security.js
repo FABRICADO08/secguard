@@ -119,7 +119,7 @@ function exportRows() {
         ...summary.systems.map(system => [
             system.name,
             system.url,
-            system.platform,
+            platformLabel(system.platform),
             system.scan_date,
             system.rating,
             system.total_findings,

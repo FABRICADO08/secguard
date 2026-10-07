@@ -1607,7 +1607,7 @@ def repository_sbom(
         return jsonify(
             {
                 "success": False,
-                "error": "No repository scan found for this application.",
+                "error": "No scan found for this application.",
             }
         ), 404
 
@@ -1647,7 +1647,7 @@ def repository_quality(
         return jsonify(
             {
                 "success": False,
-                "error": "No repository scan found for this application.",
+                "error": "No scan found for this application.",
             }
         ), 404
 
@@ -1718,7 +1718,7 @@ def repositories():
             return jsonify(
                 {
                     "success": False,
-                    "error": "Sign in with GitHub to see your repositories.",
+                    "error": "Sign in with GitHub to see your applications.",
                 }
             ), 401
 
@@ -1805,7 +1805,7 @@ def trigger_repository_scan(
         return jsonify(
             {
                 "success": False,
-                "error": "Repository not found.",
+                "error": "Application not found.",
             }
         ), 404
 
@@ -1814,7 +1814,7 @@ def trigger_repository_scan(
         return jsonify(
             {
                 "success": False,
-                "error": "Starting a scan needs write access to the repository.",
+                "error": "Starting a scan needs write access to the application's GitHub repository.",
             }
         ), 403
 
