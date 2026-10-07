@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
@@ -62,13 +62,17 @@ class Application:
         }
     )
 
+    repository: dict[str, Any] = field(
+        default_factory=dict
+    )
+
     @classmethod
     def create(
         cls,
         requested_url: str,
         final_url: str,
         name: str | None = None,
-    ) -> "Application":
+    ) -> Application:
 
         now = datetime.now(
             timezone.utc
@@ -112,7 +116,7 @@ class Application:
     def from_dict(
         cls,
         data: dict[str, Any],
-    ) -> "Application":
+    ) -> Application:
 
         return cls(
             id=data["id"],
@@ -155,6 +159,10 @@ class Application:
             ),
             model=data.get(
                 "model",
+                {},
+            ),
+            repository=data.get(
+                "repository",
                 {},
             ),
         )

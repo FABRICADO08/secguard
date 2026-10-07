@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import secrets
 from pathlib import Path
 
 from flask import (
@@ -67,6 +68,16 @@ from backend.portfolio.summary import (
 from backend.recommendations import (
     build_recommendations,
 )
+from backend.repository.findings import (
+    RULE_CATALOGUE as REPOSITORY_RULE_CATALOGUE,
+)
+from backend.repository.ingest import (
+    application_from_report,
+)
+from backend.repository.sbom import (
+    cyclonedx,
+    spdx,
+)
 from backend.risk.scoring import (
     summarize,
 )
@@ -80,12 +91,15 @@ from backend.rules.engine import (
 from backend.scanners.configuration import (
     scan_exposed_paths,
 )
-from backend.security.auth import require_api_token
+from backend.config import settings
+from backend.security import github_auth
+from backend.security.auth import request_is_authorized, require_api_token
 from backend.security.rate_limit import rate_limited
 from backend.security.targets import (
     BlockedTargetError,
     assert_target_allowed,
 )
+from backend.storage import application_names
 from backend.storage.findings import (
     load_findings,
     save_findings,
@@ -112,6 +126,36 @@ FRONTEND = ROOT / "frontend"
 app = Flask(
     __name__
 )
+
+app.secret_key = settings.SECRET_KEY or secrets.token_hex(32)
+
+app.config.update(
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=settings.SESSION_COOKIE_SECURE,
+)
+
+app.register_blueprint(github_auth.blueprint)
+
+
+@app.before_request
+def hide_inaccessible_applications():
+    """Treat a repository the signed-in user cannot read as nonexistent."""
+
+    application_id = (request.view_args or {}).get("application_id")
+
+    if not application_id or not application_exists(application_id):
+        return None
+
+    if github_auth.can_view(load_application(application_id)):
+        return None
+
+    return jsonify(
+        {
+            "success": False,
+            "error": "Application not found.",
+        }
+    ), 404
 
 
 # ============================================================
@@ -1131,7 +1175,9 @@ def applications():
                 True,
 
             "applications":
-                list_applications(),
+                github_auth.visible(
+                    list_applications()
+                ),
         }
     )
 
@@ -1149,7 +1195,9 @@ def portfolio():
                 True,
 
             **portfolio_summary(
-                list_applications(),
+                github_auth.visible(
+                    list_applications()
+                ),
                 load_findings,
             ),
         }
@@ -1449,12 +1497,473 @@ def rules_catalogue():
         )
     )
 
+    rules.extend(
+        _platform_rules(
+            "Repository",
+            {
+                rule_id: {**metadata, "confidence": ""}
+                for rule_id, metadata in REPOSITORY_RULE_CATALOGUE.items()
+            },
+        )
+    )
+
     return jsonify(
         {
             "success":
                 True,
 
             "rules": rules,
+        }
+    )
+
+
+# ============================================================
+# Repository scans
+# ============================================================
+
+@app.post("/api/repository/scans")
+@require_api_token
+@rate_limited
+def ingest_repository_scan():
+    """Store a report produced by the SecGuard repository scanner."""
+
+    if (request.content_length or 0) > MAX_MODEL_BYTES:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Repository report exceeds the upload limit.",
+            }
+        ), 413
+
+    try:
+
+        application, findings = application_from_report(
+            request.get_json(silent=True)
+        )
+
+    except ValueError:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "The upload is not a valid SecGuard repository report. "
+                         "Generate it with 'python -m backend.repository scan'.",
+            }
+        ), 400
+
+    application.update_timestamp()
+
+    save_application(
+        application.to_dict()
+    )
+
+    save_findings(
+        application.id,
+        findings,
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "application_id": application.id,
+            "health": application.repository.get("health"),
+            "summary": {
+                key: value
+                for key, value in application.security.items()
+                if key not in ("findings", "recommendations")
+            },
+        }
+    ), 201
+
+
+def _repository_report(
+    application_id: str,
+) -> dict | None:
+
+    if not application_exists(application_id):
+        return None
+
+    application = load_application(application_id)
+
+    report = application.get("repository") or {}
+
+    if not report:
+        return None
+
+    return {
+        **report,
+        "findings": application.get("security", {}).get("findings", []),
+    }
+
+
+@app.get("/api/applications/<application_id>/sbom")
+def repository_sbom(
+    application_id: str,
+):
+
+    report = _repository_report(application_id)
+
+    if report is None:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "No scan found for this application.",
+            }
+        ), 404
+
+    sbom_format = request.args.get("format", "cyclonedx").lower()
+
+    if sbom_format not in ("cyclonedx", "spdx"):
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "format must be 'cyclonedx' or 'spdx'.",
+            }
+        ), 400
+
+    document = cyclonedx(report) if sbom_format == "cyclonedx" else spdx(report)
+
+    name = str((report.get("repository") or {}).get("name") or application_id).replace("/", "_")
+
+    response = jsonify(document)
+
+    response.headers["Content-Disposition"] = (
+        f'attachment; filename="{name}.{sbom_format}.json"'
+    )
+
+    return response
+
+
+@app.get("/api/applications/<application_id>/quality")
+def repository_quality(
+    application_id: str,
+):
+
+    report = _repository_report(application_id)
+
+    if report is None:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "No scan found for this application.",
+            }
+        ), 404
+
+    return jsonify(
+        {
+            "success": True,
+            "quality": report.get("quality") or {},
+            "health": report.get("health") or {},
+        }
+    )
+
+
+def _latest_repository_scans() -> dict[str, dict]:
+
+    latest: dict[str, dict] = {}
+
+    for application in list_applications():
+
+        if application.get("platform") != "Repository":
+            continue
+
+        key = github_auth.repository_name(application).lower()
+
+        if key and str(application.get("updated_at") or "") >= str((latest.get(key) or {}).get("updated_at") or ""):
+            latest[key] = application
+
+    return latest
+
+
+def _application_name(repository: str, application: dict | None) -> str:
+
+    stored = str((application or {}).get("name") or "")
+
+    if stored.lower() == repository.lower():
+        stored = ""
+
+    return (
+        application_names.name_for(repository)
+        or stored
+        or repository.rsplit("/", 1)[-1]
+    )
+
+
+def _scan_summary(application: dict | None) -> dict | None:
+
+    if not application:
+        return None
+
+    return {
+        key: application.get(key)
+        for key in ("id", "updated_at", "health", "severity_counts", "total_findings", "risk_grade")
+    }
+
+
+@app.get("/api/repositories")
+def repositories():
+    """Repositories the user can open, each with its latest scan."""
+
+    latest = _latest_repository_scans()
+
+    if not github_auth.enabled():
+
+        items = [
+            {
+                "name": application.get("repository") or application.get("name"),
+                "private": None,
+                "html_url": "",
+                "default_branch": "",
+                "description": "",
+                "can_trigger": False,
+                "can_rename": True,
+                "display_name": _application_name(key, application),
+                "latest_scan": _scan_summary(application),
+            }
+            for key, application in latest.items()
+        ]
+
+    else:
+
+        user = github_auth.current_user()
+
+        if user is None:
+
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Sign in with GitHub to see your applications.",
+                }
+            ), 401
+
+        items = [
+            {
+                **repository,
+                "can_rename": repository["can_trigger"],
+                "display_name": _application_name(key, latest.get(key)),
+                "latest_scan": _scan_summary(latest.get(key)),
+            }
+            for key, repository in user.repositories.items()
+        ]
+
+    items.sort(
+        key=lambda item: (
+            item["latest_scan"] is None,
+            str(item["name"]).lower(),
+        )
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "github_enabled": github_auth.enabled(),
+            "repositories": items,
+        }
+    )
+
+
+@app.post("/api/repositories/refresh")
+def refresh_repositories():
+
+    user = github_auth.current_user()
+
+    if user is None:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Sign in with GitHub first.",
+            }
+        ), 401
+
+    try:
+        github_auth.refresh_repositories(user)
+
+    except (github_auth.requests.RequestException, ValueError):
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Could not reach GitHub.",
+            }
+        ), 502
+
+    return jsonify(
+        {
+            "success": True,
+            "repositories": len(user.repositories),
+        }
+    )
+
+
+@app.post("/api/repositories/<owner>/<name>/scan")
+def trigger_repository_scan(
+    owner: str,
+    name: str,
+):
+    """Start the repository's SecGuard workflow (the manual "Run workflow")."""
+
+    user = github_auth.current_user()
+
+    if user is None:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Sign in with GitHub to start a scan.",
+            }
+        ), 401
+
+    repository = user.repositories.get(f"{owner}/{name}".lower())
+
+    if repository is None:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Application not found.",
+            }
+        ), 404
+
+    if not repository["can_trigger"]:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Starting a scan needs write access to the application's GitHub repository.",
+            }
+        ), 403
+
+    try:
+        response = github_auth.dispatch_workflow(user, repository)
+
+    except github_auth.requests.RequestException:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Could not reach GitHub.",
+            }
+        ), 502
+
+    actions_url = (
+        f"{repository['html_url']}/actions/workflows/{settings.GITHUB_WORKFLOW}"
+    )
+
+    if response.status_code == 204:
+
+        return jsonify(
+            {
+                "success": True,
+                "actions_url": actions_url,
+            }
+        ), 202
+
+    if response.status_code == 404:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": (
+                    f"The repository has no .github/workflows/{settings.GITHUB_WORKFLOW} "
+                    "on its default branch. Add the SecGuard workflow first."
+                ),
+            }
+        ), 409
+
+    return jsonify(
+        {
+            "success": False,
+            "error": f"GitHub refused to start the workflow (HTTP {response.status_code}).",
+        }
+    ), 502
+
+
+@app.put("/api/repositories/<owner>/<name>/name")
+def rename_repository_application(
+    owner: str,
+    name: str,
+):
+    """Set the application name shown for a GitHub-connected application."""
+
+    full_name = f"{owner}/{name}"
+
+    if github_auth.enabled():
+
+        user = github_auth.current_user()
+
+        if user is None:
+
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Sign in with GitHub to rename an application.",
+                }
+            ), 401
+
+        repository = user.repositories.get(full_name.lower())
+
+        if repository is None:
+
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Application not found.",
+                }
+            ), 404
+
+        if not repository["can_trigger"]:
+
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Renaming needs write access to the application's GitHub repository.",
+                }
+            ), 403
+
+        full_name = repository["name"]
+
+    elif not request_is_authorized():
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Unauthorized. Set SECGUARD_API_TOKEN and send it as 'X-API-Key'.",
+            }
+        ), 401
+
+    value = (request.get_json(silent=True) or {}).get("name")
+    problem = application_names.name_problem(value)
+
+    if problem:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": problem,
+            }
+        ), 400
+
+    label = application_names.normalise(value)
+
+    application_names.set_name(full_name, label)
+
+    for summary in list_applications():
+
+        if summary.get("platform") == "Repository" and github_auth.repository_name(summary).lower() == full_name.lower():
+
+            record = load_application(summary["id"])
+            record["name"] = label
+            save_application(record)
+
+    return jsonify(
+        {
+            "success": True,
+            "name": label,
         }
     )
 

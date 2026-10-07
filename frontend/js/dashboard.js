@@ -44,7 +44,7 @@ function systemRow(system) {
             </td>
 
             <td data-label="Platform">
-                <span class="pill">${escapeHtml(system.platform)}</span>
+                <span class="pill">${escapeHtml(platformLabel(system.platform))}</span>
             </td>
 
             <td data-label="Last scan">

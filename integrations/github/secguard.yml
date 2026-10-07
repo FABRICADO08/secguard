@@ -1,0 +1,38 @@
+# Copy to .github/workflows/secguard.yml in each repository to scan.
+#
+# Runs every day at 06:00 UTC, on pull requests, and on demand from
+# Actions > SecGuard > Run workflow. GitHub schedules are in UTC; for
+# 06:00 in UTC+2 use "0 4 * * *".
+
+name: SecGuard
+
+on:
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: write
+  id-token: write
+
+concurrency:
+  group: secguard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: FABRICADO08/secguard@main
+        with:
+          # Set the SECGUARD_URL repository variable to send results to
+          # your SecGuard dashboard; leave it unset to only use GitHub
+          # code scanning and pull-request reviews.
+          server-url: ${{ vars.SECGUARD_URL }}
+          api-token: ${{ secrets.SECGUARD_API_TOKEN }}
+          fail-on: none

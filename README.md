@@ -46,6 +46,9 @@ Keep `--workers 1`: the rate limiter holds its counters in process, so additiona
 | `GET /api/applications/<id>/findings/<finding_id>` | A single finding. |
 | `GET /api/portfolio/summary` | Systems, severity deltas, new/existing/resolved activity and the monthly trend across all scans. |
 | `GET /api/rules` | Catalogue of the rules the engine evaluates. |
+| `POST /api/repository/scans` | Store a report from the repository scanner (GitHub Action or CLI). Authenticated, rate limited. |
+| `GET /api/applications/<id>/sbom?format=cyclonedx\|spdx` | SBOM of a scanned repository. |
+| `GET /api/applications/<id>/quality` | Maintainability metrics, hotspots, quality findings and the health score. |
 
 ## Interface
 
@@ -164,6 +167,50 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 | `GEN-INF-004` | `robots.txt` disallowing administrative or internal paths. |
 | `GEN-DEP-001` | Disclosed component version listed as vulnerable by a public advisory. |
 | `GEN-DEP-002` | Component release line that no longer receives security fixes. |
+
+## Repository scanning
+
+`python -m backend.repository scan <path>` analyses a checked-out repository:
+
+- **Dependencies** from `requirements*.txt`, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, `package.json`, `package-lock.json`, `go.mod`, `pom.xml`, `composer.lock` and `Gemfile.lock`. Without a lockfile, a ranged dependency is checked as the newest release its range allows.
+- **Known vulnerabilities** from [OSV](https://osv.dev), one finding per advisory (aliases merged), with the smallest upgrade that clears every advisory and whether it crosses a major version.
+- **Reachability**: advisories against packages your own code never imports are reported with `tentative` confidence.
+- **Supply chain**: deprecated, unmaintained (no release for 2+ years) and archived packages, single-maintainer packages, typo-squats of popular packages, and brand-new rarely downloaded packages.
+- **Licences**: SPDX expressions are classified (permissive, weak/strong/network copyleft, non-commercial) and compared with the project's own licence; `GPL OR commercial` dual licensing is flagged.
+- **Freshness**: major/minor versions behind the latest release, libyears and a freshness index.
+- **Code quality**: cyclomatic and cognitive complexity, long functions, many parameters, oversized classes/files, unused imports and variables, unreachable code, duplicated blocks, docstring and type-annotation coverage, missing README or API specification.
+- **Health**: security, open-source and maintainability scores (0-100), an overall A-F grade and a star rating.
+
+Outputs: a JSON report, SARIF for GitHub code scanning, CycloneDX 1.5 and SPDX 2.3 SBOMs. `--offline` skips registry and advisory lookups; `--fail-on high` fails the run on high or critical findings.
+
+### GitHub Action
+
+Copy `integrations/github/secguard.yml` to `.github/workflows/secguard.yml` in each repository. It scans every day at 06:00 UTC (adjust the cron for your timezone), on every pull request, and on demand from **Actions > SecGuard > Run workflow**. Each run:
+
+1. publishes results to the repository's code scanning alerts,
+2. on pull requests, posts a review with inline comments and one-click `suggestion` upgrades on the changed manifest lines,
+3. keeps the report and SBOMs as a run artifact,
+4. uploads the report to SecGuard when the `SECGUARD_URL` repository variable (and `SECGUARD_API_TOKEN` secret) are set.
+
+### Sign in with GitHub
+
+With GitHub sign-in configured, **My Applications** lists every application whose repository the signed-in account can read, under its application name, like a Sigrid system, each with its latest scan and health grade; selecting one opens its **Application Health** page (vulnerable dependencies with the minimum fixing version, licences, freshness, code quality, SBOM downloads). Scans of repositories the user cannot read are hidden from every application, findings, SBOM and portfolio endpoint. **Run scan** starts the repository's SecGuard workflow and needs write access.
+
+Each application has its own name, as in Sigrid, independent of the GitHub repository it is attached to. Set it in the workflow with `application-name:` (or the `SECGUARD_APPLICATION_NAME` repository variable used by the bundled workflow), or with **Rename** on the Application Health page (`PUT /api/repositories/<owner>/<repo>/name`, needs write access). A name set in SecGuard wins over the workflow's; without either, the repository name without its owner is used.
+
+1. Create an OAuth app (GitHub > Settings > Developer settings > OAuth Apps) with the callback URL `https://<your-secguard-host>/auth/github/callback`.
+2. Set:
+
+| Variable | Purpose |
+| --- | --- |
+| `SECGUARD_GITHUB_CLIENT_ID` / `SECGUARD_GITHUB_CLIENT_SECRET` | OAuth app credentials. Sign-in, and repository filtering, are off while either is empty. |
+| `SECGUARD_SECRET_KEY` | Signs the session cookie. Without it users are signed out on every restart. |
+| `SECGUARD_SECURE_COOKIES` | `1` when served over HTTPS. |
+| `SECGUARD_GITHUB_CALLBACK_URL` | Optional; must match the OAuth app when SecGuard sits behind a proxy. |
+| `SECGUARD_GITHUB_WORKFLOW` | Workflow file **Run scan** starts (default `secguard.yml`). |
+| `SECGUARD_SESSION_HOURS` | Session lifetime (default 8). |
+
+The login uses the authorization-code flow with `state` and PKCE; the GitHub token stays in server memory and the cookie only carries a random session id.
 
 ## Security configuration
 

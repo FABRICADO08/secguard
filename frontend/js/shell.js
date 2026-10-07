@@ -28,6 +28,8 @@ const ICONS = {
         '<path d="M12 2 2 8l10 6 10-6zM2 16l10 6 10-6-2.5-1.5L12 19 4.5 14.5z"/>',
     scan:
         '<path d="M11 3a8 8 0 1 0 4.9 14.3l4.4 4.4 1.4-1.4-4.4-4.4A8 8 0 0 0 11 3m0 2a6 6 0 1 1 0 12 6 6 0 0 1 0-12"/>',
+    repository:
+        '<path d="M5 3h11l3 3v15H5zm3 5v2h8V8zm0 4v2h8v-2zm0 4v2h5v-2z"/>',
     settings:
         '<path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8m9 4-2-.6a7 7 0 0 0-.7-1.7l1-1.8-1.6-1.6-1.8 1a7 7 0 0 0-1.7-.7L13.6 3h-3.2L9.8 5a7 7 0 0 0-1.7.7l-1.8-1L4.7 6.3l1 1.8a7 7 0 0 0-.7 1.7L3 10.4v3.2l2 .6c.2.6.4 1.2.7 1.7l-1 1.8 1.6 1.6 1.8-1c.5.3 1.1.5 1.7.7l.6 2h3.2l.6-2c.6-.2 1.2-.4 1.7-.7l1.8 1 1.6-1.6-1-1.8c.3-.5.5-1.1.7-1.7l2-.6z"/>',
 };
@@ -101,6 +103,12 @@ function navigationFor(scope, active, applicationId) {
                     label: "Quality Aspects",
                     links: [
                         {
+                            id: "health",
+                            icon: "repository",
+                            text: "Application Health",
+                            href: `/application-health.html${suffix}`,
+                        },
+                        {
                             id: "security",
                             icon: "security",
                             text: "Security",
@@ -140,6 +148,12 @@ function navigationFor(scope, active, applicationId) {
                         icon: "overview",
                         text: "Portfolio Overview",
                         href: "/dashboard.html",
+                    },
+                    {
+                        id: "applications",
+                        icon: "repository",
+                        text: "My Applications",
+                        href: "/applications.html",
                     },
                 ],
             },

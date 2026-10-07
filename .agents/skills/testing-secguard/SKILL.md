@@ -311,3 +311,23 @@ What to measure on each page (dashboard, portfolio-security, system-security, fi
   index.html. Save the token in settings.html (localStorage `secguardApiToken`, sent as `X-API-Key`).
 - A headed Playwright Chromium on DISPLAY=:0 (its own context) shows up in screen recordings and
   is not affected by someone clicking the shared Chrome window.
+
+## Repository scanner, repository pages and GitHub sign-in (no real OAuth app needed)
+- Make a report offline: `.venv/bin/python -m backend.repository scan . --offline --output /tmp/report.json`
+  (takes about 10s). Ingest it with `curl -X POST :PORT/api/repository/scans -H 'Content-Type: application/json' --data @report.json`.
+  Loopback requests skip the API token. The repository name must match `owner/repo` (`[A-Za-z0-9_.-]`),
+  so hostile *names* can only come from GitHub. Put XSS payloads in dependency names, advisory
+  id/summary and hotspot name/path instead. To fake a vulnerable dependency, set `vulnerabilities` and
+  `remediation {target, breaking, non_breaking_target}` on an entry in `dependencies`. The security
+  grade and severity chips come from `findings`, so they will not reflect a hand-added vulnerability.
+- Fake GitHub: `python3 .agents/skills/testing-secguard/fake_github.py 9100` (OAuth authorize/token, `/user`, `/user/repos`,
+  workflow dispatch returning 204). It logs everything to `/tmp/fakegh.log`, including dispatch bodies.
+  Touch `/tmp/fakegh_tamper` to make authorize return `state=TAMPERED`. Playwright `page.route` does
+  NOT intercept requests reached through a 302 redirect, so tamper on the fake's side.
+  Start Flask with `SECGUARD_GITHUB_CLIENT_ID=x SECGUARD_GITHUB_CLIENT_SECRET=y
+  SECGUARD_GITHUB_URL=http://127.0.0.1:9100 SECGUARD_GITHUB_API_URL=http://127.0.0.1:9100`.
+- Give the push repos a non-"main" `default_branch` (e.g. trunk). That proves the dispatch sends the
+  real default branch and not a hard-coded value.
+- Sessions live in Flask memory, so restarting Flask signs everyone out. Data in `data/` is kept.
+- For phone scrim clicks, `clientWidth` is 375 at a 390 viewport because of the scrollbar. Click the
+  scrim at x of about 360, not 375 (x=375 lands on the scrollbar and looks like a broken scrim).

@@ -66,3 +66,32 @@ ALLOWED_TARGET_HOSTS = _list_env("SECGUARD_ALLOWED_TARGET_HOSTS")
 RATE_LIMIT_REQUESTS = _int_env("SECGUARD_RATE_LIMIT_REQUESTS", 10)
 
 RATE_LIMIT_WINDOW_SECONDS = _int_env("SECGUARD_RATE_LIMIT_WINDOW", 60)
+
+# GitHub sign-in. With a client id and secret configured, repository
+# results are only shown to signed-in users whose GitHub account can read
+# the repository.
+GITHUB_CLIENT_ID = os.environ.get("SECGUARD_GITHUB_CLIENT_ID", "").strip()
+
+GITHUB_CLIENT_SECRET = os.environ.get("SECGUARD_GITHUB_CLIENT_SECRET", "").strip()
+
+# Must match the callback URL registered on the OAuth app; derived from the
+# request when empty.
+GITHUB_CALLBACK_URL = os.environ.get("SECGUARD_GITHUB_CALLBACK_URL", "").strip()
+
+# `repo` is needed to see private repositories and to start workflow runs.
+GITHUB_SCOPES = os.environ.get("SECGUARD_GITHUB_SCOPES", "repo read:user")
+
+GITHUB_URL = os.environ.get("SECGUARD_GITHUB_URL", "https://github.com").rstrip("/")
+
+GITHUB_API_URL = os.environ.get("SECGUARD_GITHUB_API_URL", "https://api.github.com").rstrip("/")
+
+# Workflow file started by "Run scan".
+GITHUB_WORKFLOW = os.environ.get("SECGUARD_GITHUB_WORKFLOW", "secguard.yml")
+
+# Signs the session cookie. A random key is used when unset, which signs
+# everyone out whenever the server restarts.
+SECRET_KEY = os.environ.get("SECGUARD_SECRET_KEY", "").strip()
+
+SESSION_COOKIE_SECURE = _bool_env("SECGUARD_SECURE_COOKIES")
+
+SESSION_HOURS = _int_env("SECGUARD_SESSION_HOURS", 8)

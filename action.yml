@@ -1,0 +1,108 @@
+name: SecGuard repository scan
+description: >-
+  Scan a repository's dependencies (known vulnerabilities, licences,
+  maintenance, typo-squatting, freshness) and code quality, publish SARIF
+  to GitHub code scanning, review pull requests and optionally upload the
+  report to a SecGuard server.
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  path:
+    description: Directory to scan, relative to the workspace.
+    default: "."
+  application-name:
+    description: Name of the application in SecGuard (for example "Customer Portal"). Defaults to the repository name.
+    default: ""
+  server-url:
+    description: SecGuard server URL. When set, the report is uploaded there.
+    default: ""
+  api-token:
+    description: "SecGuard API token for uploads. Leave empty to authenticate with GitHub OIDC (needs `id-token: write`)."
+    default: ""
+  upload-sarif:
+    description: "Publish results to GitHub code scanning (needs `security-events: write`)."
+    default: "true"
+  review-pull-requests:
+    description: "Post inline review comments and upgrade suggestions on pull requests (needs `pull-requests: write`)."
+    default: "true"
+  review-min-severity:
+    description: Lowest severity that gets an inline pull-request comment.
+    default: "medium"
+  fail-on:
+    description: Fail the job on findings at or above this severity (none, informational, low, medium, high, critical).
+    default: "none"
+  github-token:
+    description: Token for the pull-request review and upstream repository activity.
+    default: ${{ github.token }}
+
+outputs:
+  report:
+    description: Path of the JSON report.
+    value: ${{ steps.scan.outputs.report }}
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install SecGuard
+      shell: bash
+      run: python -m pip install --quiet -r "$GITHUB_ACTION_PATH/requirements.txt"
+
+    - name: Scan
+      id: scan
+      shell: bash
+      working-directory: ${{ inputs.path }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        SECGUARD_API_TOKEN: ${{ inputs.api-token }}
+        SECGUARD_SERVER: ${{ inputs.server-url }}
+        SECGUARD_FAIL_ON: ${{ inputs.fail-on }}
+        SECGUARD_APPLICATION_NAME: ${{ inputs.application-name }}
+      run: |
+        out="$RUNNER_TEMP/secguard"
+        mkdir -p "$out"
+        args=(scan . --output "$out/report.json" --sarif "$out/secguard.sarif"
+              --cyclonedx "$out/sbom.cdx.json" --spdx "$out/sbom.spdx.json"
+              --fail-on "$SECGUARD_FAIL_ON")
+        if [ -n "$SECGUARD_SERVER" ]; then args+=(--upload "$SECGUARD_SERVER"); fi
+        set +e
+        python -m backend.repository "${args[@]}"
+        status=$?
+        set -e
+        echo "report=$out/report.json" >> "$GITHUB_OUTPUT"
+        echo "status=$status" >> "$GITHUB_OUTPUT"
+
+    - name: Upload SARIF
+      if: ${{ always() && inputs.upload-sarif == 'true' }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: ${{ runner.temp }}/secguard/secguard.sarif
+        category: secguard
+
+    - name: Review pull request
+      if: ${{ always() && github.event_name == 'pull_request' && inputs.review-pull-requests == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.path }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        SECGUARD_REVIEW_MIN_SEVERITY: ${{ inputs.review-min-severity }}
+      run: python -m backend.repository review --report "$RUNNER_TEMP/secguard/report.json" --root . --min-severity "$SECGUARD_REVIEW_MIN_SEVERITY"
+
+    - name: Keep SBOM and report
+      if: ${{ always() }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: secguard-report
+        path: ${{ runner.temp }}/secguard/
+
+    - name: Apply fail-on threshold
+      if: ${{ steps.scan.outputs.status != '0' }}
+      shell: bash
+      run: exit 1

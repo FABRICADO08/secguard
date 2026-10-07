@@ -672,3 +672,71 @@ pre.evidence {
     font-size: 12px;
     max-height: 420px;
 }
+
+/* ------------------------------------------------------ repository health */
+
+.grade {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    height: 44px;
+    border-radius: 8px;
+    font-size: 22px;
+    font-weight: 700;
+    color: #fff;
+    flex: none;
+}
+
+.grade--small {
+    width: 28px;
+    height: 28px;
+    font-size: 14px;
+    border-radius: 6px;
+}
+
+.grade-A { background: var(--resolved); }
+.grade-B { background: #6aa84f; }
+.grade-C { background: var(--medium); }
+.grade-D { background: var(--high); }
+.grade-F { background: var(--critical); }
+.grade-none { background: var(--informational); }
+
+.user-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    min-width: 0;
+}
+
+.user-chip img {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+}
+
+.metric-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+    gap: 12px;
+}
+
+.metric-list div {
+    min-width: 0;
+}
+
+.metric-list strong {
+    display: block;
+    font-size: 20px;
+}
+
+.signin {
+    max-width: 440px;
+    margin: 40px auto;
+    text-align: center;
+}
+
+[hidden] {
+    display: none !important;
+}
