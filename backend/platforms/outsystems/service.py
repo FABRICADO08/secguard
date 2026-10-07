@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.platforms.errors import EmptyModelError
 from backend.platforms.outsystems.analyzer import OutSystemsSecurityAnalyzer
 from backend.platforms.outsystems.findings import to_findings
 from backend.platforms.outsystems.model import OutSystemsModel
 from backend.platforms.outsystems.parser import OutSystemsModelParser
+
+EMPTY_MODEL = (
+    "No OutSystems model elements were found. Upload an export "
+    "containing modules with entities, screens, exposed REST "
+    "APIs, site properties or queries."
+)
 
 
 def model_summary(model: OutSystemsModel) -> dict[str, Any]:
@@ -116,11 +123,7 @@ def analyze_model(data: dict[str, Any]) -> dict[str, Any]:
 
     if model.is_empty:
 
-        raise ValueError(
-            "No OutSystems model elements were found. Upload an export "
-            "containing modules with entities, screens, exposed REST "
-            "APIs, site properties or queries."
-        )
+        raise EmptyModelError(EMPTY_MODEL)
 
     findings = to_findings(
         OutSystemsSecurityAnalyzer(model).analyze()

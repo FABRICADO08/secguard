@@ -2,10 +2,17 @@ from __future__ import annotations
 
 from typing import Any
 
+from backend.platforms.errors import EmptyModelError
 from backend.platforms.mendix.analyzer import MendixSecurityAnalyzer
 from backend.platforms.mendix.findings import to_findings
 from backend.platforms.mendix.model import MendixModel
 from backend.platforms.mendix.parser import MendixModelParser
+
+EMPTY_MODEL = (
+    "No Mendix model elements were found. Upload a dump-mpr "
+    "JSON export containing modules, entities, microflows, "
+    "pages or security roles."
+)
 
 
 def _field(element: Any, name: str, default: Any) -> Any:
@@ -151,11 +158,7 @@ def analyze_model(data: dict[str, Any]) -> dict[str, Any]:
             model.associations,
         )
     ):
-        raise ValueError(
-            "No Mendix model elements were found. Upload a dump-mpr "
-            "JSON export containing modules, entities, microflows, "
-            "pages or security roles."
-        )
+        raise EmptyModelError(EMPTY_MODEL)
 
     findings = to_findings(
         MendixSecurityAnalyzer(model).analyze()

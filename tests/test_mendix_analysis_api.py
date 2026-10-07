@@ -296,3 +296,15 @@ def test_create_only_access_on_sensitive_entity_is_reported(
         and finding["location"] == "Billing.PaymentToken"
         for finding in findings
     )
+
+
+def test_unexpected_analysis_failure_hides_exception_details(client, monkeypatch):
+    def broken(document):
+        raise RuntimeError("secret internal detail")
+
+    monkeypatch.setattr(app_module, "analyze_model", broken)
+
+    response = client.post("/api/mendix/analyze", json={"model": {"units": []}})
+
+    assert response.status_code == 500
+    assert "secret internal detail" not in response.get_data(as_text=True)
