@@ -12,6 +12,15 @@ SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
 
 LEVELS = {"critical": "error", "high": "error", "medium": "warning", "low": "note", "informational": "note"}
 
+# Maintainability findings are advisory: like `--fail-on`, they never fail a
+# check, so they are reported at most as warnings.
+MAINTAINABILITY_LEVELS = {**LEVELS, "critical": "warning", "high": "warning"}
+
+
+def _level(rule_id: str, severity: str) -> str:
+    levels = MAINTAINABILITY_LEVELS if RULE_CATALOGUE.get(rule_id, {}).get("category") == "maintainability" else LEVELS
+    return levels.get(severity, "note")
+
 SECURITY_SEVERITY = {"critical": "9.5", "high": "7.5", "medium": "5.0", "low": "2.0", "informational": "0.0"}
 
 
@@ -42,7 +51,7 @@ def _result(finding: dict[str, Any], rule_index: dict[str, int], fallback: str) 
     result: dict[str, Any] = {
         "ruleId": finding["rule_id"],
         "ruleIndex": rule_index[finding["rule_id"]],
-        "level": LEVELS.get(severity, "note"),
+        "level": _level(finding["rule_id"], severity),
         "message": {"text": message},
         "partialFingerprints": {
             "secguardFinding/v1": hashlib.sha256(
@@ -99,7 +108,7 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
             "id": rule_id,
             "name": "".join(word.capitalize() for word in metadata["title"].replace("'", "").split()),
             "shortDescription": {"text": metadata["title"]},
-            "defaultConfiguration": {"level": LEVELS.get(worst.get(rule_id, "low"), "note")},
+            "defaultConfiguration": {"level": _level(rule_id, worst.get(rule_id, "low"))},
             "properties": properties,
         }
 
