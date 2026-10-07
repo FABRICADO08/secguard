@@ -17,6 +17,58 @@ from backend.storage import findings as findings_storage
 from backend.storage import scans
 
 
+def _upsert(table):
+    return lambda tables, params: tables[table].__setitem__(params[0], params[1])
+
+
+def _select_row(table):
+    def run(tables, params):
+        if params[0] in tables[table]:
+            return [(tables[table][params[0]],)]
+
+        return []
+
+    return run
+
+
+def _select_exists(table):
+    return lambda tables, params: [(1,)] if params[0] in tables[table] else []
+
+
+def _select_all(table):
+    return lambda tables, params: [(row,) for row in tables[table].values()]
+
+
+def _delete(table):
+    def run(tables, params):
+        removed = tables[table].pop(params[0], None) is not None
+
+        return [], 1 if removed else 0
+
+    return run
+
+
+def _select_pairs(table):
+    return lambda tables, params: list(tables[table].items())
+
+
+# Each entry maps the normalized statement prefix to a handler returning the
+# result rows, or (rows, rowcount) when a count matters.
+HANDLERS = {
+    "CREATE TABLE": lambda tables, params: [],
+    "INSERT INTO applications": _upsert("applications"),
+    "SELECT data FROM applications WHERE id": _select_row("applications"),
+    "SELECT 1 FROM applications WHERE id": _select_exists("applications"),
+    "SELECT data FROM applications": _select_all("applications"),
+    "DELETE FROM applications": _delete("applications"),
+    "INSERT INTO findings": _upsert("findings"),
+    "SELECT data FROM findings WHERE application_id": _select_row("findings"),
+    "DELETE FROM findings": _delete("findings"),
+    "INSERT INTO application_names": _upsert("names"),
+    "SELECT repository, name FROM application_names": _select_pairs("names"),
+}
+
+
 class FakeCursor:
     def __init__(self, connection):
         self.connection = connection
@@ -30,48 +82,25 @@ class FakeCursor:
         return False
 
     def execute(self, query, params=()):
-        tables = self.connection.tables
         normalized = " ".join(query.split())
-        self._result = []
-        self.rowcount = 0
 
-        if normalized.startswith("CREATE TABLE"):
-            return
-        if normalized.startswith("INSERT INTO applications"):
-            tables["applications"][params[0]] = params[1]
-            return
-        if normalized.startswith("SELECT data FROM applications WHERE id"):
-            if params[0] in tables["applications"]:
-                self._result = [(tables["applications"][params[0]],)]
-            return
-        if normalized.startswith("SELECT 1 FROM applications WHERE id"):
-            if params[0] in tables["applications"]:
-                self._result = [(1,)]
-            return
-        if normalized.startswith("SELECT data FROM applications"):
-            self._result = [(row,) for row in tables["applications"].values()]
-            return
-        if normalized.startswith("DELETE FROM applications"):
-            self.rowcount = 1 if tables["applications"].pop(params[0], None) is not None else 0
-            return
-        if normalized.startswith("INSERT INTO findings"):
-            tables["findings"][params[0]] = params[1]
-            return
-        if normalized.startswith("SELECT data FROM findings WHERE application_id"):
-            if params[0] in tables["findings"]:
-                self._result = [(tables["findings"][params[0]],)]
-            return
-        if normalized.startswith("DELETE FROM findings"):
-            tables["findings"].pop(params[0], None)
-            return
-        if normalized.startswith("INSERT INTO application_names"):
-            tables["names"][params[0]] = params[1]
-            return
-        if normalized.startswith("SELECT repository, name FROM application_names"):
-            self._result = list(tables["names"].items())
-            return
+        handler = next(
+            (
+                handler
+                for prefix, handler in HANDLERS.items()
+                if normalized.startswith(prefix)
+            ),
+            None,
+        )
 
-        raise AssertionError(f"Unexpected SQL: {normalized}")
+        if handler is None:
+            raise AssertionError(f"Unexpected SQL: {normalized}")
+
+        outcome = handler(self.connection.tables, params)
+
+        self._result, self.rowcount = (
+            outcome if isinstance(outcome, tuple) else (outcome, 0)
+        )
 
     def fetchone(self):
         return self._result[0] if self._result else None
@@ -262,5 +291,10 @@ def test_payloads_keep_unicode_and_nesting(fake_db):
     stored = scans.load_application("app-u")
 
     assert stored == application
-    # Stored as JSON text, not bytes, by the time it reaches the driver.
-    assert json.loads(fake_db.tables["applications"]["app-u"]) == application
+    # pg8000 serializes dict parameters to JSONB itself.
+    assert fake_db.tables["applications"]["app-u"] == application
+
+    # A driver that hands JSONB back as text is still understood.
+    fake_db.tables["applications"]["app-u"] = json.dumps(application)
+
+    assert scans.load_application("app-u") == application
