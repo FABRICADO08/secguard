@@ -24,6 +24,18 @@ To serve it with a production WSGI server:
 
 Keep `--workers 1`: the rate limiter holds its counters in process, so additional workers would each enforce the limit separately.
 
+## Database
+
+By default SecGuard stores scan results, findings and application names as JSON files under `data/` — no database is needed for local development.
+
+Set `POSTGRES_URL` (or `DATABASE_URL`) to a Postgres connection string to persist them in a database instead. This is the recommended setup for a deployed instance, where the filesystem is ephemeral. [Neon](https://neon.tech) serverless Postgres works out of the box: create a project, copy the connection string it shows (it already carries `sslmode=require`), and set it as an application setting — for example in Azure under **App Service → Settings → Environment variables**:
+
+```
+POSTGRES_URL=postgresql://<user>:<password>@<host>.neon.tech/<database>?sslmode=require
+```
+
+The schema (`applications`, `findings` and `application_names` tables) is created automatically on first use; no migration step is required. Switching between the file store and the database does not copy existing records — each store keeps its own data.
+
 ## Tests
 
 ```bash
@@ -221,6 +233,7 @@ The login uses the authorization-code flow with `state` and PKCE; the GitHub tok
 | `SECGUARD_ALLOWED_TARGET_HOSTS` | empty | Comma-separated hostnames that may be scanned regardless of the address they resolve to, e.g. `127.0.0.1,localhost` for a local test target. |
 | `SECGUARD_RATE_LIMIT_REQUESTS` | `10` | Scan requests allowed per client address per window. |
 | `SECGUARD_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. |
+| `POSTGRES_URL` / `DATABASE_URL` | empty | Postgres connection string (e.g. from Neon) that moves storage from JSON files to the database. See **Database**. |
 
 Target policy is enforced before the first request, again on every redirect hop, and once more against the address each connection actually lands on, so neither a redirect nor a second DNS answer can steer the scanner onto an internal address. Scans always run over direct connections: proxy settings are ignored and an explicitly proxied request is refused, because a proxy would connect on the scanner's behalf. Other environment settings, such as `REQUESTS_CA_BUNDLE`, still apply. The rate limiter is in-process; running multiple workers would need a shared store.
 

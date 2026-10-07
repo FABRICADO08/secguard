@@ -5,6 +5,8 @@ import shutil
 from pathlib import Path
 from typing import Any
 
+from backend.storage import db
+
 ROOT = (
     Path(__file__)
     .resolve()
@@ -90,7 +92,12 @@ def load_json(
 
 def save_application(
     application: dict[str, Any],
-) -> Path:
+) -> None:
+
+    if db.use_database():
+        db.save_application(application)
+
+        return
 
     application_id = application["id"]
 
@@ -98,22 +105,18 @@ def save_application(
         application_id
     )
 
-    path = (
-        directory
-        / "application.json"
-    )
-
     save_json(
-        path,
+        directory / "application.json",
         application,
     )
-
-    return path
 
 
 def load_application(
     application_id: str,
 ) -> dict[str, Any]:
+
+    if db.use_database():
+        return db.load_application(application_id)
 
     path = (
         application_directory(
@@ -131,6 +134,9 @@ def application_exists(
     application_id: str,
 ) -> bool:
 
+    if db.use_database():
+        return db.application_exists(application_id)
+
     path = (
         APPLICATIONS_DIR
         / application_id
@@ -144,11 +150,14 @@ def delete_application(
     application_id: str,
 ) -> bool:
     """
-    Remove an application directory and everything stored under it.
+    Remove an application and everything stored under it.
 
     Returns False when the application does not exist or the id does
     not resolve to a direct child of the applications directory.
     """
+
+    if db.use_database():
+        return db.delete_application(application_id)
 
     ensure_storage()
 
@@ -171,6 +180,9 @@ def delete_application(
 
 
 def list_applications() -> list[dict[str, Any]]:
+
+    if db.use_database():
+        return db.list_applications()
 
     ensure_storage()
 

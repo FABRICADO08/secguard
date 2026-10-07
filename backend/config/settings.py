@@ -44,7 +44,15 @@ def _list_env(name: str) -> frozenset[str]:
         if item.strip()
     )
 
-db_url = os.environ.get("POSTGRES_URL") 
+# Postgres connection string. When set (Neon supplies POSTGRES_URL), scan
+# results, findings and application names persist in the database instead of
+# JSON files under data/. Empty keeps the file-based store, which is what
+# local development and the tests use.
+DATABASE_URL = (
+    os.environ.get("POSTGRES_URL")
+    or os.environ.get("DATABASE_URL")
+    or ""
+).strip()
 
 
 # Shared secret required by the scanning and delete endpoints. When it is
