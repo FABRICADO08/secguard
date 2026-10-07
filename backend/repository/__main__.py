@@ -22,6 +22,7 @@ from backend.repository.sbom import cyclonedx, spdx
 from backend.repository.scanner import scan_repository
 from backend.repository.suggestions import SEVERITY_RANK, GitHubClient, build_review
 from backend.repository.vulnerabilities import http_poster
+from backend.storage import application_names
 
 
 def _write(path: str, document: dict[str, Any]) -> None:
@@ -95,7 +96,12 @@ def command_scan(arguments: argparse.Namespace) -> int:
     application_name = arguments.application_name or os.environ.get("SECGUARD_APPLICATION_NAME", "")
 
     if application_name.strip():
-        repository["application_name"] = application_name.strip()
+        problem = application_names.name_problem(application_name)
+
+        if problem:
+            raise SystemExit(f"--application-name: {problem}")
+
+        repository["application_name"] = application_names.normalise(application_name)
 
     if os.environ.get("GITHUB_SERVER_URL") and os.environ.get("GITHUB_REPOSITORY"):
         repository["url"] = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"

@@ -341,3 +341,5 @@ def test_cli_records_application_name(repo, tmp_path, monkeypatch):
     assert json.loads(output.read_text())["repository"]["application_name"] == "Customer Portal"
     main(["scan", str(repo), "--offline", "--output", str(output), "--application-name", "Billing"])
     assert json.loads(output.read_text())["repository"]["application_name"] == "Billing"
+    with pytest.raises(SystemExit):
+        main(["scan", str(repo), "--offline", "--output", str(output), "--application-name", "x" * 81])

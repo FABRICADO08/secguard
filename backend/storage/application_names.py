@@ -18,16 +18,32 @@ def _path() -> Path:
     return scans.APPLICATIONS_DIR.parent / "application_names.json"
 
 
-def clean_name(value: object) -> str:
-    name = re.sub(r"\s+", " ", value).strip() if isinstance(value, str) else ""
+EMPTY = "The application name cannot be empty."
+TOO_LONG = f"The application name can have at most {MAX_LENGTH} characters."
+
+
+def name_problem(value: object) -> str:
+    """Why ``value`` cannot be an application name, or "" when it can."""
+
+    name = normalise(value)
 
     if not name:
-        raise ValueError("The application name cannot be empty.")
+        return EMPTY
 
-    if len(name) > MAX_LENGTH:
-        raise ValueError(f"The application name can have at most {MAX_LENGTH} characters.")
+    return TOO_LONG if len(name) > MAX_LENGTH else ""
 
-    return name
+
+def normalise(value: object) -> str:
+    return re.sub(r"\s+", " ", value).strip() if isinstance(value, str) else ""
+
+
+def clean_name(value: object) -> str:
+    problem = name_problem(value)
+
+    if problem:
+        raise ValueError(problem)
+
+    return normalise(value)
 
 
 def _load() -> dict[str, str]:

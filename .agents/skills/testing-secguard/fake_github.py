@@ -4,6 +4,7 @@ Run: python fake_github.py [port]   (default 9100). Dispatches are appended to /
 """
 import json
 import os
+import re
 import sys
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -11,6 +12,8 @@ from urllib.parse import parse_qs, urlencode, urlparse
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 9100
 LOG = "/tmp/fakegh.log"
 TOKEN = "gho_fake_token"
+CALLBACK = re.compile(r"http://(127\.0\.0\.1|localhost):(\d{1,5})/auth/github/callback")
+HOSTS = {"127.0.0.1": "127.0.0.1", "localhost": "localhost"}
 
 
 def repo(full, push, desc="", private=False, pull=True):
@@ -51,8 +54,14 @@ class Handler(BaseHTTPRequestHandler):
         if url.path == "/login/oauth/authorize":
             log({"authorize": {k: v[0] for k, v in query.items()}})
             # Touch /tmp/fakegh_tamper to simulate an attacker-altered state on the way back.
-            state = "TAMPERED" if os.path.exists("/tmp/fakegh_tamper") else query["state"][0]
-            target = query["redirect_uri"][0] + "?" + urlencode({"code": "fake-code", "state": state})
+            callback = CALLBACK.fullmatch(query.get("redirect_uri", [""])[0])
+            state = re.sub(r"[^A-Za-z0-9_-]", "", query.get("state", [""])[0])
+            if callback is None:
+                return self._json(400, {"message": "redirect_uri must be a local /auth/github/callback"})
+            if os.path.exists("/tmp/fakegh_tamper"):
+                state = "TAMPERED"
+            base = f"http://{HOSTS[callback.group(1)]}:{int(callback.group(2))}/auth/github/callback"
+            target = (base + "?" + urlencode({"code": "fake-code", "state": state})).replace("\r", "").replace("\n", "")
             self.send_response(302)
             self.send_header("Location", target)
             self.end_headers()

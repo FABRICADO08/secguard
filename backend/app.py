@@ -1542,12 +1542,13 @@ def ingest_repository_scan():
             request.get_json(silent=True)
         )
 
-    except ValueError as exc:
+    except ValueError:
 
         return jsonify(
             {
                 "success": False,
-                "error": str(exc),
+                "error": "The upload is not a valid SecGuard repository report. "
+                         "Generate it with 'python -m backend.repository scan'.",
             }
         ), 400
 
@@ -1935,17 +1936,19 @@ def rename_repository_application(
             }
         ), 401
 
-    try:
-        label = application_names.clean_name((request.get_json(silent=True) or {}).get("name"))
+    value = (request.get_json(silent=True) or {}).get("name")
+    problem = application_names.name_problem(value)
 
-    except ValueError as exc:
+    if problem:
 
         return jsonify(
             {
                 "success": False,
-                "error": str(exc),
+                "error": problem,
             }
         ), 400
+
+    label = application_names.normalise(value)
 
     application_names.set_name(full_name, label)
 
