@@ -173,3 +173,54 @@ def test_rename_application(client, github, tmp_path):
     assert client.put("/api/repositories/acme/api/name", json={"name": "   "}).status_code == 400
     assert client.put("/api/repositories/acme/docs/name", json={"name": "Docs"}).status_code == 403
     assert client.put("/api/repositories/other/secret/name", json={"name": "Mine"}).status_code == 404
+
+
+def test_pages_send_signed_out_users_to_the_sign_in_page(client, github):
+    for path in ("/", "/applications.html", "/dashboard.html?period=90"):
+        response = client.get(path)
+        assert response.status_code == 302
+        assert response.headers["Location"].startswith("/login.html?next=")
+
+    assert client.get("/login.html").status_code == 200
+    assert client.get("/css/views.css").status_code == 200
+    assert client.get("/js/login.js").status_code == 200
+
+    sign_in(client)
+
+    assert client.get("/applications.html").status_code == 200
+    assert client.get("/login.html").headers["Location"] == "/applications.html"
+
+
+def test_pages_stay_open_without_github_sign_in(client):
+    assert client.get("/applications.html").status_code == 200
+    assert client.get("/login.html").status_code == 200
+
+
+def test_sign_in_returns_to_the_requested_page(client, github):
+    login = client.get("/auth/github/login?next=/application-health.html%3Fid%3Dabc123")
+    state = parse_qs(urlparse(login.headers["Location"]).query)["state"][0]
+
+    callback = client.get(f"/auth/github/callback?code=abc&state={state}")
+
+    assert callback.headers["Location"] == "/application-health.html?id=abc123"
+
+
+@pytest.mark.parametrize(
+    "target",
+    ["//evil.example", "https://evil.example/", "/\\evil.example", "/../etc/passwd", "/login.html", "javascript:alert(1)"],
+)
+def test_sign_in_never_returns_to_another_site(client, github, target):
+    login = client.get("/auth/github/login", query_string={"next": target})
+    state = parse_qs(urlparse(login.headers["Location"]).query)["state"][0]
+
+    callback = client.get(f"/auth/github/callback?code=abc&state={state}")
+
+    assert callback.headers["Location"] == "/applications.html"
+
+
+def test_failed_sign_in_shows_the_sign_in_page(client, github):
+    client.get("/auth/github/login")
+    response = client.get("/auth/github/callback?code=abc&state=forged")
+
+    assert response.status_code == 400
+    assert "/js/login.js" in response.get_data(as_text=True)

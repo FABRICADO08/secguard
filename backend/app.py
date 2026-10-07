@@ -3,10 +3,12 @@ from __future__ import annotations
 import json
 import secrets
 from pathlib import Path
+from urllib.parse import urlencode
 
 from flask import (
     Flask,
     jsonify,
+    redirect,
     request,
     send_from_directory,
 )
@@ -162,8 +164,36 @@ def hide_inaccessible_applications():
 # Frontend
 # ============================================================
 
+def _sign_in_gate(page: str):
+    """
+    With GitHub sign-in configured, pages open only for a signed-in user;
+    everyone else is sent to the sign-in page and brought back afterwards.
+    """
+
+    if not github_auth.enabled() or not page.endswith(".html"):
+        return None
+
+    signed_in = github_auth.current_user() is not None
+
+    if page == github_auth.LOGIN_PAGE:
+        return redirect(github_auth.DEFAULT_LANDING) if signed_in else None
+
+    if signed_in:
+        return None
+
+    return redirect(
+        "/login.html?" + urlencode({"next": request.full_path.rstrip("?")})
+    )
+
+
 @app.get("/")
 def index():
+
+    gate = _sign_in_gate("index.html")
+
+    if gate is not None:
+
+        return gate
 
     return send_from_directory(
         FRONTEND,
@@ -175,6 +205,12 @@ def index():
 def frontend_files(path):
 
     file_path = FRONTEND / path
+
+    gate = _sign_in_gate(path)
+
+    if gate is not None and file_path.is_file():
+
+        return gate
 
     if file_path.is_file():
 

@@ -651,12 +651,26 @@ function gradeBadge(grade, small) {
 }
 
 
-async function currentUser() {
-    try {
-        return await getJson("/api/auth/me");
-    } catch (error) {
-        return { github_enabled: false, authenticated: false, user: null };
+let currentUserRequest = null;
+
+
+function currentUser() {
+    if (!currentUserRequest) {
+        currentUserRequest = getJson("/api/auth/me").catch(() => ({
+            github_enabled: false,
+            authenticated: false,
+            user: null,
+        }));
     }
+
+    return currentUserRequest;
+}
+
+
+function signInUrl() {
+    return `/login.html?next=${encodeURIComponent(
+        window.location.pathname + window.location.search
+    )}`;
 }
 
 
@@ -666,7 +680,7 @@ function userChipMarkup(me) {
     }
 
     if (!me.authenticated) {
-        return '<a class="button" href="/auth/github/login">Sign in with GitHub</a>';
+        return `<a class="button" href="${escapeHtml(signInUrl())}">Sign in with GitHub</a>`;
     }
 
     return `
@@ -674,7 +688,7 @@ function userChipMarkup(me) {
             ${me.user.avatar_url
                 ? `<img src="${escapeHtml(me.user.avatar_url)}" alt="">`
                 : ""}
-            <span>${escapeHtml(me.user.login)}</span>
+            <span title="${escapeHtml(me.user.name || me.user.login)}">${escapeHtml(me.user.login)}</span>
             <button class="button button--ghost" id="signOut" type="button">
                 Sign out
             </button>
@@ -690,7 +704,7 @@ function bindSignOut() {
         button.addEventListener("click", async () => {
             await apiFetch("/auth/logout", { method: "POST" });
 
-            window.location.href = "/applications.html";
+            window.location.href = "/login.html";
         });
     }
 }

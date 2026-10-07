@@ -14,11 +14,20 @@ import secrets
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import parse_qsl, urlencode, urlsplit
 
 import requests
-from flask import Blueprint, jsonify, redirect, request, session, url_for
+from flask import (
+    Blueprint,
+    jsonify,
+    redirect,
+    request,
+    send_from_directory,
+    session,
+    url_for,
+)
 
 from backend.config import settings
 
@@ -27,6 +36,17 @@ TIMEOUT = 15
 MAX_REPOSITORY_PAGES = 10
 
 blueprint = Blueprint("github_auth", __name__)
+
+FRONTEND = Path(__file__).resolve().parents[2] / "frontend"
+
+LOGIN_PAGE = "login.html"
+
+DEFAULT_LANDING = "/applications.html"
+
+# Pages a sign-in may return to; anything else lands on My Applications.
+LANDING_PAGES = frozenset(
+    page.name for page in FRONTEND.glob("*.html") if page.name != LOGIN_PAGE
+)
 
 
 @dataclass
@@ -147,6 +167,31 @@ def _callback_url() -> str:
     return settings.GITHUB_CALLBACK_URL or url_for("github_auth.callback", _external=True)
 
 
+def safe_next(value: str) -> str:
+    """The SecGuard page to return to after sign-in, never another site."""
+
+    parts = urlsplit(str(value or ""))
+
+    if parts.scheme or parts.netloc or not str(value or "").startswith("/"):
+        return DEFAULT_LANDING
+
+    name = parts.path.lstrip("/") or "index.html"
+    page = next((page for page in LANDING_PAGES if page == name), None)
+
+    if page is None:
+        return DEFAULT_LANDING
+
+    query = urlencode(parse_qsl(parts.query))
+
+    return f"/{page}?{query}" if query else f"/{page}"
+
+
+def _sign_in_failed(status: int):
+    """Send the browser back to the sign-in page, which explains the failure."""
+
+    return send_from_directory(FRONTEND, LOGIN_PAGE), status
+
+
 def _not_configured():
     return jsonify({"success": False, "error": "GitHub sign-in is not configured."}), 404
 
@@ -162,6 +207,7 @@ def login():
 
     session["oauth_state"] = state
     session["oauth_verifier"] = verifier
+    session["next"] = safe_next(request.args.get("next", ""))
 
     query = urlencode(
         {
@@ -184,11 +230,12 @@ def callback():
 
     expected = session.pop("oauth_state", "")
     verifier = session.pop("oauth_verifier", "")
+    landing = safe_next(session.pop("next", ""))
     state = request.args.get("state", "")
     code = request.args.get("code", "")
 
     if not expected or not code or not hmac.compare_digest(state, expected):
-        return jsonify({"success": False, "error": "Sign-in failed: invalid or expired state."}), 400
+        return _sign_in_failed(400)
 
     try:
         exchange = github_request(
@@ -207,7 +254,7 @@ def callback():
         token = str((exchange.json() or {}).get("access_token") or "")
 
         if not token:
-            return jsonify({"success": False, "error": "GitHub did not issue an access token."}), 400
+            return _sign_in_failed(400)
 
         profile_response = _api("GET", "/user", token)
         profile_response.raise_for_status()
@@ -216,7 +263,7 @@ def callback():
         repositories = fetch_repositories(token)
 
     except (requests.RequestException, ValueError):
-        return jsonify({"success": False, "error": "Could not reach GitHub."}), 502
+        return _sign_in_failed(502)
 
     session_id = secrets.token_urlsafe(32)
 
@@ -238,7 +285,7 @@ def callback():
     session.clear()
     session["sid"] = session_id
 
-    return redirect("/applications.html")
+    return redirect(landing)
 
 
 @blueprint.post("/auth/logout")

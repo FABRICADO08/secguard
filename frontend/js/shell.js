@@ -209,6 +209,17 @@ function breadcrumbMarkup(trail) {
 }
 
 
+async function fillUserSlot() {
+    const me = await currentUser();
+    const slot = document.getElementById("userSlot");
+
+    if (slot) {
+        slot.innerHTML = userChipMarkup(me);
+        bindSignOut();
+    }
+}
+
+
 /**
  * Render the shell and return the element pages should fill.
  *
@@ -366,6 +377,7 @@ function renderShell(options) {
                     <div class="topbar__tools">
                         ${periodChip}
                         ${settings.tools || ""}
+                        <span id="userSlot"></span>
                     </div>
 
                 </header>
@@ -411,6 +423,8 @@ function renderShell(options) {
             window.dispatchEvent(new CustomEvent("periodchange"));
         });
     }
+
+    fillUserSlot();
 
     return document.getElementById("view");
 }

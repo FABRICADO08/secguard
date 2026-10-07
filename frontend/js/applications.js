@@ -184,10 +184,7 @@ async function load() {
             { text: "Portfolio", href: "/dashboard.html" },
             { text: "My Applications" },
         ],
-        tools: userChipMarkup(me),
     });
-
-    bindSignOut();
 
     if (me.github_enabled && !me.authenticated) {
         view.innerHTML = `
@@ -198,7 +195,7 @@ async function load() {
                     GitHub account can access.
                 </p>
                 <p>
-                    <a class="button" href="/auth/github/login">
+                    <a class="button" href="${escapeHtml(signInUrl())}">
                         Sign in with GitHub
                     </a>
                 </p>

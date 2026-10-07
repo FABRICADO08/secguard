@@ -448,10 +448,7 @@ async function load() {
             { text: "My Applications", href: "/applications.html" },
             { text: "Application Health" },
         ],
-        tools: userChipMarkup(me),
     });
-
-    bindSignOut();
 
     if (!applicationId) {
         view.innerHTML = `
@@ -486,7 +483,7 @@ async function load() {
             <div class="notice notice--error">
                 ${escapeHtml(error.message || "Could not load application.")}
                 ${me.github_enabled && !me.authenticated
-                    ? ' <a href="/auth/github/login">Sign in with GitHub</a>'
+                    ? ` <a href="${escapeHtml(signInUrl())}">Sign in with GitHub</a>`
                     : ""}
             </div>
         `;
