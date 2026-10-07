@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 
 
@@ -86,6 +87,12 @@ GITHUB_CLIENT_SECRET = os.environ.get("SECGUARD_GITHUB_CLIENT_SECRET", "").strip
 # request when empty.
 GITHUB_CALLBACK_URL = os.environ.get("SECGUARD_GITHUB_CALLBACK_URL", "").strip()
 
+# The app sits behind more than one hop on some platforms (Azure Front Door
+# in front of App Service, for example); when the real hop count is unknown,
+# trusting the first X-Forwarded-* value of each header still yields the
+# public scheme and host visitors actually reach.
+TRUST_FIRST_FORWARDED_VALUE = _bool_env("SECGUARD_TRUST_FIRST_FORWARDED_VALUE")
+
 # Number of proxies in front of SecGuard. When it is above zero, the
 # X-Forwarded-* headers the proxy sets decide the scheme and host seen by
 # the application, so URLs derived from the request (for example the
@@ -102,9 +109,15 @@ GITHUB_API_URL = os.environ.get("SECGUARD_GITHUB_API_URL", "https://api.github.c
 # Workflow file started by "Run scan".
 GITHUB_WORKFLOW = os.environ.get("SECGUARD_GITHUB_WORKFLOW", "secguard.yml")
 
-# Signs the session cookie. A random key is used when unset, which signs
-# everyone out whenever the server restarts.
+# Signs the session cookie. When unset, the key is derived from the GitHub
+# OAuth client secret so cookies survive restarts; without either, a random
+# key is used and everyone is signed out whenever the server restarts.
 SECRET_KEY = os.environ.get("SECGUARD_SECRET_KEY", "").strip()
+
+if not SECRET_KEY and GITHUB_CLIENT_SECRET:
+    SECRET_KEY = hashlib.sha256(
+        b"secguard-session-key\0" + GITHUB_CLIENT_SECRET.encode()
+    ).hexdigest()
 
 SESSION_COOKIE_SECURE = _bool_env("SECGUARD_SECURE_COOKIES")
 

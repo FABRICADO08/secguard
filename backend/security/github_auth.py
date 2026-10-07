@@ -1,7 +1,9 @@
 """
 Sign in with GitHub and decide which repository results a user may see.
 
-Sessions live in process memory (the server runs a single worker); the
+The OAuth handshake spans two requests that may land on different workers —
+and the container may restart between them — so pending state and signed-in
+sessions are kept in the shared store (backend.storage.sessions); the
 cookie only carries a random session id, never the GitHub token.
 """
 
@@ -9,9 +11,7 @@ from __future__ import annotations
 
 import base64
 import hashlib
-import hmac
 import secrets
-import threading
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -29,6 +29,7 @@ from flask import (
 )
 
 from backend.config import settings
+from backend.storage import sessions as session_store
 
 TIMEOUT = 15
 
@@ -58,13 +59,35 @@ class GitHubUser:
     expires: float = 0.0
 
 
-_sessions: dict[str, GitHubUser] = {}
-
-_lock = threading.Lock()
-
-
 def enabled() -> bool:
     return bool(settings.GITHUB_CLIENT_ID and settings.GITHUB_CLIENT_SECRET)
+
+
+# --------------------------------------------------------------------- codec
+#
+# Session payloads cross processes as JSON. Only JSON types may be stored.
+
+
+def _encode(user: GitHubUser) -> dict[str, Any]:
+    return {
+        "login": user.login,
+        "name": user.name,
+        "avatar_url": user.avatar_url,
+        "token": user.token,
+        "repositories": user.repositories,
+        "expires": user.expires,
+    }
+
+
+def _decode(payload: dict[str, Any]) -> GitHubUser:
+    return GitHubUser(
+        login=str(payload.get("login") or ""),
+        name=str(payload.get("name") or ""),
+        avatar_url=str(payload.get("avatar_url") or ""),
+        token=str(payload.get("token") or ""),
+        repositories=dict(payload.get("repositories") or {}),
+        expires=float(payload.get("expires") or 0),
+    )
 
 
 def github_request(method: str, url: str, **kwargs: Any) -> requests.Response:
@@ -128,14 +151,12 @@ def current_user() -> GitHubUser | None:
     if not session_id:
         return None
 
-    with _lock:
-        user = _sessions.get(session_id)
+    payload = session_store.get("user", session_id)
 
-        if user is not None and user.expires < time.time():
-            _sessions.pop(session_id, None)
-            user = None
+    if payload is None:
+        return None
 
-    return user
+    return _decode(payload)
 
 
 def repository_name(application: dict[str, Any]) -> str:
@@ -211,9 +232,19 @@ def login():
     verifier = secrets.token_urlsafe(48)
     challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).rstrip(b"=").decode()
 
-    session["oauth_state"] = state
-    session["oauth_verifier"] = verifier
-    session["next"] = safe_next(request.args.get("next", ""))
+    # The callback may reach another worker or a restarted container, so the
+    # handshake state cannot travel in the signed cookie (Flask cookies are
+    # not shared across workers and a new key is drawn on restart when
+    # SECGUARD_SECRET_KEY is unset) — keep it in the shared store instead.
+    session_store.put(
+        "pending",
+        state,
+        {
+            "verifier": verifier,
+            "next": safe_next(request.args.get("next", "")),
+            "expires": time.time() + session_store.PENDING_TTL_SECONDS,
+        },
+    )
 
     query = urlencode(
         {
@@ -234,14 +265,18 @@ def callback():
     if not enabled():
         return _not_configured()
 
-    expected = session.pop("oauth_state", "")
-    verifier = session.pop("oauth_verifier", "")
-    landing = safe_next(session.pop("next", ""))
     state = request.args.get("state", "")
     code = request.args.get("code", "")
 
-    if not expected or not code or not hmac.compare_digest(state, expected):
+    # Popping makes every state single-use, so a leaked code cannot be
+    # replayed, and an expired (or never started) handshake fails closed.
+    pending = session_store.pop("pending", state) if state else None
+
+    if pending is None or not code:
         return _sign_in_failed(400)
+
+    verifier = str(pending.get("verifier") or "")
+    landing = safe_next(str(pending.get("next") or ""))
 
     try:
         exchange = github_request(
@@ -273,20 +308,20 @@ def callback():
 
     session_id = secrets.token_urlsafe(32)
 
-    with _lock:
-        now = time.time()
-
-        for key in [key for key, user in _sessions.items() if user.expires < now]:
-            _sessions.pop(key, None)
-
-        _sessions[session_id] = GitHubUser(
-            login=str(profile.get("login") or ""),
-            name=str(profile.get("name") or ""),
-            avatar_url=str(profile.get("avatar_url") or ""),
-            token=token,
-            repositories=repositories,
-            expires=now + settings.SESSION_HOURS * 3600,
-        )
+    session_store.put(
+        "user",
+        session_id,
+        _encode(
+            GitHubUser(
+                login=str(profile.get("login") or ""),
+                name=str(profile.get("name") or ""),
+                avatar_url=str(profile.get("avatar_url") or ""),
+                token=token,
+                repositories=repositories,
+                expires=time.time() + settings.SESSION_HOURS * 3600,
+            )
+        ),
+    )
 
     session.clear()
     session["sid"] = session_id
@@ -299,8 +334,7 @@ def logout():
     session_id = session.pop("sid", None)
 
     if session_id:
-        with _lock:
-            _sessions.pop(session_id, None)
+        session_store.delete("user", session_id)
 
     session.clear()
 
@@ -326,10 +360,12 @@ def me():
 
 
 def refresh_repositories(user: GitHubUser) -> None:
-    repositories = fetch_repositories(user.token)
+    user.repositories = fetch_repositories(user.token)
 
-    with _lock:
-        user.repositories = repositories
+    session_id = session.get("sid")
+
+    if session_id:
+        session_store.put("user", session_id, _encode(user))
 
 
 def dispatch_workflow(user: GitHubUser, repository: dict[str, Any]) -> requests.Response:

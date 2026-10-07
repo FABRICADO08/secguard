@@ -27,7 +27,8 @@ from backend.config import settings
 
 _lock = threading.Lock()
 
-_ready = False
+# Schemas (setup functions) already created in this process.
+_ready: set = set()
 
 # Tests override selection/connection through these two hooks.
 _override = None
@@ -72,11 +73,43 @@ def _connect():
     return pg8000.connect(**_connection_kwargs(settings.DATABASE_URL))
 
 
-@contextmanager
-def _connection():
-    init_schema()
+def _schema_ready(schema) -> bool:
+    """The schema is created once per process per table group."""
 
-    connection = _connect()
+    with _lock:
+        if schema in _ready:
+            return False
+
+        _ready.add(schema)
+
+    return True
+
+
+@contextmanager
+def _connection(init=None):
+    """Open a connection, first running the caller's schema setup once.
+
+    ``init`` defaults to the core schema; modules with their own tables
+    pass a setup function so their schema exists without forcing the core
+    one. A failed setup clears the process flag so the next call retries.
+    """
+
+    setup = init or init_schema
+
+    if _schema_ready(setup):
+        connection = _connect()
+    else:
+        connection = _connect()
+
+        try:
+            setup(connection)
+            connection.commit()
+        except BaseException:
+            with _lock:
+                _ready.discard(setup)
+
+            connection.close()
+            raise
 
     try:
         yield connection
@@ -85,59 +118,65 @@ def _connection():
         connection.close()
 
 
-def init_schema() -> None:
-    """Create the tables once per process; safe to call on every request."""
+def init_schema(connection=None) -> None:
+    """Create the core tables; safe to call on every request.
 
-    global _ready
+    Takes an open connection when called from ``_connection``; called
+    directly (as tests do) it opens and closes its own.
+    """
 
-    if _ready:
-        return
-
-    with _lock:
-        if _ready:
+    if connection is None:
+        if not _schema_ready(init_schema):
             return
 
-        connection = _connect()
+        owned = _connect()
 
         try:
-            with connection.cursor() as cursor:
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS applications (
-                        id TEXT PRIMARY KEY,
-                        data JSONB NOT NULL
-                    )
-                    """
-                )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS findings (
-                        application_id TEXT PRIMARY KEY,
-                        data JSONB NOT NULL
-                    )
-                    """
-                )
-                cursor.execute(
-                    """
-                    CREATE TABLE IF NOT EXISTS application_names (
-                        repository TEXT PRIMARY KEY,
-                        name TEXT NOT NULL
-                    )
-                    """
-                )
-            connection.commit()
-        finally:
-            connection.close()
+            init_schema(owned)
+            owned.commit()
+        except BaseException:
+            with _lock:
+                _ready.discard(init_schema)
 
-        _ready = True
+            raise
+        finally:
+            owned.close()
+
+        return
+
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS applications (
+                id TEXT PRIMARY KEY,
+                data JSONB NOT NULL
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS findings (
+                application_id TEXT PRIMARY KEY,
+                data JSONB NOT NULL
+            )
+            """
+        )
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS application_names (
+                repository TEXT PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+            """
+        )
 
 
 def reset() -> None:
-    """Drop the cached schema flag and test hooks (used by tests)."""
+    """Drop the cached schema flags and test hooks (used by tests)."""
 
-    global _ready, _override, _connector
+    global _override, _connector
 
-    _ready = False
+    _ready.clear()
     _override = None
     _connector = None
 
