@@ -740,3 +740,78 @@ pre.evidence {
 [hidden] {
     display: none !important;
 }
+
+.login {
+    min-height: 100vh;
+    display: grid;
+    place-items: center;
+    padding: 24px 16px;
+}
+
+.login__card {
+    width: 100%;
+    max-width: 400px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    padding: 32px 28px;
+    display: grid;
+    gap: 16px;
+}
+
+.login__card h1 {
+    margin: 0;
+    font-size: 22px;
+}
+
+.login__card p {
+    margin: 0;
+}
+
+.login__brand {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-weight: 600;
+    font-size: 16px;
+}
+
+.login__logo {
+    width: 32px;
+    height: 32px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    background: var(--accent);
+    color: #fff;
+    font-weight: 700;
+}
+
+.login__action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    width: 100%;
+    min-height: 44px;
+    text-decoration: none;
+}
+
+.login__github {
+    background: #24292f;
+    border-color: #24292f;
+}
+
+.login__github:hover {
+    background: #000;
+}
+
+.login__fine {
+    color: var(--ink-muted);
+    font-size: 12px;
+}
+
+.login code {
+    overflow-wrap: anywhere;
+}
