@@ -12,6 +12,9 @@ inputs:
   path:
     description: Directory to scan, relative to the workspace.
     default: "."
+  application-name:
+    description: Name of the application in SecGuard (for example "Customer Portal"). Defaults to the repository name.
+    default: ""
   server-url:
     description: SecGuard server URL. When set, the report is uploaded there.
     default: ""
@@ -60,6 +63,7 @@ runs:
         SECGUARD_API_TOKEN: ${{ inputs.api-token }}
         SECGUARD_SERVER: ${{ inputs.server-url }}
         SECGUARD_FAIL_ON: ${{ inputs.fail-on }}
+        SECGUARD_APPLICATION_NAME: ${{ inputs.application-name }}
       run: |
         out="$RUNNER_TEMP/secguard"
         mkdir -p "$out"

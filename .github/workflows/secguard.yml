@@ -33,6 +33,9 @@ jobs:
           # Set the SECGUARD_URL repository variable to send results to
           # your SecGuard dashboard; leave it unset to only use GitHub
           # code scanning and pull-request reviews.
+          # Name shown in SecGuard, e.g. "Customer Portal" (repository
+          # variable SECGUARD_APPLICATION_NAME); defaults to the repo name.
+          application-name: ${{ vars.SECGUARD_APPLICATION_NAME }}
           server-url: ${{ vars.SECGUARD_URL }}
           api-token: ${{ secrets.SECGUARD_API_TOKEN }}
           fail-on: none

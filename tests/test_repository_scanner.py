@@ -331,3 +331,13 @@ def test_ingest_rejects_tampered_reports(client, report):
     stored = client.get(f"/api/applications/{response.get_json()['application_id']}/findings").get_json()["findings"][0]
     assert stored["category"] == "supply-chain" and stored["risk"]["score"] > 0
     assert client.post("/api/repository/scans", json={**report, "repository": {"name": "../../etc"}}).status_code == 400
+
+
+def test_cli_records_application_name(repo, tmp_path, monkeypatch):
+    monkeypatch.delenv("GITHUB_ACTIONS", raising=False)
+    monkeypatch.setenv("SECGUARD_APPLICATION_NAME", "Customer Portal")
+    output = tmp_path / "named.json"
+    main(["scan", str(repo), "--offline", "--output", str(output)])
+    assert json.loads(output.read_text())["repository"]["application_name"] == "Customer Portal"
+    main(["scan", str(repo), "--offline", "--output", str(output), "--application-name", "Billing"])
+    assert json.loads(output.read_text())["repository"]["application_name"] == "Billing"

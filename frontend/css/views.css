@@ -736,3 +736,7 @@ pre.evidence {
     margin: 40px auto;
     text-align: center;
 }
+
+[hidden] {
+    display: none !important;
+}

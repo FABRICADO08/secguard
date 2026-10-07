@@ -138,3 +138,38 @@ def test_without_github_configured_everything_stays_open(client, tmp_path, monke
     assert client.get(f"/api/applications/{application_id}").status_code == 200
     names = [item["name"] for item in client.get("/api/repositories").get_json()["repositories"]]
     assert names == ["acme/api"]
+
+
+def test_workflow_application_name_is_used(client, tmp_path, monkeypatch):
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_ID", "")
+    root = tmp_path / "named"
+    root.mkdir()
+    report = scan_repository(root, {"name": "acme/api", "application_name": "  Customer   Portal "})
+    application_id = client.post("/api/repository/scans", json=report).get_json()["application_id"]
+    assert client.get(f"/api/applications/{application_id}").get_json()["application"]["name"] == "Customer Portal"
+    assert client.get("/api/repositories").get_json()["repositories"][0]["display_name"] == "Customer Portal"
+
+    too_long = scan_repository(root, {"name": "acme/api", "application_name": "x" * 81})
+    assert client.post("/api/repository/scans", json=too_long).status_code == 400
+
+
+def test_rename_application(client, github, tmp_path):
+    application_id = ingest(client, tmp_path, "acme/api")
+    assert client.put("/api/repositories/acme/api/name", json={"name": "Billing"}).status_code == 401
+
+    sign_in(client)
+    listed = client.get("/api/repositories").get_json()["repositories"]
+    assert [(item["display_name"], item["can_rename"]) for item in listed] == [("api", True), ("docs", False)]
+
+    response = client.put("/api/repositories/acme/api/name", json={"name": " Billing  Service "})
+    assert response.status_code == 200 and response.get_json()["name"] == "Billing Service"
+    assert client.get(f"/api/applications/{application_id}").get_json()["application"]["name"] == "Billing Service"
+    assert client.get("/api/repositories").get_json()["repositories"][0]["display_name"] == "Billing Service"
+
+    (tmp_path / "newer").mkdir()
+    newer_id = ingest(client, tmp_path / "newer", "acme/api")
+    assert client.get(f"/api/applications/{newer_id}").get_json()["application"]["name"] == "Billing Service"
+
+    assert client.put("/api/repositories/acme/api/name", json={"name": "   "}).status_code == 400
+    assert client.put("/api/repositories/acme/docs/name", json={"name": "Docs"}).status_code == 403
+    assert client.put("/api/repositories/other/secret/name", json={"name": "Mine"}).status_code == 404

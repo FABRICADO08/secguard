@@ -92,6 +92,11 @@ def command_scan(arguments: argparse.Namespace) -> int:
         "trigger": os.environ.get("GITHUB_EVENT_NAME", "manual"),
     }
 
+    application_name = arguments.application_name or os.environ.get("SECGUARD_APPLICATION_NAME", "")
+
+    if application_name.strip():
+        repository["application_name"] = application_name.strip()
+
     if os.environ.get("GITHUB_SERVER_URL") and os.environ.get("GITHUB_REPOSITORY"):
         repository["url"] = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
 
@@ -176,6 +181,7 @@ def main(argv: list[str] | None = None) -> int:
     scan = commands.add_parser("scan", help="Scan a checked-out repository.")
     scan.add_argument("path", nargs="?", default=".")
     scan.add_argument("--name", default="", help="owner/repo; defaults to $GITHUB_REPOSITORY.")
+    scan.add_argument("--application-name", default="", help="Name shown in SecGuard; defaults to $SECGUARD_APPLICATION_NAME, then the repository name.")
     scan.add_argument("--commit", default="")
     scan.add_argument("--ref", default="")
     scan.add_argument("--output", default="secguard-report.json")

@@ -93,12 +93,13 @@ from backend.scanners.configuration import (
 )
 from backend.config import settings
 from backend.security import github_auth
-from backend.security.auth import require_api_token
+from backend.security.auth import request_is_authorized, require_api_token
 from backend.security.rate_limit import rate_limited
 from backend.security.targets import (
     BlockedTargetError,
     assert_target_allowed,
 )
+from backend.storage import application_names
 from backend.storage.findings import (
     load_findings,
     save_findings,
@@ -1677,6 +1678,20 @@ def _latest_repository_scans() -> dict[str, dict]:
     return latest
 
 
+def _application_name(repository: str, application: dict | None) -> str:
+
+    stored = str((application or {}).get("name") or "")
+
+    if stored.lower() == repository.lower():
+        stored = ""
+
+    return (
+        application_names.name_for(repository)
+        or stored
+        or repository.rsplit("/", 1)[-1]
+    )
+
+
 def _scan_summary(application: dict | None) -> dict | None:
 
     if not application:
@@ -1704,9 +1719,11 @@ def repositories():
                 "default_branch": "",
                 "description": "",
                 "can_trigger": False,
+                "can_rename": True,
+                "display_name": _application_name(key, application),
                 "latest_scan": _scan_summary(application),
             }
-            for application in latest.values()
+            for key, application in latest.items()
         ]
 
     else:
@@ -1725,6 +1742,8 @@ def repositories():
         items = [
             {
                 **repository,
+                "can_rename": repository["can_trigger"],
+                "display_name": _application_name(key, latest.get(key)),
                 "latest_scan": _scan_summary(latest.get(key)),
             }
             for key, repository in user.repositories.items()
@@ -1861,6 +1880,89 @@ def trigger_repository_scan(
             "error": f"GitHub refused to start the workflow (HTTP {response.status_code}).",
         }
     ), 502
+
+
+@app.put("/api/repositories/<owner>/<name>/name")
+def rename_repository_application(
+    owner: str,
+    name: str,
+):
+    """Set the application name shown for a GitHub-connected application."""
+
+    full_name = f"{owner}/{name}"
+
+    if github_auth.enabled():
+
+        user = github_auth.current_user()
+
+        if user is None:
+
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Sign in with GitHub to rename an application.",
+                }
+            ), 401
+
+        repository = user.repositories.get(full_name.lower())
+
+        if repository is None:
+
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Application not found.",
+                }
+            ), 404
+
+        if not repository["can_trigger"]:
+
+            return jsonify(
+                {
+                    "success": False,
+                    "error": "Renaming needs write access to the application's GitHub repository.",
+                }
+            ), 403
+
+        full_name = repository["name"]
+
+    elif not request_is_authorized():
+
+        return jsonify(
+            {
+                "success": False,
+                "error": "Unauthorized. Set SECGUARD_API_TOKEN and send it as 'X-API-Key'.",
+            }
+        ), 401
+
+    try:
+        label = application_names.clean_name((request.get_json(silent=True) or {}).get("name"))
+
+    except ValueError as exc:
+
+        return jsonify(
+            {
+                "success": False,
+                "error": str(exc),
+            }
+        ), 400
+
+    application_names.set_name(full_name, label)
+
+    for summary in list_applications():
+
+        if summary.get("platform") == "Repository" and github_auth.repository_name(summary).lower() == full_name.lower():
+
+            record = load_application(summary["id"])
+            record["name"] = label
+            save_application(record)
+
+    return jsonify(
+        {
+            "success": True,
+            "name": label,
+        }
+    )
 
 
 # ============================================================

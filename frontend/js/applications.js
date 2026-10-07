@@ -14,11 +14,13 @@ function applicationRow(repository) {
 
     const health = scan && scan.health ? scan.health.overall || {} : {};
 
+    const label = repository.display_name || systemName(repository.name);
+
     const title = scan
         ? `<a class="row-title" href="/application-health.html?application=${encodeURIComponent(scan.id)}">
-               ${escapeHtml(systemName(repository.name))}
+               ${escapeHtml(label)}
            </a>`
-        : `<span class="row-title">${escapeHtml(systemName(repository.name))}</span>`;
+        : `<span class="row-title">${escapeHtml(label)}</span>`;
 
     return `
         <tr>

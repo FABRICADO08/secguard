@@ -11,6 +11,7 @@ from backend.repository.findings import PLATFORM, RULE_CATALOGUE
 from backend.repository.scanner import SCHEMA
 from backend.risk.scoring import summarize
 from backend.rules.base import Finding
+from backend.storage import application_names
 
 REPOSITORY_NAME = re.compile(r"^[A-Za-z0-9_.-]+(/[A-Za-z0-9_.-]+)?$")
 
@@ -75,12 +76,19 @@ def application_from_report(report: Any) -> tuple[Application, list[dict[str, An
     findings = [_clean_finding(item) for item in raw_findings]
     quality_findings = [_clean_finding(item) for item in quality.get("findings") or []]
 
+    chosen = repository.get("application_name")
+
+    try:
+        label = application_names.clean_name(chosen) if chosen else ""
+    except ValueError as exc:
+        raise InvalidReportError(str(exc)) from exc
+
     provider = "github" if repository.get("provider") == "github" else "repository"
 
     application = Application.create(
         requested_url=f"{provider}://{name}",
         final_url=str(repository.get("url") or f"{provider}://{name}"),
-        name=name.rsplit("/", 1)[-1],
+        name=application_names.name_for(name) or label or name.rsplit("/", 1)[-1],
     )
 
     application.platform = PLATFORM

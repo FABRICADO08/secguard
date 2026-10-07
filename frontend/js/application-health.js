@@ -172,7 +172,7 @@ function table(headers, rows, empty) {
 }
 
 
-function render(application, canTrigger) {
+function render(application, access) {
     const report = application.repository || {};
     const meta = report.repository || {};
     const health = report.health || {};
@@ -201,9 +201,25 @@ function render(application, canTrigger) {
 
         <section class="card">
             <div class="card__head">
-                <h2>${escapeHtml(systemName(meta.name || application.name))}</h2>
+                <h2 id="applicationName">${escapeHtml(application.name || systemName(meta.name))}</h2>
+                <form class="toolbar" id="renameForm" hidden>
+                    <div class="field">
+                        <input
+                            type="text"
+                            id="renameInput"
+                            maxlength="80"
+                            aria-label="Application name"
+                            value="${escapeHtml(application.name || systemName(meta.name))}"
+                        >
+                    </div>
+                    <button class="button" type="submit">Save</button>
+                    <button class="button button--ghost" id="renameCancel" type="button">Cancel</button>
+                </form>
                 <div class="toolbar">
-                    ${canTrigger
+                    ${access.can_rename
+                        ? '<button class="button button--ghost" id="renameStart" type="button">Rename</button>'
+                        : ""}
+                    ${access.can_trigger
                         ? '<button class="button" id="runScan" type="button">Run scan</button>'
                         : ""}
                     <a class="button button--ghost" href="${sbom("cyclonedx")}">
@@ -314,6 +330,8 @@ function render(application, canTrigger) {
         </section>
     `;
 
+    bindRename(meta.name);
+
     const run = document.getElementById("runScan");
 
     if (run) {
@@ -345,9 +363,57 @@ function render(application, canTrigger) {
 }
 
 
-async function canTriggerScan(me, application) {
-    if (!me.authenticated) {
-        return false;
+function bindRename(fullName) {
+    const start = document.getElementById("renameStart");
+
+    if (!start) {
+        return;
+    }
+
+    const form = document.getElementById("renameForm");
+    const heading = document.getElementById("applicationName");
+    const input = document.getElementById("renameInput");
+
+    const toggle = editing => {
+        form.hidden = !editing;
+        heading.hidden = editing;
+        start.hidden = editing;
+
+        if (editing) {
+            input.focus();
+        }
+    };
+
+    start.addEventListener("click", () => toggle(true));
+
+    document.getElementById("renameCancel").addEventListener("click", () => toggle(false));
+
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const notice = document.getElementById("scanNotice");
+
+        try {
+            const label = await renameApplication(fullName, input.value);
+
+            heading.textContent = label;
+            input.value = label;
+            notice.innerHTML = "";
+            toggle(false);
+        } catch (error) {
+            notice.innerHTML = `
+                <div class="notice notice--error">${escapeHtml(error.message)}</div>
+            `;
+        }
+    });
+}
+
+
+async function repositoryAccess(me, application) {
+    const none = { can_trigger: false, can_rename: false };
+
+    if (me.github_enabled && !me.authenticated) {
+        return none;
     }
 
     const name = String(
@@ -357,11 +423,15 @@ async function canTriggerScan(me, application) {
     try {
         const data = await getJson("/api/repositories");
 
-        return (data.repositories || []).some(
-            item => String(item.name).toLowerCase() === name && item.can_trigger
+        const item = (data.repositories || []).find(
+            entry => String(entry.name).toLowerCase() === name
         );
+
+        return item
+            ? { can_trigger: Boolean(item.can_trigger), can_rename: Boolean(item.can_rename) }
+            : none;
     } catch {
-        return false;
+        return none;
     }
 }
 
@@ -410,7 +480,7 @@ async function load() {
             return;
         }
 
-        render(data.application, await canTriggerScan(me, data.application));
+        render(data.application, await repositoryAccess(me, data.application));
     } catch (error) {
         view.innerHTML = `
             <div class="notice notice--error">

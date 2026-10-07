@@ -696,6 +696,28 @@ function bindSignOut() {
 }
 
 
+async function renameApplication(fullName, label) {
+    const [owner, name] = String(fullName).split("/");
+
+    const response = await apiFetch(
+        `/api/repositories/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/name`,
+        {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: label }),
+        }
+    );
+
+    const data = await response.json();
+
+    if (!response.ok) {
+        throw new Error(data.error || "Could not rename the application.");
+    }
+
+    return data.name;
+}
+
+
 async function triggerRepositoryScan(fullName) {
     const [owner, name] = String(fullName).split("/");
 
