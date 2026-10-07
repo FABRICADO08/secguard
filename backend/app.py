@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import secrets
 from pathlib import Path
 from urllib.parse import urlencode
@@ -55,11 +56,20 @@ from backend.model.normalized import (
 from backend.platforms.mendix.findings import (
     RULE_CATALOGUE as MENDIX_RULE_CATALOGUE,
 )
+from backend.platforms.errors import (
+    EmptyModelError,
+)
+from backend.platforms.mendix.service import (
+    EMPTY_MODEL as MENDIX_EMPTY_MODEL,
+)
 from backend.platforms.mendix.service import (
     analyze_model,
 )
 from backend.platforms.outsystems.findings import (
     RULE_CATALOGUE as OUTSYSTEMS_RULE_CATALOGUE,
+)
+from backend.platforms.outsystems.service import (
+    EMPTY_MODEL as OUTSYSTEMS_EMPTY_MODEL,
 )
 from backend.platforms.outsystems.service import (
     analyze_model as analyze_outsystems_model,
@@ -246,6 +256,15 @@ def health():
                 "0.2.0",
         }
     )
+
+
+BLOCKED_TARGET_MESSAGE = (
+    "The target, or a page it redirects to, is not allowed: only public "
+    "http(s) addresses can be scanned. Set SECGUARD_ALLOW_PRIVATE_TARGETS=1 "
+    "or add the host to SECGUARD_ALLOWED_TARGET_HOSTS to scan it deliberately."
+)
+
+CERTIFICATE_REJECTED_MESSAGE = "The server's TLS certificate failed validation."
 
 
 def _certificate_only_scan(
@@ -760,7 +779,7 @@ def discover():
             }
         )
 
-    except BlockedTargetError as exc:
+    except BlockedTargetError:
 
         return jsonify(
             {
@@ -768,14 +787,14 @@ def discover():
                     False,
 
                 "error":
-                    str(exc),
+                    BLOCKED_TARGET_MESSAGE,
 
                 "reason":
                     "blocked_target",
             }
         ), 403
 
-    except ValueError as exc:
+    except ValueError:
 
         return jsonify(
             {
@@ -783,7 +802,7 @@ def discover():
                     False,
 
                 "error":
-                    str(exc),
+                    "Enter a valid http:// or https:// application URL.",
             }
         ), 400
 
@@ -795,11 +814,11 @@ def discover():
 
             return _certificate_only_scan(
                 url,
-                str(exc),
+                CERTIFICATE_REJECTED_MESSAGE,
                 exc.url,
             )
 
-        except BlockedTargetError as blocked:
+        except BlockedTargetError:
 
             return jsonify(
                 {
@@ -807,14 +826,14 @@ def discover():
                         False,
 
                     "error":
-                        str(blocked),
+                        BLOCKED_TARGET_MESSAGE,
 
                     "reason":
                         "blocked_target",
                 }
             ), 403
 
-    except TargetUnreachableError as exc:
+    except TargetUnreachableError:
 
         return jsonify(
             {
@@ -822,14 +841,16 @@ def discover():
                     False,
 
                 "error":
-                    str(exc),
+                    f"Could not connect to {url}.",
 
                 "reason":
                     "unreachable",
             }
         ), 502
 
-    except Exception as exc:
+    except Exception:
+
+        app.logger.exception("Application discovery failed.")
 
         return jsonify(
             {
@@ -838,9 +859,6 @@ def discover():
 
                 "error":
                     "Application discovery failed.",
-
-                "details":
-                    str(exc),
             }
         ), 500
 
@@ -874,25 +892,32 @@ def _model_name(
 
 def _read_model_upload(
     platform: str = "Mendix",
-) -> tuple[dict, str]:
+) -> tuple[dict, str, str]:
     """
     Accept a platform model as a multipart upload or a JSON body.
 
-    Returns the decoded model document and the name to display for it.
+    Returns the decoded model document, the name to display for it and,
+    when the upload is unusable, why.
     """
 
     fallback = f"{platform.lower()}-model.json"
+    too_large = (
+        f"{platform} model exceeds the "
+        f"{MAX_MODEL_BYTES // (1024 * 1024)} MB upload limit."
+    )
 
     if (request.content_length or 0) > MAX_MODEL_BYTES:
 
-        raise ValueError(
-            f"{platform} model exceeds the "
-            f"{MAX_MODEL_BYTES // (1024 * 1024)} MB upload limit."
-        )
+        return {}, fallback, too_large
 
     upload = request.files.get("model")
 
     if upload is not None:
+
+        name = _model_name(
+            upload.filename,
+            fallback,
+        )
 
         raw = upload.read(
             MAX_MODEL_BYTES + 1
@@ -900,16 +925,11 @@ def _read_model_upload(
 
         if len(raw) > MAX_MODEL_BYTES:
 
-            raise ValueError(
-                f"{platform} model exceeds the "
-                f"{MAX_MODEL_BYTES // (1024 * 1024)} MB upload limit."
-            )
+            return {}, name, too_large
 
         if not raw.strip():
 
-            raise ValueError(
-                f"Uploaded {platform} model file is empty."
-            )
+            return {}, name, f"Uploaded {platform} model file is empty."
 
         try:
 
@@ -917,40 +937,114 @@ def _read_model_upload(
                 raw.decode("utf-8")
             )
 
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except (UnicodeDecodeError, json.JSONDecodeError):
 
-            raise ValueError(
-                f"Uploaded {platform} model is not valid JSON: {exc}"
-            ) from exc
+            return {}, name, f"Uploaded {platform} model is not valid JSON."
 
-        return document, _model_name(
-            upload.filename,
+    else:
+
+        body = request.get_json(
+            silent=True
+        )
+
+        if not isinstance(body, dict):
+
+            return {}, fallback, (
+                f"Provide a {platform} model as a 'model' file upload or "
+                "a JSON body."
+            )
+
+        document = body.get(
+            "model",
+            body,
+        )
+
+        name = _model_name(
+            body.get(
+                "name",
+                "",
+            ),
             fallback,
         )
 
-    body = request.get_json(
-        silent=True
+    if not isinstance(document, dict):
+
+        return {}, name, f"{platform} model JSON root must be an object."
+
+    return document, name, ""
+
+
+def _analyze_upload(
+    platform: str,
+    analyze,
+    empty_model: str,
+):
+    """
+    Read and analyze an uploaded model.
+
+    Returns ``(result, name, None)`` on success, or ``(None, "", response)``
+    with the error response to send.
+    """
+
+    document, name, problem = _read_model_upload(
+        platform
     )
 
-    if not isinstance(body, dict):
+    if problem:
 
-        raise ValueError(
-            f"Provide a {platform} model as a 'model' file upload or "
-            "a JSON body."
+        return None, "", (
+            jsonify(
+                {
+                    "success": False,
+                    "error": problem,
+                }
+            ),
+            400,
         )
 
-    document = body.get(
-        "model",
-        body,
-    )
+    try:
 
-    return document, _model_name(
-        body.get(
-            "name",
-            "",
-        ),
-        fallback,
-    )
+        return analyze(document), name, None
+
+    except EmptyModelError:
+
+        return None, "", (
+            jsonify(
+                {
+                    "success": False,
+                    "error": empty_model,
+                }
+            ),
+            400,
+        )
+
+    except ValueError:
+
+        app.logger.exception("Invalid %s model", platform)
+
+        return None, "", (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"The {platform} model could not be read.",
+                }
+            ),
+            400,
+        )
+
+    except Exception:
+
+        app.logger.exception("%s model analysis failed", platform)
+
+        return None, "", (
+            jsonify(
+                {
+                    "success": False,
+                    "error": f"{platform} model analysis failed.",
+                }
+            ),
+            500,
+        )
 
 
 @app.post("/api/mendix/analyze")
@@ -958,40 +1052,15 @@ def _read_model_upload(
 @rate_limited
 def analyze_mendix_model():
 
-    try:
+    result, name, error = _analyze_upload(
+        "Mendix",
+        analyze_model,
+        MENDIX_EMPTY_MODEL,
+    )
 
-        document, name = _read_model_upload()
+    if error:
 
-        result = analyze_model(
-            document
-        )
-
-    except ValueError as exc:
-
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    str(exc),
-            }
-        ), 400
-
-    except Exception as exc:
-
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    "Mendix model analysis failed.",
-
-                "details":
-                    str(exc),
-            }
-        ), 500
+        return error
 
     findings = result["findings"]
 
@@ -1095,42 +1164,15 @@ def _platform_model_statistics(
 @rate_limited
 def analyze_outsystems():
 
-    try:
+    result, name, error = _analyze_upload(
+        "OutSystems",
+        analyze_outsystems_model,
+        OUTSYSTEMS_EMPTY_MODEL,
+    )
 
-        document, name = _read_model_upload(
-            "OutSystems"
-        )
+    if error:
 
-        result = analyze_outsystems_model(
-            document
-        )
-
-    except ValueError as exc:
-
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    str(exc),
-            }
-        ), 400
-
-    except Exception as exc:
-
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    "OutSystems model analysis failed.",
-
-                "details":
-                    str(exc),
-            }
-        ), 500
+        return error
 
     findings = result["findings"]
 
@@ -1293,7 +1335,9 @@ def get_application(
             }
         )
 
-    except Exception as exc:
+    except Exception:
+
+        app.logger.exception("Could not load application.")
 
         return jsonify(
             {
@@ -1302,9 +1346,6 @@ def get_application(
 
                 "error":
                     "Could not load application.",
-
-                "details":
-                    str(exc),
             }
         ), 500
 
@@ -2013,5 +2054,5 @@ if __name__ == "__main__":
     app.run(
         host="127.0.0.1",
         port=8000,
-        debug=True,
+        debug=os.environ.get("SECGUARD_DEBUG") == "1",
     )

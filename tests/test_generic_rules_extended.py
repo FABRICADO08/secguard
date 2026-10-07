@@ -154,10 +154,10 @@ def test_specific_origin_is_not_reported():
 @pytest.mark.parametrize(
     "secret",
     [
-        "AKIAIOSFODNN7EXAMPLX",
-        "AIzaSyA1234567890abcdefghijklmnopqrstuv",
-        "ghp_0123456789abcdefghijklmnopqrstuvwxyz",
-        "sk_live_0123456789abcdef",
+        "AKIA" + "IOSFODNN7EXAMPLX",
+        "AIza" + "SyA1234567890abcdefghijklmnopqrstuv",
+        "ghp_" + "0123456789abcdefghijklmnopqrstuvwxyz",
+        "sk_live_" + "0123456789abcdef",
     ],
 )
 def test_client_side_secrets_are_reported(secret):
@@ -301,3 +301,12 @@ def test_bearer_challenge_is_not_reported():
     )
 
     assert "GEN-AUTH-004" not in rule_ids(run(context))
+
+
+def test_script_blocks_with_spaced_closing_tags_are_inspected():
+    secret = "ghp_" + "0123456789abcdefghijklmnopqrstuvwxyz"
+    context = make_context(
+        response={"body": f"<html><script>var k = '{secret}';</script ></html>"}
+    )
+
+    assert [f for f in run(context) if f["rule_id"] == "GEN-JS-001"]

@@ -48,7 +48,7 @@ PLACEHOLDER_MARKERS = (
 )
 
 SCRIPT_BLOCK = re.compile(
-    r"<script\b[^>]*>(.*?)</script>",
+    r"<script\b[^>]*>(.*?)</script\b[^>]*>",
     re.IGNORECASE | re.DOTALL,
 )
 

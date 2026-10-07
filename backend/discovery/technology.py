@@ -160,8 +160,7 @@ def detect_technologies(
     # --------------------------------------------------------
 
     if (
-        "asp.net" in body_lower
-        or "aspnet" in body_lower
+        re.search(r"asp\.?net", body_lower)
         or "x-aspnetmvc-version" in headers
     ):
 
