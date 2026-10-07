@@ -1,3 +1,4 @@
+import importlib
 from urllib.parse import parse_qs, urlparse
 
 import pytest
@@ -7,6 +8,7 @@ from backend.config import settings
 from backend.repository.scanner import scan_repository
 from backend.security import github_auth
 from backend.storage import scans
+from backend.storage import sessions as session_store
 
 
 class FakeResponse:
@@ -280,3 +282,104 @@ def test_failed_sign_in_shows_the_sign_in_page(client, github):
 
     assert response.status_code == 400
     assert "/js/login.js" in response.get_data(as_text=True)
+
+
+def test_sign_in_survives_a_restart_between_login_and_callback(client, github):
+    """App Service restarts the container mid-login: a fresh client (new
+    cookies) completes the handshake because the state is not in the cookie."""
+
+    login = client.get("/auth/github/login")
+    state = parse_qs(urlparse(login.headers["Location"]).query)["state"][0]
+
+    restarted = app_module.app.test_client()
+    callback = restarted.get(f"/auth/github/callback?code=abc&state={state}")
+
+    assert callback.status_code == 302
+    me = restarted.get("/api/auth/me").get_json()
+    assert me["authenticated"] and me["user"]["login"] == "octo"
+
+
+def test_session_survives_a_process_restart(client, github):
+    """Sessions live in the shared store, so a new worker still knows them."""
+
+    sign_in(client)
+
+    payload = session_store.get("user", "anything")
+    assert payload is None  # unknown ids stay unknown
+
+    restarted = app_module.app.test_client()
+    restarted.set_cookie("session", client.get_cookie("session").value)
+    assert restarted.get("/api/auth/me").get_json()["authenticated"] is True
+
+
+def test_oauth_state_is_single_use(client, github):
+    """A leaked code cannot be replayed: popping the state consumes it."""
+
+    login = client.get("/auth/github/login")
+    state = parse_qs(urlparse(login.headers["Location"]).query)["state"][0]
+
+    assert client.get(f"/auth/github/callback?code=abc&state={state}").status_code == 302
+    assert client.get(f"/auth/github/callback?code=abc&state={state}").status_code == 400
+
+
+def test_expired_pending_state_is_rejected(client, github, monkeypatch):
+    login = client.get("/auth/github/login")
+    state = parse_qs(urlparse(login.headers["Location"]).query)["state"][0]
+
+    pending = session_store.get("pending", state)
+    pending["expires"] = 0
+    session_store.put("pending", state, pending)
+
+    assert client.get(f"/auth/github/callback?code=abc&state={state}").status_code == 400
+
+
+def test_logout_removes_the_shared_session(client, github):
+    sign_in(client)
+    session_id = client.get("/api/auth/me").get_json()
+    assert session_id["authenticated"]
+
+    client.post("/auth/logout")
+
+    assert client.get("/api/auth/me").get_json()["authenticated"] is False
+
+
+def test_secret_key_is_derived_from_the_oauth_client_secret(monkeypatch):
+    """Restarts keep signing cookies the same way without SECGUARD_SECRET_KEY."""
+
+    monkeypatch.setenv("SECGUARD_SECRET_KEY", "")
+    monkeypatch.setenv("SECGUARD_GITHUB_CLIENT_SECRET", "oauth-secret")
+
+    import backend.config.settings as reloaded
+
+    importlib.reload(reloaded)
+    try:
+        first = reloaded.SECRET_KEY
+        assert first and first != "oauth-secret"
+
+        importlib.reload(reloaded)
+        assert reloaded.SECRET_KEY == first
+    finally:
+        monkeypatch.undo()
+        importlib.reload(reloaded)
+
+
+def test_first_forwarded_value_wins_over_spoofed_hops(github):
+    """With an unknown number of hops, the outermost proxy's values decide."""
+
+    proxied = app_module._FirstForwardedValue(app_module.app.wsgi_app)
+    app_module.app.wsgi_app = proxied
+    proxied_client = app_module.app.test_client()
+    try:
+        login = proxied_client.get(
+            "/auth/github/login",
+            base_url="http://10.0.0.2:8000",
+            headers={
+                "X-Forwarded-Proto": "https, http",
+                "X-Forwarded-Host": "secguard.example, internal.cloudapp.net",
+            },
+        )
+    finally:
+        app_module.app.wsgi_app = proxied.app
+
+    query = parse_qs(urlparse(login.headers["Location"]).query)
+    assert query["redirect_uri"] == ["https://secguard.example/auth/github/callback"]

@@ -142,10 +142,49 @@ app = Flask(
 
 app.secret_key = settings.SECRET_KEY or secrets.token_hex(32)
 
+class _FirstForwardedValue:
+    """
+    WSGI middleware that takes the first (left-most) value of each
+    X-Forwarded-* header, added by the outermost proxy. Use it when the
+    number of proxies is unknown (Azure Front Door in front of App Service,
+    for example): ProxyFix always counts from the right, so with more hops
+    than the configured depth it would hand the scheme and host chosen by
+    an inner hop — or by the client — to OAuth redirect derivation. The
+    left-most scheme/host can only be influenced by a client when no proxy
+    strips them, which is exactly the deployments this flag is for.
+
+    Only wsgi.url_scheme, HTTP_HOST and SERVER_PORT are rewritten; the
+    client address is not trusted because rate limiting keys on it.
+    """
+
+    def __init__(self, app):
+        self.app = app
+
+    def __call__(self, environ, start_response):
+        proto = environ.get("HTTP_X_FORWARDED_PROTO", "").split(",")[0].strip()
+
+        if proto:
+            environ["wsgi.url_scheme"] = proto
+
+        host = environ.get("HTTP_X_FORWARDED_HOST", "").split(",")[0].strip()
+
+        if host:
+            environ["HTTP_HOST"] = environ["SERVER_NAME"] = host
+
+        port = environ.get("HTTP_X_FORWARDED_PORT", "").split(",")[0].strip()
+
+        if port:
+            environ["SERVER_PORT"] = port
+
+        return self.app(environ, start_response)
+
+
 # Trust the X-Forwarded-* headers of the proxies in front of SecGuard, so
 # URLs derived from a request (for example the GitHub OAuth callback) use
 # the scheme and host visitors actually reach.
-if settings.PROXY_DEPTH > 0:
+if settings.TRUST_FIRST_FORWARDED_VALUE:
+    app.wsgi_app = _FirstForwardedValue(app.wsgi_app)
+elif settings.PROXY_DEPTH > 0:
     app.wsgi_app = ProxyFix(
         app.wsgi_app,
         x_for=settings.PROXY_DEPTH,

@@ -8,6 +8,7 @@ the row mapping are tested the same way a real Neon database is driven.
 from __future__ import annotations
 
 import json
+import time
 
 import pytest
 
@@ -15,6 +16,7 @@ from backend.storage import application_names
 from backend.storage import db
 from backend.storage import findings as findings_storage
 from backend.storage import scans
+from backend.storage import sessions as session_store
 
 
 def _upsert(table):
@@ -52,6 +54,55 @@ def _select_pairs(table):
     return lambda tables, params: list(tables[table].items())
 
 
+# Sessions are keyed by (kind, id) and carry their expiry next to the data.
+
+
+def _upsert_session(tables, params):
+    kind, key, data, expires = params
+    tables["sessions"][(kind, key)] = (data, expires)
+
+    return []
+
+
+def _select_session(tables, params):
+    kind, key = params
+
+    if (kind, key) in tables["sessions"]:
+        data, expires = tables["sessions"][(kind, key)]
+
+        return [(data, expires)]
+
+    return []
+
+
+def _pop_session(tables, params):
+    kind, key = params
+    removed = tables["sessions"].pop((kind, key), None)
+
+    return ([(removed[0], removed[1])] if removed else []), 0
+
+
+def _delete_session(tables, params):
+    kind, key = params
+    removed = tables["sessions"].pop((kind, key), None) is not None
+
+    return [], 1 if removed else 0
+
+
+def _delete_expired_sessions(tables, params):
+    (cutoff,) = params
+    expired = [
+        key
+        for key, (_, expires) in tables["sessions"].items()
+        if expires < cutoff
+    ]
+
+    for key in expired:
+        del tables["sessions"][key]
+
+    return [], len(expired)
+
+
 # Each entry maps the normalized statement prefix to a handler returning the
 # result rows, or (rows, rowcount) when a count matters.
 HANDLERS = {
@@ -66,6 +117,11 @@ HANDLERS = {
     "DELETE FROM findings": _delete("findings"),
     "INSERT INTO application_names": _upsert("names"),
     "SELECT repository, name FROM application_names": _select_pairs("names"),
+    "INSERT INTO sessions": _upsert_session,
+    "SELECT data, expires FROM sessions WHERE kind": _select_session,
+    "DELETE FROM sessions WHERE expires": _delete_expired_sessions,
+    "DELETE FROM sessions WHERE kind = %s AND id = %s RETURNING": _pop_session,
+    "DELETE FROM sessions WHERE kind": _delete_session,
 }
 
 
@@ -111,7 +167,7 @@ class FakeCursor:
 
 class FakeConnection:
     def __init__(self):
-        self.tables = {"applications": {}, "findings": {}, "names": {}}
+        self.tables = {"applications": {}, "findings": {}, "names": {}, "sessions": {}}
         self.commits = 0
 
     def cursor(self):
@@ -145,7 +201,7 @@ def fake_db(monkeypatch):
 
     monkeypatch.setattr(db, "_override", True)
     monkeypatch.setattr(db, "_connector", shared_connect)
-    monkeypatch.setattr(db, "_ready", False)
+    monkeypatch.setattr(db, "_ready", set())
 
     yield shared
 
@@ -298,3 +354,54 @@ def test_payloads_keep_unicode_and_nesting(fake_db):
     fake_db.tables["applications"]["app-u"] = json.dumps(application)
 
     assert scans.load_application("app-u") == application
+
+
+# ------------------------------------------------------------------ sessions
+
+
+def test_sessions_round_trip(fake_db):
+    future = time.time() + 60
+
+    assert session_store.get("pending", "abc") is None
+
+    session_store.put("pending", "abc", {"verifier": "v", "expires": future})
+
+    assert session_store.get("pending", "abc") == {"verifier": "v", "expires": future}
+
+    # Popping returns the payload once and removes it.
+    assert session_store.pop("pending", "abc") == {"verifier": "v", "expires": future}
+    assert session_store.pop("pending", "abc") is None
+
+    session_store.put("user", "sid", {"login": "octo", "expires": future})
+    session_store.delete("user", "sid")
+
+    assert session_store.get("user", "sid") is None
+
+
+def test_expired_sessions_are_invisible_and_pruned(fake_db):
+    session_store.put("pending", "old", {"expires": time.time() - 1})
+
+    assert session_store.get("pending", "old") is None
+    assert session_store.pop("pending", "old") is None
+
+    # Writes clear expired rows of every kind.
+    session_store.put("pending", "old", {"expires": time.time() - 1})
+    session_store.put("pending", "new", {"expires": time.time() + 60})
+
+    assert ("pending", "old") not in fake_db.tables["sessions"]
+    assert ("pending", "new") in fake_db.tables["sessions"]
+
+
+def test_sessions_fall_back_to_files(fake_db, monkeypatch, tmp_path):
+    monkeypatch.setattr(db, "_override", False)
+    monkeypatch.setattr(session_store, "SESSIONS_DIR", tmp_path)
+
+    session_store.put("pending", "abc", {"verifier": "v", "expires": time.time() + 60})
+
+    assert (tmp_path / "pending-abc.json").exists()
+    assert session_store.pop("pending", "abc")["verifier"] == "v"
+    assert not (tmp_path / "pending-abc.json").exists()
+
+    # Unsafe characters never become a path.
+    session_store.put("pending", "../x/../../etc", {"expires": time.time() + 60})
+    assert [path.name for path in tmp_path.iterdir()] == ["pending-xetc.json"]
