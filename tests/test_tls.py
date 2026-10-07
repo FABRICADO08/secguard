@@ -493,6 +493,24 @@ def test_timeout_on_one_address_is_not_buried_by_a_later_refusal(
     assert probe["untested"] == [label for label, _ in TESTABLE_PROTOCOLS]
 
 
+@pytest.mark.parametrize("verify", [True, False])
+def test_default_context_refuses_tls_below_1_2(verify):
+    # A context that still offers TLSv1 or TLSv1.1 makes every
+    # connection it wraps negotiable down to a deprecated protocol.
+    context = tls._default_context(verify=verify)
+
+    assert context.minimum_version >= ssl.TLSVersion.TLSv1_2
+
+
+def test_the_probe_context_can_still_offer_deprecated_versions():
+    context = tls._pinned_context(ssl.TLSVersion.TLSv1_1)
+
+    if context is None:
+        pytest.skip("local OpenSSL cannot offer TLSv1.1 at all")
+
+    assert context.maximum_version == ssl.TLSVersion.TLSv1_1
+
+
 def test_ca_directory_is_passed_as_capath(tmp_path, monkeypatch):
     directory = tmp_path / "company-ca"
     directory.mkdir()
