@@ -107,7 +107,7 @@ function render(application, statistics, system) {
                 <h2>${escapeHtml(application.name)}</h2>
                 <div class="toolbar">
                     <span class="pill">
-                        ${escapeHtml(application.platform)}
+                        ${escapeHtml(platformLabel(application.platform))}
                     </span>
                     <a
                         class="chip"

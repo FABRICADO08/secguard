@@ -82,7 +82,7 @@ function render(finding) {
                 <dd>${escapeHtml(titleCase(finding.category))}</dd>
 
                 <dt>Platform</dt>
-                <dd>${escapeHtml(finding.platform || "Generic")}</dd>
+                <dd>${escapeHtml(platformLabel(finding.platform))}</dd>
 
                 <dt>Location</dt>
                 <dd class="mono">${escapeHtml(finding.location || "-")}</dd>
