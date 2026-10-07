@@ -86,6 +86,12 @@ GITHUB_CLIENT_SECRET = os.environ.get("SECGUARD_GITHUB_CLIENT_SECRET", "").strip
 # request when empty.
 GITHUB_CALLBACK_URL = os.environ.get("SECGUARD_GITHUB_CALLBACK_URL", "").strip()
 
+# Number of proxies in front of SecGuard. When it is above zero, the
+# X-Forwarded-* headers the proxy sets decide the scheme and host seen by
+# the application, so URLs derived from the request (for example the
+# GitHub OAuth callback) use the public address visitors actually reach.
+PROXY_DEPTH = _int_env("SECGUARD_PROXY_DEPTH", 0)
+
 # `repo` is needed to see private repositories and to start workflow runs.
 GITHUB_SCOPES = os.environ.get("SECGUARD_GITHUB_SCOPES", "repo read:user")
 

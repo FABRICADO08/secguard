@@ -13,6 +13,7 @@ from flask import (
     request,
     send_from_directory,
 )
+from werkzeug.middleware.proxy_fix import ProxyFix
 
 from backend.discovery.api_discovery import (
     discover_common_api_paths,
@@ -140,6 +141,18 @@ app = Flask(
 )
 
 app.secret_key = settings.SECRET_KEY or secrets.token_hex(32)
+
+# Trust the X-Forwarded-* headers of the proxies in front of SecGuard, so
+# URLs derived from a request (for example the GitHub OAuth callback) use
+# the scheme and host visitors actually reach.
+if settings.PROXY_DEPTH > 0:
+    app.wsgi_app = ProxyFix(
+        app.wsgi_app,
+        x_for=settings.PROXY_DEPTH,
+        x_proto=settings.PROXY_DEPTH,
+        x_host=settings.PROXY_DEPTH,
+        x_port=settings.PROXY_DEPTH,
+    )
 
 app.config.update(
     SESSION_COOKIE_HTTPONLY=True,
