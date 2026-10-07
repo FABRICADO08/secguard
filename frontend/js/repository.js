@@ -172,7 +172,7 @@ function table(headers, rows, empty) {
 }
 
 
-function render(application, me) {
+function render(application, canTrigger) {
     const report = application.repository || {};
     const meta = report.repository || {};
     const health = report.health || {};
@@ -203,7 +203,7 @@ function render(application, me) {
             <div class="card__head">
                 <h2>${escapeHtml(meta.name || application.name)}</h2>
                 <div class="toolbar">
-                    ${me.authenticated
+                    ${canTrigger
                         ? '<button class="button" id="runScan" type="button">Run scan</button>'
                         : ""}
                     <a class="button button--ghost" href="${sbom("cyclonedx")}">
@@ -345,6 +345,27 @@ function render(application, me) {
 }
 
 
+async function canTriggerScan(me, application) {
+    if (!me.authenticated) {
+        return false;
+    }
+
+    const name = String(
+        ((application.repository || {}).repository || {}).name || ""
+    ).toLowerCase();
+
+    try {
+        const data = await getJson("/api/repositories");
+
+        return (data.repositories || []).some(
+            item => String(item.name).toLowerCase() === name && item.can_trigger
+        );
+    } catch {
+        return false;
+    }
+}
+
+
 async function load() {
     const me = await currentUser();
 
@@ -389,7 +410,7 @@ async function load() {
             return;
         }
 
-        render(data.application, me);
+        render(data.application, await canTriggerScan(me, data.application));
     } catch (error) {
         view.innerHTML = `
             <div class="notice notice--error">
