@@ -170,28 +170,13 @@ def _pep508(requirement: str) -> tuple[str, str]:
     return (match.group(1), match.group(3).strip())
 
 
-def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
-    try:
-        document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        return []
-
+def _pep508_dependencies(
+    text: str, manifest: str, groups: list[tuple[str, list[Any]]]
+) -> list[Dependency]:
     dependencies = []
-
-    project = document.get("project") or {}
-
-    groups: list[tuple[str, list[Any]]] = [
-        (RUNTIME, list(project.get("dependencies") or []))
-    ]
-
-    for name, items in (project.get("optional-dependencies") or {}).items():
-        scope = DEVELOPMENT if re.search(r"dev|test|lint|doc", name, re.IGNORECASE) else RUNTIME
-        groups.append((scope, list(items or [])))
-
     for scope, items in groups:
         for item in items:
             name, spec = _pep508(str(item))
-
             if name:
                 dependencies.append(
                     Dependency(
@@ -204,27 +189,33 @@ def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
                         scope=scope,
                     )
                 )
+    return dependencies
 
-    poetry = (document.get("tool") or {}).get("poetry") or {}
 
-    poetry_groups = [(RUNTIME, poetry.get("dependencies") or {}),
-                     (DEVELOPMENT, poetry.get("dev-dependencies") or {})]
-
-    for name, group in (poetry.get("group") or {}).items():
-        poetry_groups.append(
-            (
-                RUNTIME if name == "main" else DEVELOPMENT,
-                (group or {}).get("dependencies") or {},
-            )
+def _poetry_groups(poetry: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    groups = [
+        (RUNTIME, poetry.get("dependencies") or {}),
+        (DEVELOPMENT, poetry.get("dev-dependencies") or {}),
+    ]
+    groups.extend(
+        (
+            RUNTIME if name == "main" else DEVELOPMENT,
+            (group or {}).get("dependencies") or {},
         )
+        for name, group in (poetry.get("group") or {}).items()
+    )
+    return groups
 
-    for scope, table in poetry_groups:
+
+def _poetry_dependencies(
+    text: str, manifest: str, poetry: dict[str, Any]
+) -> list[Dependency]:
+    dependencies = []
+    for scope, table in _poetry_groups(poetry):
         for name, value in table.items():
             if name.lower() == "python":
                 continue
-
             spec = value.get("version", "") if isinstance(value, dict) else str(value)
-
             dependencies.append(
                 Dependency(
                     name=name,
@@ -236,8 +227,29 @@ def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
                     scope=scope,
                 )
             )
-
     return dependencies
+
+
+def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return []
+
+    project = document.get("project") or {}
+
+    groups: list[tuple[str, list[Any]]] = [
+        (RUNTIME, list(project.get("dependencies") or []))
+    ]
+
+    for name, items in (project.get("optional-dependencies") or {}).items():
+        scope = DEVELOPMENT if re.search(r"dev|test|lint|doc", name, re.IGNORECASE) else RUNTIME
+        groups.append((scope, list(items or [])))
+
+    poetry = (document.get("tool") or {}).get("poetry") or {}
+    return _pep508_dependencies(text, manifest, groups) + _poetry_dependencies(
+        text, manifest, poetry
+    )
 
 
 def parse_poetry_lock(text: str, manifest: str) -> list[Dependency]:

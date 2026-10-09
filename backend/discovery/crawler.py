@@ -30,6 +30,60 @@ def is_same_origin(
     )
 
 
+def _page_links(
+    soup: BeautifulSoup,
+    page_url: str,
+    start_url: str,
+    visited: set[str],
+    queue: deque[str],
+    max_pages: int,
+) -> list[str]:
+    links = []
+    for anchor in soup.find_all("a", href=True):
+        absolute = urljoin(page_url, anchor["href"])
+        if not is_same_origin(start_url, absolute):
+            continue
+        absolute = absolute.split("#", 1)[0]
+        links.append(absolute)
+        if (
+            absolute not in visited
+            and absolute not in queue
+            and len(visited) + len(queue) < max_pages
+        ):
+            queue.append(absolute)
+    return links
+
+
+def _page_forms(soup: BeautifulSoup, page_url: str) -> list[dict]:
+    results = []
+    for form in soup.find_all("form"):
+        inputs = [
+            {
+                "name": field.get("name", ""),
+                "type": field.get("type", field.name),
+                "autocomplete": field.get("autocomplete", ""),
+            }
+            for field in form.find_all(["input", "textarea", "select"])
+        ]
+        results.append(
+            {
+                "page": page_url,
+                "action": urljoin(page_url, form.get("action", "")),
+                "method": form.get("method", "GET").upper(),
+                "autocomplete": form.get("autocomplete", ""),
+                "inputs": inputs,
+            }
+        )
+    return results
+
+
+def _page_scripts(soup: BeautifulSoup, page_url: str) -> list[str]:
+    return [
+        urljoin(page_url, script["src"])
+        for script in soup.find_all("script", src=True)
+    ]
+
+
 def crawl(
     start_url: str,
     max_pages: int = 20,
@@ -97,128 +151,15 @@ def crawl(
             "html.parser",
         )
 
-        for anchor in soup.find_all(
-            "a",
-            href=True,
+        for link in _page_links(
+            soup, response.url, start_url, visited, queue, max_pages
         ):
-
-            absolute = urljoin(
-                response.url,
-                anchor["href"],
-            )
-
-            if not is_same_origin(
-                start_url,
-                absolute,
-            ):
-                continue
-
-            absolute = absolute.split(
-                "#",
-                1,
-            )[0]
-
-            if absolute not in links:
-                links.append(
-                    absolute
-                )
-
-            if (
-                absolute not in visited
-                and absolute not in queue
-                and len(visited) + len(queue)
-                < max_pages
-            ):
-
-                queue.append(
-                    absolute
-                )
-
-        for form in soup.find_all(
-            "form"
-        ):
-
-            action = urljoin(
-                response.url,
-                form.get(
-                    "action",
-                    "",
-                ),
-            )
-
-            method = form.get(
-                "method",
-                "GET",
-            ).upper()
-
-            inputs = []
-
-            for field in form.find_all(
-                [
-                    "input",
-                    "textarea",
-                    "select",
-                ]
-            ):
-
-                inputs.append(
-                    {
-                        "name":
-                            field.get(
-                                "name",
-                                "",
-                            ),
-
-                        "type":
-                            field.get(
-                                "type",
-                                field.name,
-                            ),
-
-                        "autocomplete":
-                            field.get(
-                                "autocomplete",
-                                "",
-                            ),
-                    }
-                )
-
-            forms.append(
-                {
-                    "page":
-                        response.url,
-
-                    "action":
-                        action,
-
-                    "method":
-                        method,
-
-                    "autocomplete":
-                        form.get(
-                            "autocomplete",
-                            "",
-                        ),
-
-                    "inputs":
-                        inputs,
-                }
-            )
-
-        for script in soup.find_all(
-            "script",
-            src=True,
-        ):
-
-            script_url = urljoin(
-                response.url,
-                script["src"],
-            )
-
+            if link not in links:
+                links.append(link)
+        forms.extend(_page_forms(soup, response.url))
+        for script_url in _page_scripts(soup, response.url):
             if script_url not in scripts:
-                scripts.append(
-                    script_url
-                )
+                scripts.append(script_url)
 
     return {
         "pages": pages,

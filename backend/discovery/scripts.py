@@ -136,6 +136,38 @@ def _fetch_script(url: str, session: requests.Session) -> tuple[int | None, str]
     return response.status_code, body.decode("utf-8", errors="replace")
 
 
+def _analyze_script(
+    url: str, base_url: str, session: requests.Session
+) -> tuple[dict[str, Any] | None, list[dict[str, str]], list[dict[str, Any]]]:
+    if not is_same_origin(base_url, url):
+        return None, [], []
+    status, source = _fetch_script(url, session)
+    if status != 200 or not source:
+        return None, [], []
+
+    script_endpoints = extract_endpoints(source)
+    banners = detect_in_source(url, source)
+    analyzed = {
+        "url": url,
+        "bytes": len(source),
+        "endpoint_count": len(script_endpoints),
+        "secrets": find_secrets(source),
+        "source_maps": SOURCE_MAP.findall(source)[:3],
+        "libraries": banners,
+    }
+    origin = urlparse(base_url)
+    endpoints = [
+        {
+            **endpoint,
+            "url": urljoin(f"{origin.scheme}://{origin.netloc}", endpoint["path"]),
+            "source": url,
+            "discovered_by": "javascript",
+        }
+        for endpoint in script_endpoints
+    ]
+    return analyzed, endpoints, banners
+
+
 def analyze_scripts(
     script_urls: list[str],
     base_url: str,
@@ -158,52 +190,16 @@ def analyze_scripts(
     for url in script_urls:
         if len(analyzed) >= MAX_SCRIPTS:
             break
-
-        if not is_same_origin(base_url, url):
+        result, script_endpoints, banners = _analyze_script(url, base_url, session)
+        if result is None:
             continue
-
-        status, source = _fetch_script(url, session)
-
-        if status != 200 or not source:
-            continue
-
-        script_endpoints = extract_endpoints(source)
-        secrets = find_secrets(source)
-        source_maps = SOURCE_MAP.findall(source)
-        banners = detect_in_source(url, source)
-
         libraries.extend(banners)
-
-        analyzed.append(
-            {
-                "url": url,
-                "bytes": len(source),
-                "endpoint_count": len(script_endpoints),
-                "secrets": secrets,
-                "source_maps": source_maps[:3],
-                "libraries": banners,
-            }
-        )
-
+        analyzed.append(result)
         for endpoint in script_endpoints:
             if endpoint["path"] in seen_paths:
                 continue
-
             seen_paths.add(endpoint["path"])
-
-            origin = urlparse(base_url)
-
-            endpoints.append(
-                {
-                    **endpoint,
-                    "url": urljoin(
-                        f"{origin.scheme}://{origin.netloc}",
-                        endpoint["path"],
-                    ),
-                    "source": url,
-                    "discovered_by": "javascript",
-                }
-            )
+            endpoints.append(endpoint)
 
     return {
         "scripts": analyzed,
