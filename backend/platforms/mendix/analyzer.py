@@ -631,130 +631,108 @@ class MendixSecurityAnalyzer:
     # ------------------------------------------------------------------
 
     def _check_sensitive_attributes(self):
-
         for entity in self._entities():
-
             entity_name = self._qualified_name(entity)
-
             sensitive_attributes = (
                 self._sensitive_attributes(entity)
             )
-
             if not sensitive_attributes:
                 continue
-
             rules = self._entity_access_rules(entity)
-
             for attribute_name, categories in (
                 sensitive_attributes.items()
             ):
-
-                risky_roles = []
-
-                for rule in rules:
-
-                    roles = self._role_names(rule)
-
-                    for member in self._member_accesses(rule):
-
-                        member_attribute = (
-                            self._get(
-                                member,
-                                "attribute",
-                                "",
-                            )
-                        )
-
-                        if (
-                            member_attribute
-                            and (
-                                member_attribute
-                                == attribute_name
-                            )
-                        ):
-                            rights = self._normalise(
-                                self._get(
-                                    member,
-                                    "access_rights",
-                                    self._get(
-                                        member,
-                                        "accessRights",
-                                        "",
-                                    ),
-                                )
-                            )
-
-                            if rights in {
-                                "readwrite",
-                                "write",
-                                "read",
-                                "readonly",
-                            }:
-                                risky_roles.extend(
-                                    roles
-                                )
-
-                risky_roles = sorted(
-                    set(risky_roles)
+                risky_roles = self._risky_attribute_roles(
+                    rules,
+                    attribute_name,
                 )
-
                 if not risky_roles:
                     continue
 
-                severity = "critical"
-
-                category_text = ", ".join(
-                    sorted(categories)
+                self.findings.append(
+                    self._sensitive_attribute_finding(
+                        entity_name,
+                        attribute_name,
+                        categories,
+                        risky_roles,
+                    )
                 )
 
-                self.findings.append({
-                    "rule_id": "MXSEC-106",
-                    "severity": severity,
-                    "title": (
-                        "Sensitive attribute is accessible "
-                        "to application roles"
-                    ),
-                    "entity": entity_name,
-                    "module": self._module_from_entity(
-                        entity_name
-                    ),
-                    "roles": risky_roles,
-                    "attributes": [
-                        {
-                            "name": attribute_name,
-                            "sensitive_categories": sorted(
-                                categories
-                            ),
-                        }
-                    ],
-                    "access": {
-                        "roles_with_access": risky_roles,
-                    },
-                    "xpath": "",
-                    "sensitive": True,
-                    "sensitive_categories": sorted(
-                        categories
-                    ),
-                    "evidence": {
-                        "attribute": attribute_name,
-                        "categories": sorted(
-                            categories
-                        ),
-                        "roles": risky_roles,
-                    },
-                    "risk": (
-                        f"The attribute '{attribute_name}' "
-                        f"appears to contain {category_text} "
-                        "information and is accessible through "
-                        "one or more module roles."
-                    ),
-                    "recommendation": (
-                        "Review whether every listed role needs "
-                        "access to this attribute. Remove "
-                        "unnecessary Read/Write permissions and "
-                        "apply least-privilege access."
-                    ),
-                })
+    def _risky_attribute_roles(self, rules, attribute_name):
+        risky_roles = []
+        readable_rights = {
+            "readwrite",
+            "write",
+            "read",
+            "readonly",
+        }
+
+        for rule in rules:
+            roles = self._role_names(rule)
+            for member in self._member_accesses(rule):
+                member_attribute = self._get(member, "attribute", "")
+                if not member_attribute or member_attribute != attribute_name:
+                    continue
+                rights = self._normalise(
+                    self._get(
+                        member,
+                        "access_rights",
+                        self._get(member, "accessRights", ""),
+                    )
+                )
+                if rights in readable_rights:
+                    risky_roles.extend(roles)
+
+        return sorted(set(risky_roles))
+
+    def _sensitive_attribute_finding(
+        self,
+        entity_name,
+        attribute_name,
+        categories,
+        risky_roles,
+    ):
+        category_text = ", ".join(sorted(categories))
+        return {
+            "rule_id": "MXSEC-106",
+            "severity": "critical",
+            "title": (
+                "Sensitive attribute is accessible "
+                "to application roles"
+            ),
+            "entity": entity_name,
+            "module": self._module_from_entity(entity_name),
+            "roles": risky_roles,
+            "attributes": [
+                {
+                    "name": attribute_name,
+                    "sensitive_categories": sorted(categories),
+                }
+            ],
+            "access": {
+                "roles_with_access": risky_roles,
+            },
+            "xpath": "",
+            "sensitive": True,
+            "sensitive_categories": sorted(categories),
+            "evidence": {
+                "attribute": attribute_name,
+                "categories": sorted(categories),
+                "roles": risky_roles,
+            },
+            "risk": (
+                f"The attribute '{attribute_name}' "
+                f"appears to contain {category_text} "
+                "information and is accessible through "
+                "one or more module roles."
+            ),
+            "recommendation": (
+                "Review whether every listed role needs "
+                "access to this attribute. Remove "
+                "unnecessary Read/Write permissions and "
+                "apply least-privilege access."
+            ),
+        }
 
     # ------------------------------------------------------------------
     # ASSOCIATION CHECKS

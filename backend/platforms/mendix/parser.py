@@ -183,98 +183,31 @@ class MendixModelParser:
         value: Any,
     ) -> None:
 
-        if isinstance(
-            value,
-            dict,
-        ):
-
-            node_type = str(
-                value.get(
-                    "$Type",
-                    "",
-                )
-                or ""
-            )
-
-            # ----------------------------------------------------
-            # Entity
-            #
-            # Entity contains its attributes and access rules.
-            # Parse it as one complete unit.
-            # ----------------------------------------------------
-
-            if node_type == "DomainModels$Entity":
-
-                self._parse_entity(
-                    value
-                )
-
-                return
-
-            # ----------------------------------------------------
-            # Microflow
-            # ----------------------------------------------------
-
-            if self._is_microflow_type(
-                node_type
-            ):
-
-                self._parse_microflow(
-                    value
-                )
-
-            # ----------------------------------------------------
-            # Page
-            # ----------------------------------------------------
-
-            elif self._is_page_type(
-                node_type
-            ):
-
-                self._parse_page(
-                    value
-                )
-
-            # ----------------------------------------------------
-            # Module role
-            # ----------------------------------------------------
-
-            elif self._is_module_role_type(
-                node_type
-            ):
-
-                self._parse_module_role(
-                    value
-                )
-
-            # ----------------------------------------------------
-            # Continue recursively.
-            #
-            # Entity was returned above because its children have
-            # already been handled by _parse_entity().
-            # ----------------------------------------------------
-
-            for child in value.values():
-
-                if isinstance(
-                    child,
-                    (dict, list),
-                ):
-
-                    self._walk_model(
-                        child
-                    )
-
-        elif isinstance(
-            value,
-            list,
-        ):
-
+        if isinstance(value, dict):
+            self._walk_model_dict(value)
+        elif isinstance(value, list):
             for child in value:
+                self._walk_model(child)
 
-                self._walk_model(
-                    child
-                )
+    def _walk_model_dict(self, value: Dict[str, Any]) -> None:
+        node_type = str(value.get("$Type", "") or "")
+
+        # An entity and its nested attributes/access rules are parsed
+        # together, so do not visit its children a second time.
+        if node_type == "DomainModels$Entity":
+            self._parse_entity(value)
+            return
+
+        if self._is_microflow_type(node_type):
+            self._parse_microflow(value)
+        elif self._is_page_type(node_type):
+            self._parse_page(value)
+        elif self._is_module_role_type(node_type):
+            self._parse_module_role(value)
+
+        for child in value.values():
+            if isinstance(child, (dict, list)):
+                self._walk_model(child)
 
     # ============================================================
     # MODULES
@@ -909,127 +842,44 @@ class MendixModelParser:
         )
 
         for node in nodes:
-
-            association_id = str(
-                node.get(
-                    "$ID",
-                    "",
-                )
-                or ""
-            )
-
-            qualified_name = str(
-                node.get(
-                    "$QualifiedName",
-                    "",
-                )
-                or ""
-            )
-
-            name = str(
-                node.get(
-                    "name",
-                    "",
-                )
-                or ""
-            )
-
+            association_id, qualified_name, name = self._association_identity(node)
             if not qualified_name:
-
-                qualified_name = name
-
-            if not qualified_name:
-
                 continue
 
-            if (
-                qualified_name
-                in
-                self.associations_by_name
-            ):
-
+            if qualified_name in self.associations_by_name:
                 continue
 
-            parent_id = str(
-                node.get(
-                    "parent",
-                    "",
-                )
-                or ""
+            association = self._make_association(
+                node,
+                association_id,
+                qualified_name,
+                name,
             )
+            self.associations_by_name[qualified_name] = association
+            self.model.associations.append(association)
 
-            child_id = str(
-                node.get(
-                    "child",
-                    "",
-                )
-                or ""
-            )
+    @staticmethod
+    def _association_identity(node):
+        association_id = str(node.get("$ID", "") or "")
+        qualified_name = str(node.get("$QualifiedName", "") or "")
+        name = str(node.get("name", "") or "")
+        return association_id, qualified_name or name, name
 
-            association_type = str(
-                node.get(
-                    "type",
-                    "",
-                )
-                or ""
-            )
+    def _make_association(
+        self,
+        node,
+        association_id,
+        qualified_name,
+        name,
+    ):
+        parent_id = str(node.get("parent", "") or "")
+        child_id = str(node.get("child", "") or "")
+        delete_behavior = node.get("deleteBehavior")
+        parent_delete_behavior, child_delete_behavior = (
+            self._association_delete_behaviors(delete_behavior)
+        )
 
-            owner = str(
-                node.get(
-                    "owner",
-                    "",
-                )
-                or ""
-            )
-
-            documentation = str(
-                node.get(
-                    "documentation",
-                    "",
-                )
-                or ""
-            )
-
-            # ----------------------------------------------------
-            # Delete behavior
-            # ----------------------------------------------------
-
-            delete_behavior = (
-                node.get(
-                    "deleteBehavior"
-                )
-            )
-
-            parent_delete_behavior = ""
-
-            child_delete_behavior = ""
-
-            if isinstance(
-                delete_behavior,
-                dict,
-            ):
-
-                parent_delete_behavior = str(
-                    delete_behavior.get(
-                        "parentDeleteBehavior",
-                        "",
-                    )
-                    or ""
-                )
-
-                child_delete_behavior = str(
-                    delete_behavior.get(
-                        "childDeleteBehavior",
-                        "",
-                    )
-                    or ""
-                )
-
-            # ----------------------------------------------------
-            # Construct
-            # ----------------------------------------------------
-
-            association = self._construct(
+        return self._construct(
                 Association,
                 {
                     "id":
@@ -1042,10 +892,10 @@ class MendixModelParser:
                         qualified_name,
 
                     "type":
-                        association_type,
+                        str(node.get("type", "") or ""),
 
                     "owner":
-                        owner,
+                        str(node.get("owner", "") or ""),
 
                     "parent_id":
                         parent_id,
@@ -1078,17 +928,18 @@ class MendixModelParser:
                         child_delete_behavior,
 
                     "documentation":
-                        documentation,
+                        str(node.get("documentation", "") or ""),
                 },
             )
 
-            self.associations_by_name[
-                qualified_name
-            ] = association
-
-            self.model.associations.append(
-                association
-            )
+    @staticmethod
+    def _association_delete_behaviors(delete_behavior):
+        if not isinstance(delete_behavior, dict):
+            return "", ""
+        return (
+            str(delete_behavior.get("parentDeleteBehavior", "") or ""),
+            str(delete_behavior.get("childDeleteBehavior", "") or ""),
+        )
 
     # ============================================================
     # ACCESS RULE
@@ -1120,76 +971,8 @@ class MendixModelParser:
                 rule_id
             ]
 
-        # --------------------------------------------------------
-        # Roles
-        # --------------------------------------------------------
-
-        roles = []
-
-        raw_roles = node.get(
-            "moduleRoles",
-            [],
-        )
-
-        if isinstance(
-            raw_roles,
-            list,
-        ):
-
-            for role in raw_roles:
-
-                role_name = (
-                    self._reference_name(
-                        role
-                    )
-                )
-
-                if role_name:
-
-                    roles.append(
-                        role_name
-                    )
-
-                    self._ensure_module_role(
-                        role_name
-                    )
-
-        # --------------------------------------------------------
-        # Member accesses
-        # --------------------------------------------------------
-
-        member_accesses = []
-
-        raw_members = node.get(
-            "memberAccesses",
-            [],
-        )
-
-        if isinstance(
-            raw_members,
-            list,
-        ):
-
-            for raw_member in raw_members:
-
-                if not isinstance(
-                    raw_member,
-                    dict,
-                ):
-
-                    continue
-
-                member = (
-                    self._parse_member_access(
-                        raw_member
-                    )
-                )
-
-                if member:
-
-                    member_accesses.append(
-                        member
-                    )
+        roles = self._access_rule_roles(node)
+        member_accesses = self._access_rule_members(node)
 
         # --------------------------------------------------------
         # XPath
@@ -1343,6 +1126,33 @@ class MendixModelParser:
         )
 
         return rule
+
+    def _access_rule_roles(self, node):
+        raw_roles = node.get("moduleRoles", [])
+        if not isinstance(raw_roles, list):
+            return []
+
+        roles = []
+        for role in raw_roles:
+            role_name = self._reference_name(role)
+            if role_name:
+                roles.append(role_name)
+                self._ensure_module_role(role_name)
+        return roles
+
+    def _access_rule_members(self, node):
+        raw_members = node.get("memberAccesses", [])
+        if not isinstance(raw_members, list):
+            return []
+
+        member_accesses = []
+        for raw_member in raw_members:
+            if not isinstance(raw_member, dict):
+                continue
+            member = self._parse_member_access(raw_member)
+            if member:
+                member_accesses.append(member)
+        return member_accesses
 
     # ============================================================
     # MEMBER ACCESS
@@ -1712,214 +1522,70 @@ class MendixModelParser:
         """
 
         for entity in self.model.entities:
-
             attributes_by_id = {
-                str(
-                    getattr(
-                        attribute,
-                        "id",
-                        "",
-                    )
-                    or ""
-                ): attribute
-
-                for attribute in getattr(
-                    entity,
-                    "attributes",
-                    [],
-                )
+                str(getattr(attribute, "id", "") or ""): attribute
+                for attribute in getattr(entity, "attributes", [])
             }
-
-            for rule in getattr(
-                entity,
-                "access_rules",
-                [],
-            ):
-
-                for member in getattr(
+            for rule in getattr(entity, "access_rules", []):
+                self._resolve_rule_member_attributes(
                     rule,
-                    "member_accesses",
-                    [],
-                ):
+                    attributes_by_id,
+                )
 
-                    if not isinstance(
-                        member,
-                        dict,
-                    ):
+    @staticmethod
+    def _resolve_rule_member_attributes(rule, attributes_by_id):
+        for member in getattr(rule, "member_accesses", []):
+            if not isinstance(member, dict):
+                continue
 
-                        continue
+            reference = str(member.get("attribute", "") or "")
+            attribute = attributes_by_id.get(reference)
+            if attribute is None:
+                continue
 
-                    reference = str(
-                        member.get(
-                            "attribute",
-                            "",
-                        )
-                        or ""
-                    )
-
-                    attribute = (
-                        attributes_by_id.get(
-                            reference
-                        )
-                    )
-
-                    if attribute is None:
-
-                        continue
-
-                    member["attribute_id"] = reference
-
-                    member["attribute"] = (
-                        attribute.qualified_name
-                        or
-                        attribute.name
-                    )
+            member["attribute_id"] = reference
+            member["attribute"] = (
+                attribute.qualified_name or attribute.name
+            )
 
     def _resolve_references(
         self,
     ) -> None:
-
         self._resolve_member_access_attributes()
+        self._resolve_associations()
+        self._resolve_attributes()
+        self._resolve_access_rules()
 
-        # ========================================================
-        # ASSOCIATIONS
-        # ========================================================
-
+    def _resolve_associations(self) -> None:
         for association in self.model.associations:
+            parent_id = str(getattr(association, "parent_id", "") or "")
+            child_id = str(getattr(association, "child_id", "") or "")
+            parent_entity = self.entities_by_id.get(parent_id)
+            child_entity = self.entities_by_id.get(child_id)
+            self._set_if_possible(association, "parent_entity", parent_entity)
+            self._set_association_endpoint(association, parent_entity, "parent")
+            self._set_if_possible(association, "child_entity", child_entity)
+            self._set_association_endpoint(association, child_entity, "child")
 
-            parent_id = str(
-                getattr(
-                    association,
-                    "parent_id",
-                    "",
-                )
-                or
-                ""
-            )
+    def _set_association_endpoint(self, association, entity, side) -> None:
+        if not entity:
+            return
+        entity_name = entity.qualified_name or entity.name
+        self._set_if_possible(association, f"{side}_name", entity_name)
+        self._append_unique(entity.associations, association)
 
-            child_id = str(
-                getattr(
-                    association,
-                    "child_id",
-                    "",
-                )
-                or
-                ""
-            )
-
-            parent_entity = (
-                self.entities_by_id.get(
-                    parent_id
-                )
-            )
-
-            child_entity = (
-                self.entities_by_id.get(
-                    child_id
-                )
-            )
-
-            # ----------------------------------------------------
-            # Parent
-            # ----------------------------------------------------
-
-            self._set_if_possible(
-                association,
-                "parent_entity",
-                parent_entity,
-            )
-
-            if parent_entity:
-
-                parent_name = (
-                    parent_entity.qualified_name
-                    or
-                    parent_entity.name
-                )
-
-                self._set_if_possible(
-                    association,
-                    "parent_name",
-                    parent_name,
-                )
-
-                self._append_unique(
-                    parent_entity.associations,
-                    association,
-                )
-
-            # ----------------------------------------------------
-            # Child
-            # ----------------------------------------------------
-
-            self._set_if_possible(
-                association,
-                "child_entity",
-                child_entity,
-            )
-
-            if child_entity:
-
-                child_name = (
-                    child_entity.qualified_name
-                    or
-                    child_entity.name
-                )
-
-                self._set_if_possible(
-                    association,
-                    "child_name",
-                    child_name,
-                )
-
-                self._append_unique(
-                    child_entity.associations,
-                    association,
-                )
-
-        # ========================================================
-        # ATTRIBUTES
-        # ========================================================
-
+    def _resolve_attributes(self) -> None:
         for entity in self.model.entities:
-
+            owner_name = entity.qualified_name or entity.name
             for attribute in entity.attributes:
+                self._set_if_possible(attribute, "entity", owner_name)
+                self._set_if_possible(attribute, "owner", owner_name)
 
-                owner_name = (
-                    entity.qualified_name
-                    or
-                    entity.name
-                )
-
-                self._set_if_possible(
-                    attribute,
-                    "entity",
-                    owner_name,
-                )
-
-                self._set_if_possible(
-                    attribute,
-                    "owner",
-                    owner_name,
-                )
-
-        # ========================================================
-        # ACCESS RULES
-        # ========================================================
-
+    def _resolve_access_rules(self) -> None:
         for entity in self.model.entities:
-
+            entity_name = entity.qualified_name or entity.name
             for rule in entity.access_rules:
-
-                self._set_if_possible(
-                    rule,
-                    "entity",
-                    (
-                        entity.qualified_name
-                        or
-                        entity.name
-                    ),
-                )
+                self._set_if_possible(rule, "entity", entity_name)
 
     # ============================================================
     # EXACT NODE SEARCH
