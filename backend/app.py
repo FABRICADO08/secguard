@@ -11,23 +11,10 @@ from flask import Flask, jsonify, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from backend.config import settings
-from backend.discovery.fingerprint import TargetUnreachableError, fetch_application
-from backend.discovery.api_discovery import discover_common_api_paths
-from backend.discovery.crawler import crawl
-from backend.discovery.endpoints import discover_endpoints
-from backend.discovery.technology import detect_technologies
-from backend.scanners.configuration import scan_exposed_paths
-from backend.platforms.mendix.service import analyze_model
 from backend.security import github_auth
 from backend.storage.scans import application_exists, load_application
 from backend.route_applications import register_routes as register_application_routes
 from backend.route_discovery import register_routes as register_discovery_routes
-from backend.route_discovery import (
-    BLOCKED_TARGET_MESSAGE,
-    CERTIFICATE_REJECTED_MESSAGE,
-    _blocked_target_response,
-    _certificate_only_scan,
-)
 from backend.route_frontend import register_routes as register_frontend_routes
 from backend.route_models import register_routes as register_model_routes
 from backend.route_repositories import register_routes as register_repository_routes
