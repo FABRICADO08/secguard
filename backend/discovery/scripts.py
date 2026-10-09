@@ -16,7 +16,6 @@ from backend.rules.generic.clientside import (
     is_placeholder,
     redact,
 )
-
 MAX_SCRIPTS = 15
 
 # Bundles are routinely megabytes; reading the whole file buys little and
@@ -136,52 +135,12 @@ def _fetch_script(url: str, session: requests.Session) -> tuple[int | None, str]
     return response.status_code, body.decode("utf-8", errors="replace")
 
 
-def _analyze_script(
-    url: str, base_url: str, session: requests.Session
-) -> tuple[dict[str, Any] | None, list[dict[str, str]], list[dict[str, Any]]]:
-    if not is_same_origin(base_url, url):
-        return None, [], []
-    status, source = _fetch_script(url, session)
-    if status != 200 or not source:
-        return None, [], []
-
-    script_endpoints = extract_endpoints(source)
-    banners = detect_in_source(url, source)
-    analyzed = {
-        "url": url,
-        "bytes": len(source),
-        "endpoint_count": len(script_endpoints),
-        "secrets": find_secrets(source),
-        "source_maps": SOURCE_MAP.findall(source)[:3],
-        "libraries": banners,
-    }
-    origin = urlparse(base_url)
-    endpoints = [
-        {
-            **endpoint,
-            "url": urljoin(f"{origin.scheme}://{origin.netloc}", endpoint["path"]),
-            "source": url,
-            "discovered_by": "javascript",
-        }
-        for endpoint in script_endpoints
-    ]
-    return analyzed, endpoints, banners
-
-
 def analyze_scripts(
     script_urls: list[str],
     base_url: str,
 ) -> dict[str, Any]:
-    """
-    Fetch same-origin scripts and mine them for endpoints and secrets.
-
-    Third-party scripts are skipped: they are outside the authorization
-    the scan was given, and findings against a CDN copy of a library are
-    not actionable by the application owner.
-    """
-
+    """Fetch and analyze same-origin scripts within the configured limits."""
     session = build_session()
-
     analyzed: list[dict[str, Any]] = []
     endpoints: list[dict[str, str]] = []
     libraries: list[dict[str, Any]] = []
@@ -190,19 +149,74 @@ def analyze_scripts(
     for url in script_urls:
         if len(analyzed) >= MAX_SCRIPTS:
             break
-        result, script_endpoints, banners = _analyze_script(url, base_url, session)
+
+        if not is_same_origin(base_url, url):
+            continue
+
+        result = _analyze_script(url, base_url, session)
+
         if result is None:
             continue
+
+        script_info, script_endpoints, banners = result
+        analyzed.append(script_info)
         libraries.extend(banners)
-        analyzed.append(result)
-        for endpoint in script_endpoints:
-            if endpoint["path"] in seen_paths:
-                continue
-            seen_paths.add(endpoint["path"])
-            endpoints.append(endpoint)
+        _merge_script_endpoints(
+            script_endpoints, url, base_url, endpoints, seen_paths
+        )
 
     return {
         "scripts": analyzed,
         "endpoints": endpoints,
         "libraries": libraries,
     }
+
+
+def _analyze_script(
+    url: str,
+    base_url: str,
+    session: requests.Session,
+) -> tuple[dict[str, Any], list[dict[str, str]], list[dict[str, Any]]] | None:
+    status, source = _fetch_script(url, session)
+
+    if status != 200 or not source:
+        return None
+
+    script_endpoints = extract_endpoints(source)
+    banners = detect_in_source(url, source)
+    script_info = {
+        "url": url,
+        "bytes": len(source),
+        "endpoint_count": len(script_endpoints),
+        "secrets": find_secrets(source),
+        "source_maps": SOURCE_MAP.findall(source)[:3],
+        "libraries": banners,
+    }
+    return script_info, script_endpoints, banners
+
+
+def _merge_script_endpoints(
+    script_endpoints: list[dict[str, str]],
+    url: str,
+    base_url: str,
+    endpoints: list[dict[str, str]],
+    seen_paths: set[str],
+) -> None:
+    origin = urlparse(base_url)
+
+    for endpoint in script_endpoints:
+        if endpoint["path"] in seen_paths:
+            continue
+
+        seen_paths.add(endpoint["path"])
+        endpoints.append(
+            {
+                **endpoint,
+                "url": urljoin(
+                    f"{origin.scheme}://{origin.netloc}",
+                    endpoint["path"],
+                ),
+                "source": url,
+                "discovered_by": "javascript",
+            }
+        )

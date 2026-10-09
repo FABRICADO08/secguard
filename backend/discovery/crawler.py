@@ -30,32 +30,33 @@ def is_same_origin(
     )
 
 
-def _page_links(
+def _record_links(
     soup: BeautifulSoup,
     page_url: str,
     start_url: str,
-    visited: set[str],
-    queue: deque[str],
+    state: dict,
     max_pages: int,
-) -> list[str]:
-    links = []
+) -> None:
     for anchor in soup.find_all("a", href=True):
         absolute = urljoin(page_url, anchor["href"])
+
         if not is_same_origin(start_url, absolute):
             continue
+
         absolute = absolute.split("#", 1)[0]
-        links.append(absolute)
+
+        if absolute not in state["links"]:
+            state["links"].append(absolute)
+
         if (
-            absolute not in visited
-            and absolute not in queue
-            and len(visited) + len(queue) < max_pages
+            absolute not in state["visited"]
+            and absolute not in state["queue"]
+            and len(state["visited"]) + len(state["queue"]) < max_pages
         ):
-            queue.append(absolute)
-    return links
+            state["queue"].append(absolute)
 
 
-def _page_forms(soup: BeautifulSoup, page_url: str) -> list[dict]:
-    results = []
+def _record_forms(soup: BeautifulSoup, page_url: str, forms: list[dict]) -> None:
     for form in soup.find_all("form"):
         inputs = [
             {
@@ -65,7 +66,7 @@ def _page_forms(soup: BeautifulSoup, page_url: str) -> list[dict]:
             }
             for field in form.find_all(["input", "textarea", "select"])
         ]
-        results.append(
+        forms.append(
             {
                 "page": page_url,
                 "action": urljoin(page_url, form.get("action", "")),
@@ -74,45 +75,74 @@ def _page_forms(soup: BeautifulSoup, page_url: str) -> list[dict]:
                 "inputs": inputs,
             }
         )
-    return results
 
 
-def _page_scripts(soup: BeautifulSoup, page_url: str) -> list[str]:
-    return [
-        urljoin(page_url, script["src"])
-        for script in soup.find_all("script", src=True)
-    ]
+def _record_scripts(soup: BeautifulSoup, page_url: str, scripts: list[str]) -> None:
+    for script in soup.find_all("script", src=True):
+        script_url = urljoin(page_url, script["src"])
+
+        if script_url not in scripts:
+            scripts.append(script_url)
+
+
+def _process_page(
+    response,
+    start_url: str,
+    state: dict,
+    max_pages: int,
+) -> None:
+    state["pages"].append(
+        {
+            "url": response.url,
+            "status_code": response.status_code,
+            "content_type": response.headers.get("Content-Type", ""),
+        }
+    )
+    content_type = response.headers.get("Content-Type", "").lower()
+    if "text/html" not in content_type:
+        return
+
+    soup = BeautifulSoup(response.text, "html.parser")
+    _record_links(
+        soup,
+        response.url,
+        start_url,
+        state,
+        max_pages,
+    )
+    _record_forms(soup, response.url, state["forms"])
+    _record_scripts(soup, response.url, state["scripts"])
 
 
 def crawl(
     start_url: str,
     max_pages: int = 20,
 ) -> dict:
-
     start_url = normalize_url(
         start_url
     )
 
-    queue = deque([start_url])
-    visited = set()
-
-    pages = []
-    links = []
-    forms = []
-    scripts = []
+    state = {
+        "queue": deque([start_url]),
+        "visited": set(),
+        "pages": [],
+        "links": [],
+        "forms": [],
+        "scripts": [],
+    }
 
     # Shared session so crawled pages are subject to the same target
     # policy: a page may otherwise redirect the crawler internally.
     session = build_session()
 
-    while queue and len(visited) < max_pages:
+    while state["queue"] and len(state["visited"]) < max_pages:
 
-        current = queue.popleft()
+        current = state["queue"].popleft()
 
-        if current in visited:
+        if current in state["visited"]:
             continue
 
-        visited.add(current)
+        state["visited"].add(current)
 
         try:
 
@@ -125,46 +155,12 @@ def crawl(
         except requests.RequestException:
             continue
 
-        page_record = {
-            "url": response.url,
-            "status_code": response.status_code,
-            "content_type": response.headers.get(
-                "Content-Type",
-                "",
-            ),
-        }
-
-        pages.append(
-            page_record
-        )
-
-        content_type = response.headers.get(
-            "Content-Type",
-            "",
-        ).lower()
-
-        if "text/html" not in content_type:
-            continue
-
-        soup = BeautifulSoup(
-            response.text,
-            "html.parser",
-        )
-
-        for link in _page_links(
-            soup, response.url, start_url, visited, queue, max_pages
-        ):
-            if link not in links:
-                links.append(link)
-        forms.extend(_page_forms(soup, response.url))
-        for script_url in _page_scripts(soup, response.url):
-            if script_url not in scripts:
-                scripts.append(script_url)
+        _process_page(response, start_url, state, max_pages)
 
     return {
-        "pages": pages,
-        "links": links,
-        "forms": forms,
-        "scripts": scripts,
-        "pages_scanned": len(pages),
+        "pages": state["pages"],
+        "links": state["links"],
+        "forms": state["forms"],
+        "scripts": state["scripts"],
+        "pages_scanned": len(state["pages"]),
     }
