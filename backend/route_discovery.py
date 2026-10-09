@@ -3,7 +3,6 @@ from flask import current_app, jsonify, request
 from backend.discovery.fingerprint import (
     CertificateRejectedError,
     TargetUnreachableError,
-    fetch_application,
     validate_url,
 )
 from backend.discovery.libraries import detect_libraries

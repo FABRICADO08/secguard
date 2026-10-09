@@ -221,7 +221,6 @@ def test_supply_chain_and_license_findings(report):
 
 
 def _assert_typosquat_findings(report):
-    rules = _rules(report)
     squats = {finding["evidence"]["package"]: finding for finding in report["findings"] if finding["rule_id"] == "REPO-SUP-001"}
     assert squats["expresss"]["severity"] == "critical"
     assert squats["reqeusts"]["severity"] == "high"
