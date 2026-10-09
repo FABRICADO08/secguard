@@ -63,6 +63,18 @@ def effective_sources(
     return "", []
 
 
+def _script_sources(context: ScanContext) -> tuple[str, list[str]]:
+    value = context.header("Content-Security-Policy")
+
+    if not value.strip():
+        return "", []
+
+    return effective_sources(
+        parse_policy(value),
+        "script-src",
+    )
+
+
 class CspAllowsUnsafeScriptSources(Rule):
     id = "GEN-CSP-001"
     title = "Content-Security-Policy allows unsafe script sources"
@@ -83,14 +95,7 @@ class CspAllowsUnsafeScriptSources(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
-        value = context.header("Content-Security-Policy")
-
-        if not value.strip():
-            return []
-
-        policy = parse_policy(value)
-
-        directive, sources = effective_sources(policy, "script-src")
+        directive, sources = _script_sources(context)
 
         if not directive:
             return []
@@ -147,16 +152,9 @@ class CspAllowsWildcardSources(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
-        value = context.header("Content-Security-Policy")
-
-        if not value.strip():
-            return []
-
-        policy = parse_policy(value)
-
         # script-src overrides default-src, so only the directive the
         # browser actually applies to scripts is worth reporting.
-        directive, sources = effective_sources(policy, "script-src")
+        directive, sources = _script_sources(context)
 
         if not directive:
             return []

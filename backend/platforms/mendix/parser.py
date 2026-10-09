@@ -188,13 +188,7 @@ class MendixModelParser:
             dict,
         ):
 
-            node_type = str(
-                value.get(
-                    "$Type",
-                    "",
-                )
-                or ""
-            )
+            node_type = self._node_type(value)
 
             # ----------------------------------------------------
             # Entity
@@ -309,25 +303,37 @@ class MendixModelParser:
             )
         )
 
-        module_name = (
-            qualified_name
-            or
-            name
+        return self._get_or_create_module(
+            qualified_name or name,
+            name,
+            qualified_name,
         )
 
-        if not module_name:
+    def _ensure_module(
+        self,
+        module_name: str,
+    ) -> Optional[Module]:
 
+        return self._get_or_create_module(
+            module_name,
+            module_name,
+            module_name,
+        )
+
+    def _get_or_create_module(
+        self,
+        module_key: str,
+        name: str,
+        qualified_name: str,
+    ) -> Optional[Module]:
+
+        if not module_key:
             return None
 
-        if (
-            module_name
-            in
-            self.modules_by_name
-        ):
+        existing = self.modules_by_name.get(module_key)
 
-            return self.modules_by_name[
-                module_name
-            ]
+        if existing:
+            return existing
 
         module = self._construct(
             Module,
@@ -352,100 +358,16 @@ class MendixModelParser:
             },
         )
 
-        self._ensure_list(
-            module,
+        for field_name in (
             "entities",
-        )
-
-        self._ensure_list(
-            module,
             "microflows",
-        )
-
-        self._ensure_list(
-            module,
             "pages",
-        )
-
-        self._ensure_list(
-            module,
             "roles",
-        )
-
-        self.modules_by_name[
-            module_name
-        ] = module
-
-        self.model.modules.append(
-            module
-        )
-
-        return module
-
-    def _ensure_module(
-        self,
-        module_name: str,
-    ) -> Optional[Module]:
-
-        if not module_name:
-
-            return None
-
-        if (
-            module_name
-            in
-            self.modules_by_name
         ):
-
-            return self.modules_by_name[
-                module_name
-            ]
-
-        module = self._construct(
-            Module,
-            {
-                "name":
-                    module_name,
-
-                "qualified_name":
-                    module_name,
-
-                "entities":
-                    [],
-
-                "microflows":
-                    [],
-
-                "pages":
-                    [],
-
-                "roles":
-                    [],
-            },
-        )
-
-        self._ensure_list(
-            module,
-            "entities",
-        )
-
-        self._ensure_list(
-            module,
-            "microflows",
-        )
-
-        self._ensure_list(
-            module,
-            "pages",
-        )
-
-        self._ensure_list(
-            module,
-            "roles",
-        )
+            self._ensure_list(module, field_name)
 
         self.modules_by_name[
-            module_name
+            module_key
         ] = module
 
         self.model.modules.append(
@@ -850,18 +772,10 @@ class MendixModelParser:
                     length,
 
                 "owner":
-                    (
-                        entity.qualified_name
-                        or
-                        entity.name
-                    ),
+                    self._entity_name(entity),
 
                 "entity":
-                    (
-                        entity.qualified_name
-                        or
-                        entity.name
-                    ),
+                    self._entity_name(entity),
 
                 "documentation":
                     str(
@@ -1269,11 +1183,7 @@ class MendixModelParser:
                     xpath_caption,
 
                 "entity":
-                    (
-                        entity.qualified_name
-                        or
-                        entity.name
-                    ),
+                    self._entity_name(entity),
 
                 "documentation":
                     str(
@@ -1400,19 +1310,7 @@ class MendixModelParser:
         node: Dict[str, Any],
     ) -> Optional[Microflow]:
 
-        name = self._name(
-            node
-        )
-
-        qualified_name = (
-            self._qualified_name(
-                node
-            )
-        )
-
-        if not qualified_name:
-
-            qualified_name = name
+        name, qualified_name = self._named_identity(node)
 
         if not qualified_name:
 
@@ -1511,19 +1409,7 @@ class MendixModelParser:
         node: Dict[str, Any],
     ) -> Optional[Page]:
 
-        name = self._name(
-            node
-        )
-
-        qualified_name = (
-            self._qualified_name(
-                node
-            )
-        )
-
-        if not qualified_name:
-
-            qualified_name = name
+        name, qualified_name = self._named_identity(node)
 
         if not qualified_name:
 
@@ -1604,19 +1490,7 @@ class MendixModelParser:
         node: Dict[str, Any],
     ) -> Optional[ModuleRole]:
 
-        name = self._name(
-            node
-        )
-
-        qualified_name = (
-            self._qualified_name(
-                node
-            )
-        )
-
-        if not qualified_name:
-
-            qualified_name = name
+        name, qualified_name = self._named_identity(node)
 
         if not qualified_name:
 
@@ -1930,63 +1804,11 @@ class MendixModelParser:
         node_type_to_find: str,
     ) -> List[Dict[str, Any]]:
 
-        result = []
-
-        def walk(
-            value: Any,
-        ):
-
-            if isinstance(
-                value,
-                dict,
-            ):
-
-                node_type = str(
-                    value.get(
-                        "$Type",
-                        "",
-                    )
-                    or
-                    ""
-                )
-
-                if (
-                    node_type
-                    ==
-                    node_type_to_find
-                ):
-
-                    result.append(
-                        value
-                    )
-
-                for child in value.values():
-
-                    if isinstance(
-                        child,
-                        (dict, list),
-                    ):
-
-                        walk(
-                            child
-                        )
-
-            elif isinstance(
-                value,
-                list,
-            ):
-
-                for child in value:
-
-                    walk(
-                        child
-                    )
-
-        walk(
-            self.data
-        )
-
-        return result
+        return [
+            node
+            for node in self._iter_nodes(self.data)
+            if self._node_type(node) == node_type_to_find
+        ]
 
     # ============================================================
     # GENERAL NODE SEARCH
@@ -1997,65 +1819,30 @@ class MendixModelParser:
         suffix: str,
     ) -> List[Dict[str, Any]]:
 
-        result = []
+        return [
+            node
+            for node in self._iter_nodes(self.data)
+            if self._node_type(node) == suffix
+            or self._node_type(node).endswith(suffix)
+        ]
 
-        def walk(
-            value: Any,
-        ):
+    @staticmethod
+    def _node_type(node: Dict[str, Any]) -> str:
+        return str(node.get("$Type", "") or "")
 
-            if isinstance(
-                value,
-                dict,
-            ):
-
-                node_type = str(
-                    value.get(
-                        "$Type",
-                        "",
-                    )
-                    or
-                    ""
-                )
-
-                if (
-                    node_type == suffix
-                    or
-                    node_type.endswith(
-                        suffix
-                    )
-                ):
-
-                    result.append(
-                        value
-                    )
-
-                for child in value.values():
-
-                    if isinstance(
-                        child,
-                        (dict, list),
-                    ):
-
-                        walk(
-                            child
-                        )
-
-            elif isinstance(
-                value,
-                list,
-            ):
-
-                for child in value:
-
-                    walk(
-                        child
-                    )
-
-        walk(
-            self.data
-        )
-
-        return result
+    @classmethod
+    def _iter_nodes(
+        cls,
+        value: Any,
+    ):
+        if isinstance(value, dict):
+            yield value
+            for child in value.values():
+                if isinstance(child, (dict, list)):
+                    yield from cls._iter_nodes(child)
+        elif isinstance(value, list):
+            for child in value:
+                yield from cls._iter_nodes(child)
 
     # ============================================================
     # TYPE DETECTION
@@ -2142,6 +1929,18 @@ class MendixModelParser:
             or
             ""
         )
+
+    @classmethod
+    def _named_identity(
+        cls,
+        node: Dict[str, Any],
+    ) -> tuple[str, str]:
+        name = cls._name(node)
+        return name, cls._qualified_name(node) or name
+
+    @staticmethod
+    def _entity_name(entity: Entity) -> str:
+        return entity.qualified_name or entity.name
 
     @staticmethod
     def _module_from_name(

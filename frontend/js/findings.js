@@ -16,22 +16,9 @@ const grouping = GROUPINGS[queryParameter("grouping")]
     ? queryParameter("grouping")
     : "owasp";
 
-const view = renderShell({
-    scope: "system",
-    active: "findings",
-    applicationId,
-    period: false,
-    breadcrumbs: [
-        { text: "Portfolio", href: "/dashboard.html" },
-        {
-            text: "Security",
-            href: `/system-security.html?application=${
-                encodeURIComponent(applicationId)
-            }`,
-        },
-        { text: groupName || "All findings" },
-    ],
-});
+const view = renderFindingPage(applicationId, [
+    { text: groupName || "All findings" },
+]);
 
 const FILTER_KEYS = ["severity", "category", "platform"];
 
@@ -280,12 +267,7 @@ function render(findings) {
 
 async function load() {
     if (!applicationId) {
-        view.innerHTML = `
-            <div class="notice notice--warning">
-                No application selected.
-                <a href="/dashboard.html">Pick one from the portfolio</a>.
-            </div>
-        `;
+        renderNoApplicationSelected(view);
 
         return;
     }

@@ -329,6 +329,18 @@ def parse_package_lock(text: str, manifest: str) -> list[Dependency]:
 
     dependencies = []
 
+    def add_dependency(name: str, entry: dict[str, Any]) -> None:
+        dependencies.append(
+            Dependency(
+                name=name,
+                ecosystem=NPM,
+                version=str(entry.get("version") or ""),
+                manifest=manifest,
+                direct=False,
+                scope=DEVELOPMENT if entry.get("dev") else RUNTIME,
+            )
+        )
+
     packages = document.get("packages")
 
     if isinstance(packages, dict):
@@ -337,32 +349,13 @@ def parse_package_lock(text: str, manifest: str) -> list[Dependency]:
                 continue
 
             name = entry.get("name") or location.rsplit("node_modules/", 1)[1]
-
-            dependencies.append(
-                Dependency(
-                    name=name,
-                    ecosystem=NPM,
-                    version=str(entry.get("version") or ""),
-                    manifest=manifest,
-                    direct=False,
-                    scope=DEVELOPMENT if entry.get("dev") else RUNTIME,
-                )
-            )
+            add_dependency(name, entry)
 
         return dependencies
 
     def walk(tree: dict[str, Any]) -> None:
         for name, entry in tree.items():
-            dependencies.append(
-                Dependency(
-                    name=name,
-                    ecosystem=NPM,
-                    version=str(entry.get("version") or ""),
-                    manifest=manifest,
-                    direct=False,
-                    scope=DEVELOPMENT if entry.get("dev") else RUNTIME,
-                )
-            )
+            add_dependency(name, entry)
 
             walk(entry.get("dependencies") or {})
 

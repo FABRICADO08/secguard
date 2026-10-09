@@ -214,12 +214,7 @@ def hide_inaccessible_applications():
     if github_auth.can_view(load_application(application_id)):
         return None
 
-    return jsonify(
-        {
-            "success": False,
-            "error": "Application not found.",
-        }
-    ), 404
+    return _application_not_found_response()
 
 
 # ============================================================
@@ -1155,35 +1150,10 @@ def analyze_mendix_model():
             [],
     }
 
-    application.status = "analyzed"
-
-    application.update_timestamp()
-
-    save_application(
-        application.to_dict()
-    )
-
-    save_findings(
-        application.id,
+    return _persist_analyzed_application(
+        application,
         findings,
-    )
-
-    return jsonify(
-        {
-            "success":
-                True,
-
-            "application_id":
-                application.id,
-
-            "application":
-                application.to_dict(),
-
-            "model_statistics":
-                model_statistics(
-                    application.model
-                ),
-        }
+        model_statistics(application.model),
     )
 
 
@@ -1216,6 +1186,52 @@ def _platform_model_statistics(
         return _outsystems_statistics(model)
 
     return model_statistics(model)
+
+
+def _persist_analyzed_application(
+    application: Application,
+    findings: list[dict],
+    statistics: dict[str, int],
+):
+
+    application.status = "analyzed"
+    application.update_timestamp()
+
+    save_application(
+        application.to_dict()
+    )
+
+    save_findings(
+        application.id,
+        findings,
+    )
+
+    return jsonify(
+        {
+            "success": True,
+            "application_id": application.id,
+            "application": application.to_dict(),
+            "model_statistics": statistics,
+        }
+    )
+
+
+def _application_not_found_response():
+    return jsonify(
+        {
+            "success": False,
+            "error": "Application not found.",
+        }
+    ), 404
+
+
+def _repository_scan_not_found_response():
+    return jsonify(
+        {
+            "success": False,
+            "error": "No scan found for this application.",
+        }
+    ), 404
 
 
 @app.post("/api/outsystems/analyze")
@@ -1267,35 +1283,10 @@ def analyze_outsystems():
             [],
     }
 
-    application.status = "analyzed"
-
-    application.update_timestamp()
-
-    save_application(
-        application.to_dict()
-    )
-
-    save_findings(
-        application.id,
+    return _persist_analyzed_application(
+        application,
         findings,
-    )
-
-    return jsonify(
-        {
-            "success":
-                True,
-
-            "application_id":
-                application.id,
-
-            "application":
-                application.to_dict(),
-
-            "model_statistics":
-                _outsystems_statistics(
-                    application.model
-                ),
-        }
+        _outsystems_statistics(application.model),
     )
 
 
@@ -1356,15 +1347,7 @@ def get_application(
         application_id
     ):
 
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    "Application not found.",
-            }
-        ), 404
+        return _application_not_found_response()
 
     try:
 
@@ -1425,15 +1408,7 @@ def remove_application(
         application_id
     ):
 
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    "Application not found.",
-            }
-        ), 404
+        return _application_not_found_response()
 
     return jsonify(
         {
@@ -1461,15 +1436,7 @@ def application_findings(
         application_id
     ):
 
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    "Application not found.",
-            }
-        ), 404
+        return _application_not_found_response()
 
     findings = load_findings(
         application_id
@@ -1531,15 +1498,7 @@ def application_finding(
         application_id
     ):
 
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    "Application not found.",
-            }
-        ), 404
+        return _application_not_found_response()
 
     for finding in load_findings(
         application_id
@@ -1742,12 +1701,7 @@ def repository_sbom(
 
     if report is None:
 
-        return jsonify(
-            {
-                "success": False,
-                "error": "No scan found for this application.",
-            }
-        ), 404
+        return _repository_scan_not_found_response()
 
     sbom_format = request.args.get("format", "cyclonedx").lower()
 
@@ -1782,12 +1736,7 @@ def repository_quality(
 
     if report is None:
 
-        return jsonify(
-            {
-                "success": False,
-                "error": "No scan found for this application.",
-            }
-        ), 404
+        return _repository_scan_not_found_response()
 
     return jsonify(
         {
@@ -1958,12 +1907,7 @@ def trigger_repository_scan(
 
     if repository is None:
 
-        return jsonify(
-            {
-                "success": False,
-                "error": "Application not found.",
-            }
-        ), 404
+        return _application_not_found_response()
 
     if not repository["can_trigger"]:
 
@@ -2045,12 +1989,7 @@ def rename_repository_application(
 
         if repository is None:
 
-            return jsonify(
-                {
-                    "success": False,
-                    "error": "Application not found.",
-                }
-            ), 404
+            return _application_not_found_response()
 
         if not repository["can_trigger"]:
 
