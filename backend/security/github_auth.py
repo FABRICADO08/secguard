@@ -197,20 +197,22 @@ def _callback_url() -> str:
 def safe_next(value: str) -> str:
     """The SecGuard page to return to after sign-in, never another site."""
 
-    parts = urlsplit(str(value or ""))
-
-    if parts.scheme or parts.netloc or not str(value or "").startswith("/"):
-        return DEFAULT_LANDING
-
-    name = parts.path.lstrip("/") or "index.html"
-    page = next((page for page in LANDING_PAGES if page == name), None)
-
+    page = _landing_page(value)
     if page is None:
         return DEFAULT_LANDING
 
-    query = urlencode(parse_qsl(parts.query))
-
+    query = urlencode(parse_qsl(urlsplit(str(value or "")).query))
     return f"/{page}?{query}" if query else f"/{page}"
+
+
+def _landing_page(value: str) -> str | None:
+    raw = str(value or "")
+    parts = urlsplit(raw)
+    if parts.scheme or parts.netloc or not raw.startswith("/"):
+        return None
+
+    name = parts.path.lstrip("/") or "index.html"
+    return next((page for page in LANDING_PAGES if page == name), None)
 
 
 def _sign_in_failed(status: int):
@@ -279,54 +281,55 @@ def callback():
     landing = safe_next(str(pending.get("next") or ""))
 
     try:
-        exchange = github_request(
-            "POST",
-            f"{settings.GITHUB_URL}/login/oauth/access_token",
-            headers={"Accept": "application/json"},
-            data={
-                "client_id": settings.GITHUB_CLIENT_ID,
-                "client_secret": settings.GITHUB_CLIENT_SECRET,
-                "code": code,
-                "redirect_uri": _callback_url(),
-                "code_verifier": verifier,
-            },
-        )
-
-        token = str((exchange.json() or {}).get("access_token") or "")
-
-        if not token:
-            return _sign_in_failed(400)
-
-        profile_response = _api("GET", "/user", token)
-        profile_response.raise_for_status()
-        profile = profile_response.json()
-
-        repositories = fetch_repositories(token)
-
+        user = _github_user(code, verifier)
     except (requests.RequestException, ValueError):
         return _sign_in_failed(502)
+
+    if user is None:
+        return _sign_in_failed(400)
 
     session_id = secrets.token_urlsafe(32)
 
     session_store.put(
         "user",
         session_id,
-        _encode(
-            GitHubUser(
-                login=str(profile.get("login") or ""),
-                name=str(profile.get("name") or ""),
-                avatar_url=str(profile.get("avatar_url") or ""),
-                token=token,
-                repositories=repositories,
-                expires=time.time() + settings.SESSION_HOURS * 3600,
-            )
-        ),
+        _encode(user),
     )
 
     session.clear()
     session["sid"] = session_id
 
     return redirect(landing)
+
+
+def _github_user(code: str, verifier: str) -> GitHubUser | None:
+    exchange = github_request(
+        "POST",
+        f"{settings.GITHUB_URL}/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": settings.GITHUB_CLIENT_ID,
+            "client_secret": settings.GITHUB_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": _callback_url(),
+            "code_verifier": verifier,
+        },
+    )
+    token = str((exchange.json() or {}).get("access_token") or "")
+    if not token:
+        return None
+
+    profile_response = _api("GET", "/user", token)
+    profile_response.raise_for_status()
+    profile = profile_response.json()
+    return GitHubUser(
+        login=str(profile.get("login") or ""),
+        name=str(profile.get("name") or ""),
+        avatar_url=str(profile.get("avatar_url") or ""),
+        token=token,
+        repositories=fetch_repositories(token),
+        expires=time.time() + settings.SESSION_HOURS * 3600,
+    )
 
 
 @blueprint.post("/auth/logout")
