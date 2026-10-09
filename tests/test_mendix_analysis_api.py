@@ -48,10 +48,17 @@ def test_findings_are_normalized(client, model_document):
         .get_json()["application"]["security"]["findings"]
     )
 
-    rule_ids = {finding["rule_id"] for finding in findings}
+    _assert_expected_mendix_rules(findings)
+    _assert_findings_have_normalized_fields(findings)
+    _assert_findings_are_sorted(findings)
 
+
+def _assert_expected_mendix_rules(findings):
+    rule_ids = {finding["rule_id"] for finding in findings}
     assert {"MXSEC-101", "MXSEC-102"} <= rule_ids
 
+
+def _assert_findings_have_normalized_fields(findings):
     for finding in findings:
         assert finding["id"]
         assert finding["detected_at"]
@@ -61,8 +68,9 @@ def test_findings_are_normalized(client, model_document):
         assert finding["recommendation"]
         assert finding["risk"]["score"] > 0
 
-    scores = [finding["risk"]["score"] for finding in findings]
 
+def _assert_findings_are_sorted(findings):
+    scores = [finding["risk"]["score"] for finding in findings]
     assert scores == sorted(scores, reverse=True)
 
 

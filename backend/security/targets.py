@@ -127,33 +127,36 @@ def unwrap_blocked(exc: BaseException) -> BlockedTargetError | None:
 
     while queue:
         current = queue.pop()
-
-        if current is None or id(current) in seen:
+        if id(current) in seen:
             continue
 
         seen.add(id(current))
-
         if isinstance(current, BlockedTargetError):
             return current
 
-        for arg in current.args:
-
-            # urllib3 packs the original error into a tuple argument.
-            candidates = arg if isinstance(arg, tuple) else (arg,)
-
-            queue.extend(
-                candidate
-                for candidate in candidates
-                if isinstance(candidate, BaseException)
-            )
-
-        queue.extend(
-            candidate
-            for candidate in (current.__cause__, current.__context__)
-            if candidate is not None
-        )
+        queue.extend(_nested_exceptions(current))
 
     return None
+
+
+def _nested_exceptions(exc: BaseException) -> list[BaseException]:
+    nested = []
+
+    for arg in exc.args:
+        # urllib3 packs the original error into a tuple argument.
+        candidates = arg if isinstance(arg, tuple) else (arg,)
+        nested.extend(
+            candidate
+            for candidate in candidates
+            if isinstance(candidate, BaseException)
+        )
+
+    nested.extend(
+        candidate
+        for candidate in (exc.__cause__, exc.__context__)
+        if candidate is not None
+    )
+    return nested
 
 
 def guard_response(response, *args, **kwargs) -> None:

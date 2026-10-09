@@ -56,18 +56,8 @@ class ExposedApiDocumentation(Rule):
         for entry in context.attack_surface.get(
             "potential_api_paths"
         ) or []:
-            if not entry.get("documentation") or not _accessible(entry):
-                continue
-
-            body = str(entry.get("body_preview") or "").lower()
-
-            markers = [
-                marker
-                for marker in DOCUMENTATION_MARKERS
-                if marker in body
-            ]
-
-            if not markers and not _serves_api_content(entry):
+            markers = _documentation_markers(entry)
+            if markers is None:
                 continue
 
             findings.append(
@@ -94,6 +84,18 @@ class ExposedApiDocumentation(Rule):
             )
 
         return findings
+
+
+def _documentation_markers(entry: dict) -> list[str] | None:
+    if not entry.get("documentation") or not _accessible(entry):
+        return None
+
+    body = str(entry.get("body_preview") or "").lower()
+    markers = [marker for marker in DOCUMENTATION_MARKERS if marker in body]
+    if not markers and not _serves_api_content(entry):
+        return None
+
+    return markers
 
 
 class UnauthenticatedApiEndpoint(Rule):

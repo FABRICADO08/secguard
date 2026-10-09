@@ -1,7 +1,7 @@
 Flask>=3.0,<4.0
 requests>=2.32,<3.0
 beautifulsoup4>=4.12,<5.0
-gunicorn==23.0.0
+gunicorn==26.2.0
 packaging==26.3
 tomli>=2.0,<3.0; python_version < "3.11"
 pg8000==1.31.5

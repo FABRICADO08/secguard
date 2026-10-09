@@ -120,37 +120,23 @@ def _spdx_id(value: str) -> str:
     return "SPDXRef-" + re.sub(r"[^A-Za-z0-9.-]+", "-", value).strip("-")
 
 
-def spdx(report: dict[str, Any]) -> dict[str, Any]:
-    repository = report.get("repository") or {}
-    name = repository.get("name") or "repository"
-
-    root_id = "SPDXRef-Root"
-
-    packages = [
-        {
-            "SPDXID": root_id,
-            "name": name,
-            "versionInfo": repository.get("commit") or "",
-            "downloadLocation": repository.get("url") or "NOASSERTION",
-            "filesAnalyzed": False,
-            "licenseConcluded": "NOASSERTION",
-            "licenseDeclared": repository.get("license") or "NOASSERTION",
-            "copyrightText": "NOASSERTION",
-        }
-    ]
-
-    relationships = [{"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": root_id}]
-
+def _spdx_dependencies(
+    dependencies: list[dict[str, Any]],
+    root_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
+    packages = []
+    relationships = []
     seen: set[str] = set()
 
-    for dependency in report.get("dependencies") or []:
-        identifier = _spdx_id(f"{dependency['ecosystem']}-{dependency['name']}-{dependency.get('version') or 'unresolved'}")
+    for dependency in dependencies:
+        identifier = _spdx_id(
+            f"{dependency['ecosystem']}-{dependency['name']}-{dependency.get('version') or 'unresolved'}"
+        )
 
         if identifier in seen:
             continue
 
         seen.add(identifier)
-
         package: dict[str, Any] = {
             "SPDXID": identifier,
             "name": dependency["name"],
@@ -164,15 +150,22 @@ def spdx(report: dict[str, Any]) -> dict[str, Any]:
 
         if dependency.get("purl"):
             package["externalRefs"] = [
-                {"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": dependency["purl"]}
+                {
+                    "referenceCategory": "PACKAGE-MANAGER",
+                    "referenceType": "purl",
+                    "referenceLocator": dependency["purl"],
+                }
             ]
 
         packages.append(package)
-
         relationships.append(
             {
                 "spdxElementId": root_id,
-                "relationshipType": "DEV_DEPENDENCY_OF" if dependency.get("scope") == "development" else "DEPENDS_ON",
+                "relationshipType": (
+                    "DEV_DEPENDENCY_OF"
+                    if dependency.get("scope") == "development"
+                    else "DEPENDS_ON"
+                ),
                 "relatedSpdxElement": identifier,
             }
         )
@@ -184,6 +177,33 @@ def spdx(report: dict[str, Any]) -> dict[str, Any]:
                 relationship["relatedSpdxElement"],
                 relationship["spdxElementId"],
             )
+
+    return packages, relationships
+
+
+def spdx(report: dict[str, Any]) -> dict[str, Any]:
+    repository = report.get("repository") or {}
+    name = repository.get("name") or "repository"
+    root_id = "SPDXRef-Root"
+    packages = [
+        {
+            "SPDXID": root_id,
+            "name": name,
+            "versionInfo": repository.get("commit") or "",
+            "downloadLocation": repository.get("url") or "NOASSERTION",
+            "filesAnalyzed": False,
+            "licenseConcluded": "NOASSERTION",
+            "licenseDeclared": repository.get("license") or "NOASSERTION",
+            "copyrightText": "NOASSERTION",
+        }
+    ]
+    relationships = [{"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": root_id}]
+    dependency_packages, dependency_relationships = _spdx_dependencies(
+        report.get("dependencies") or [],
+        root_id,
+    )
+    packages.extend(dependency_packages)
+    relationships.extend(dependency_relationships)
 
     return {
         "spdxVersion": "SPDX-2.3",

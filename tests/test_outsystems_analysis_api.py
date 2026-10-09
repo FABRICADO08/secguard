@@ -66,17 +66,23 @@ def test_json_body_model_is_analyzed(client, model_document):
 def test_findings_are_normalized(client, model_document):
     findings = findings_of(analyze(client, model_document))
 
+    _assert_findings_have_normalized_fields(findings, "OutSystems")
+    _assert_findings_are_sorted(findings)
+
+
+def _assert_findings_have_normalized_fields(findings, platform):
     for finding in findings:
         assert finding["id"]
         assert finding["detected_at"]
-        assert finding["platform"] == "OutSystems"
+        assert finding["platform"] == platform
         assert finding["category"]
         assert finding["confidence"]
         assert finding["recommendation"]
         assert finding["risk"]["score"] > 0
 
-    scores = [finding["risk"]["score"] for finding in findings]
 
+def _assert_findings_are_sorted(findings):
+    scores = [finding["risk"]["score"] for finding in findings]
     assert scores == sorted(scores, reverse=True)
 
 

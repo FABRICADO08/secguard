@@ -100,22 +100,8 @@ def _freshness(dependency: Dependency, info: PackageInfo | None) -> dict[str, An
 
     current = release_parts(dependency.ecosystem, dependency.version)
     latest = release_parts(dependency.ecosystem, info.latest)
-
-    behind = {"major": max(latest[0] - current[0], 0), "minor": 0, "patch": 0}
-
-    if behind["major"] == 0:
-        behind["minor"] = max(latest[1] - current[1], 0)
-
-        if behind["minor"] == 0:
-            behind["patch"] = max(latest[2] - current[2], 0)
-
-    libyears = None
-
-    released = parse_time(info.released(dependency.version))
-    newest = parse_time(info.released(info.latest) or info.latest_release)
-
-    if released and newest and compare(dependency.ecosystem, info.latest, dependency.version) > 0:
-        libyears = round(max((newest - released).days / 365.25, 0.0), 2)
+    behind = _version_gap(current, latest)
+    libyears = _libyears(dependency, info)
 
     return {
         "latest": info.latest,
@@ -123,6 +109,65 @@ def _freshness(dependency: Dependency, info: PackageInfo | None) -> dict[str, An
         "libyears": libyears if libyears is not None else 0.0,
         "up_to_date": compare(dependency.ecosystem, dependency.version, info.latest) >= 0,
     }
+
+
+def _version_gap(current: tuple[int, int, int], latest: tuple[int, int, int]) -> dict[str, int]:
+    major = max(latest[0] - current[0], 0)
+    minor = max(latest[1] - current[1], 0) if major == 0 else 0
+    patch = max(latest[2] - current[2], 0) if major == 0 and minor == 0 else 0
+    return {"major": major, "minor": minor, "patch": patch}
+
+
+def _libyears(dependency: Dependency, info: PackageInfo) -> float | None:
+    released = parse_time(info.released(dependency.version))
+    newest = parse_time(info.released(info.latest) or info.latest_release)
+
+    if not released or not newest:
+        return None
+    if compare(dependency.ecosystem, info.latest, dependency.version) <= 0:
+        return None
+
+    return round(max((newest - released).days / 365.25, 0.0), 2)
+
+
+def _vulnerability_confidence(dependency: Dependency, reach: str) -> str:
+    if reach == NOT_IMPORTED or dependency.scope == DEVELOPMENT:
+        return TENTATIVE
+    if reach == IMPORTED:
+        return CONFIRMED
+    return FIRM
+
+
+def _reach_note(reach: str) -> str:
+    return {
+        IMPORTED: " First-party code imports this package.",
+        NOT_IMPORTED: " No first-party code imports this package, so the vulnerable code is unlikely to be reachable.",
+    }.get(reach, "")
+
+
+def _vulnerability_recommendation(dependency, vulnerability, fix) -> str:
+    if fix and fix.target:
+        upgrade = f"Upgrade {dependency.name} from {dependency.version} to {fix.target}"
+
+        if fix.breaking and fix.non_breaking_target:
+            upgrade += (
+                f" ({fix.target} is a major upgrade; {fix.non_breaking_target} stays on your "
+                "current major line but does not clear every advisory)"
+            )
+        elif fix.breaking:
+            upgrade += f" ({fix.target} is a major upgrade: review its changelog for breaking changes)"
+        else:
+            upgrade += ", a compatible upgrade that clears every known advisory"
+
+        return upgrade + "."
+
+    if vulnerability.minimum_fix:
+        return f"Upgrade {dependency.name} to at least {vulnerability.minimum_fix}."
+
+    return (
+        f"No fixed release of {dependency.name} is published; replace the package or "
+        "mitigate the vulnerable feature."
+    )
 
 
 class RepositoryScanner:
@@ -293,48 +338,14 @@ class RepositoryScanner:
             advisory = {**vulnerability.to_dict(), "purl": package_url, "manifest": dependency.manifest, "line": dependency.line}
             advisories.append(advisory)
 
-            confidence = FIRM
-
-            if reach == NOT_IMPORTED or dependency.scope == DEVELOPMENT:
-                confidence = TENTATIVE
-            elif reach == IMPORTED:
-                confidence = CONFIRMED
-
-            if fix and fix.target:
-                upgrade = f"Upgrade {dependency.name} from {dependency.version} to {fix.target}"
-
-                if fix.breaking and fix.non_breaking_target:
-                    upgrade += (
-                        f" ({fix.target} is a major upgrade; {fix.non_breaking_target} stays on your "
-                        "current major line but does not clear every advisory)"
-                    )
-                elif fix.breaking:
-                    upgrade += f" ({fix.target} is a major upgrade: review its changelog for breaking changes)"
-                else:
-                    upgrade += ", a compatible upgrade that clears every known advisory"
-
-                recommendation = upgrade + "."
-            elif vulnerability.minimum_fix:
-                recommendation = f"Upgrade {dependency.name} to at least {vulnerability.minimum_fix}."
-            else:
-                recommendation = (
-                    f"No fixed release of {dependency.name} is published; replace the package or "
-                    "mitigate the vulnerable feature."
-                )
-
-            reach_note = {
-                IMPORTED: " First-party code imports this package.",
-                NOT_IMPORTED: " No first-party code imports this package, so the vulnerable code is unlikely to be reachable.",
-            }.get(reach, "")
-
             results.append(
                 make_finding(
                     "REPO-DEP-001",
                     vulnerability.severity,
                     f"{dependency.name} {dependency.version} is affected by {vulnerability.id}"
                     f"{' (' + ', '.join(vulnerability.aliases[:2]) + ')' if vulnerability.aliases else ''}: "
-                    f"{vulnerability.summary}{reach_note}",
-                    recommendation,
+                    f"{vulnerability.summary}{_reach_note(reach)}",
+                    _vulnerability_recommendation(dependency, vulnerability, fix),
                     _location(dependency),
                     {
                         "package": dependency.name,
@@ -355,13 +366,44 @@ class RepositoryScanner:
                         "manifest": dependency.manifest,
                         "line": dependency.line,
                     },
-                    confidence=confidence,
+                    confidence=_vulnerability_confidence(dependency, reach),
                     title=f"{dependency.name} {dependency.version}: {vulnerability.id}",
                     references=[vulnerability.url, *vulnerability.references[:3]],
                 )
             )
 
         return results
+
+    @staticmethod
+    def _freshness_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
+        counts = {
+            "known": 0,
+            "up_to_date": 0,
+            "outdated": 0,
+            "major_behind": 0,
+            "minor_behind": 0,
+        }
+        libyears = 0.0
+        current = 0
+
+        for record in records:
+            item = record["freshness"]
+            if not item:
+                continue
+
+            behind = item["behind"]
+            counts["known"] += 1
+            counts["up_to_date" if item["up_to_date"] else "outdated"] += 1
+            counts["major_behind"] += behind["major"] > 0
+            counts["minor_behind"] += behind["major"] == 0 and behind["minor"] > 0
+            current += behind["major"] == 0 and behind["minor"] == 0
+            libyears += item.get("libyears") or 0
+
+        return {
+            **counts,
+            "libyears": round(libyears, 2),
+            "freshness_index": round(100 * current / counts["known"]) if counts["known"] else None,
+        }
 
     def _package_findings(self, dependency, info, verdict, project_category, freshness, activity):
         name = dependency.name
@@ -527,23 +569,6 @@ class RepositoryScanner:
             location,
             detail,
         )
-
-    @staticmethod
-    def _freshness_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
-        known = [record["freshness"] for record in records if record["freshness"]]
-
-        current = sum(1 for item in known if item["behind"]["major"] == 0 and item["behind"]["minor"] == 0)
-
-        return {
-            "known": len(known),
-            "up_to_date": sum(1 for item in known if item["up_to_date"]),
-            "outdated": sum(1 for item in known if not item["up_to_date"]),
-            "major_behind": sum(1 for item in known if item["behind"]["major"] > 0),
-            "minor_behind": sum(1 for item in known if item["behind"]["major"] == 0 and item["behind"]["minor"] > 0),
-            "libyears": round(sum(item.get("libyears") or 0 for item in known), 2),
-            "freshness_index": round(100 * current / len(known)) if known else None,
-        }
-
 
 def scan_repository(root: Path, repository: dict[str, Any] | None = None, **options: Any) -> dict[str, Any]:
     return RepositoryScanner(root, **options).run(repository)
