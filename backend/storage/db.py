@@ -250,6 +250,32 @@ def delete_application(application_id: str) -> bool:
             return cursor.rowcount > 0
 
 
+def application_summary(data: dict[str, Any]) -> dict[str, Any]:
+    """Build the public portfolio summary for one stored application."""
+    security = data.get("security") or {}
+    repository = data.get("repository") or {}
+
+    return {
+        "id": data.get("id"),
+        "name": data.get("name"),
+        "url": data.get("final_url"),
+        "requested_url": data.get("requested_url"),
+        "platform": data.get("platform", "Unknown"),
+        "status": data.get("status", "unknown"),
+        "created_at": data.get("created_at"),
+        "updated_at": data.get("updated_at"),
+        "risk_score": security.get("risk_score", 0),
+        "risk_grade": security.get("risk_grade", ""),
+        "total_findings": security.get(
+            "total_findings",
+            len(security.get("findings", [])),
+        ),
+        "severity_counts": security.get("severity_counts", {}),
+        "repository": (repository.get("repository") or {}).get("name", ""),
+        "health": repository.get("health") or {},
+    }
+
+
 def list_applications() -> list[dict[str, Any]]:
     with _connection() as connection:
         with connection.cursor() as cursor:
@@ -264,31 +290,7 @@ def list_applications() -> list[dict[str, Any]]:
         except (ValueError, TypeError):
             continue
 
-        security = data.get("security", {}) or {}
-
-        applications.append(
-            {
-                "id": data.get("id"),
-                "name": data.get("name"),
-                "url": data.get("final_url"),
-                "requested_url": data.get("requested_url"),
-                "platform": data.get("platform", "Unknown"),
-                "status": data.get("status", "unknown"),
-                "created_at": data.get("created_at"),
-                "updated_at": data.get("updated_at"),
-                "risk_score": security.get("risk_score", 0),
-                "risk_grade": security.get("risk_grade", ""),
-                "total_findings": security.get(
-                    "total_findings",
-                    len(security.get("findings", [])),
-                ),
-                "severity_counts": security.get("severity_counts", {}),
-                "repository": (
-                    (data.get("repository") or {}).get("repository") or {}
-                ).get("name", ""),
-                "health": (data.get("repository") or {}).get("health") or {},
-            }
-        )
+        applications.append(application_summary(data))
 
     applications.sort(
         key=lambda item: item.get("updated_at") or "",

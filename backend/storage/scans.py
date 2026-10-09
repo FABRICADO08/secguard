@@ -181,28 +181,7 @@ def delete_application(
 
 def _application_summary(data: dict[str, Any]) -> dict[str, Any]:
     """Build the public portfolio summary for one stored application."""
-    security = data.get("security") or {}
-    repository = data.get("repository") or {}
-
-    return {
-        "id": data.get("id"),
-        "name": data.get("name"),
-        "url": data.get("final_url"),
-        "requested_url": data.get("requested_url"),
-        "platform": data.get("platform", "Unknown"),
-        "status": data.get("status", "unknown"),
-        "created_at": data.get("created_at"),
-        "updated_at": data.get("updated_at"),
-        "risk_score": security.get("risk_score", 0),
-        "risk_grade": security.get("risk_grade", ""),
-        "total_findings": security.get(
-            "total_findings",
-            len(security.get("findings", [])),
-        ),
-        "severity_counts": security.get("severity_counts", {}),
-        "repository": (repository.get("repository") or {}).get("name", ""),
-        "health": repository.get("health") or {},
-    }
+    return db.application_summary(data)
 
 
 def _read_application_summary(directory: Path) -> dict[str, Any] | None:
