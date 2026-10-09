@@ -270,44 +270,71 @@ def login():
     return redirect(f"{settings.GITHUB_URL}/login/oauth/authorize?{query}")
 
 
+def _exchange_code(code: str, verifier: str) -> str:
+    exchange = github_request(
+        "POST",
+        f"{settings.GITHUB_URL}/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": settings.GITHUB_CLIENT_ID,
+            "client_secret": settings.GITHUB_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": _callback_url(),
+            "code_verifier": verifier,
+        },
+    )
+    return str((exchange.json() or {}).get("access_token") or "")
+
+
+def _github_profile_and_repositories(token: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    profile_response = _api("GET", "/user", token)
+    profile_response.raise_for_status()
+    return profile_response.json(), fetch_repositories(token)
+
+def _store_github_session(
+    profile: dict[str, Any], token: str, repositories: list[dict[str, Any]]
+) -> str:
+    session_id = secrets.token_urlsafe(32)
+    session_store.put(
+        "user",
+        session_id,
+        _encode(
+            GitHubUser(
+                login=str(profile.get("login") or ""),
+                name=str(profile.get("name") or ""),
+                avatar_url=str(profile.get("avatar_url") or ""),
+                token=token,
+                repositories=repositories,
+                expires=time.time() + settings.SESSION_HOURS * 3600,
+            )
+        ),
+    )
+    session.clear()
+    session["sid"] = session_id
+    return session_id
+
+
 @blueprint.get("/auth/github/callback")
 def callback():
     """Validate OAuth state, exchange the code, and persist the session."""
     if not enabled():
         return _not_configured()
-
     state = request.args.get("state", "")
     code = request.args.get("code", "")
-
-    # Popping makes every state single-use, so a leaked code cannot be
-    # replayed, and an expired (or never started) handshake fails closed.
+    # Popping makes every state single-use; expired handshakes fail closed.
     pending = session_store.pop("pending", state) if state else None
-
     if pending is None or not code:
         return _sign_in_failed(400)
-
     verifier = str(pending.get("verifier") or "")
     landing = safe_next(str(pending.get("next") or ""))
-
     try:
-        user = _github_user(code, verifier)
+        token = _exchange_code(code, verifier)
+        if not token:
+            return _sign_in_failed(400)
+        profile, repositories = _github_profile_and_repositories(token)
     except (requests.RequestException, ValueError):
         return _sign_in_failed(502)
-
-    if user is None:
-        return _sign_in_failed(400)
-
-    session_id = secrets.token_urlsafe(32)
-
-    session_store.put(
-        "user",
-        session_id,
-        _encode(user),
-    )
-
-    session.clear()
-    session["sid"] = session_id
-
+    _store_github_session(profile, token, repositories)
     return redirect(landing)
 
 

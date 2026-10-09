@@ -264,44 +264,42 @@ def _span(node: ast.AST) -> int:
     return end - getattr(node, "lineno", 0) + 1
 
 
-def _unused_locals(function: ast.AST) -> list[tuple[str, int]]:
+def _function_bindings(function: ast.AST) -> tuple[dict[str, int], set[str]]:
     stored: dict[str, int] = {}
     loaded: set[str] = set()
     declared_outer: set[str] = set()
-
-    # Only this function's own bindings count, but a nested function or
-    # class reading a name (a closure) uses it.
     for child in _walk_own(function):
         if isinstance(child, (ast.Global, ast.Nonlocal)):
             declared_outer.update(child.names)
         elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
             stored.setdefault(child.id, child.lineno)
-
     for child in ast.walk(function):
         if isinstance(child, ast.Name) and not isinstance(child.ctx, ast.Store):
             loaded.add(child.id)
+    return stored, loaded | declared_outer
 
-    # Names unpacked in a loop or tuple target are routinely partly unused.
+
+def _unpacked_names(function: ast.AST) -> set[str]:
     unpacked: set[str] = set()
-
     for child in ast.walk(function):
         targets = []
-
         if isinstance(child, (ast.For, ast.AsyncFor, ast.comprehension)):
             targets.append(child.target)
         elif isinstance(child, ast.Assign):
             targets.extend(target for target in child.targets if isinstance(target, (ast.Tuple, ast.List)))
         elif isinstance(child, ast.withitem) and child.optional_vars is not None:
             targets.append(child.optional_vars)
-
         for target in targets:
             unpacked.update(name.id for name in ast.walk(target) if isinstance(name, ast.Name))
+    return unpacked
 
+def _unused_locals(function: ast.AST) -> list[tuple[str, int]]:
+    stored, used = _function_bindings(function)
+    unpacked = _unpacked_names(function)
     return [
         (name, line)
         for name, line in stored.items()
-        if name not in loaded
-        and name not in declared_outer
+        if name not in used
         and name not in unpacked
         and not name.startswith("_")
     ]
@@ -328,85 +326,82 @@ def _unreachable(body: list[ast.stmt]) -> list[ast.stmt]:
     return found
 
 
+def _record_python_class(
+    path: str, node: ast.ClassDef, is_test: bool, report: QualityReport
+) -> None:
+    methods = [child for child in node.body if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    span = _span(node)
+    if len(methods) > CLASS_METHODS or span > CLASS_LINES:
+        report.issues.append(
+            Issue("REPO-MNT-004", path, node.lineno, node.name,
+                  f"Class `{node.name}` has {len(methods)} methods over {span} lines.",
+                  float(span), node.end_lineno or node.lineno)
+        )
+    if not is_test and not node.name.startswith("_"):
+        report.documentable += 1
+        report.documented += ast.get_docstring(node) is not None
+
+
+def _record_python_function(
+    path: str, node: ast.FunctionDef | ast.AsyncFunctionDef,
+    is_test: bool, report: QualityReport
+) -> None:
+    cyclomatic = cyclomatic_complexity(node)
+    cognitive = cognitive_complexity(node)
+    arguments = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+    parameters = [argument for argument in arguments if argument.arg not in ("self", "cls")]
+    span = _span(node)
+    report.functions.append(
+        FunctionMetrics(path, node.name, node.lineno, span, cyclomatic, cognitive, len(parameters))
+    )
+    end = node.end_lineno or node.lineno
+    if cyclomatic > COMPLEXITY_WARNING or cognitive > COGNITIVE_WARNING:
+        report.issues.append(
+            Issue("REPO-MNT-001", path, node.lineno, node.name,
+                  f"`{node.name}` has cyclomatic complexity {cyclomatic} and cognitive complexity {cognitive}.",
+                  float(cyclomatic), end)
+        )
+    if span > FUNCTION_LINES:
+        report.issues.append(
+            Issue("REPO-MNT-002", path, node.lineno, node.name,
+                  f"`{node.name}` is {span} lines long.", float(span), end)
+        )
+    if len(parameters) > PARAMETERS:
+        report.issues.append(
+            Issue("REPO-MNT-003", path, node.lineno, node.name,
+                  f"`{node.name}` takes {len(parameters)} parameters.", float(len(parameters)), end)
+        )
+    for name, line in _unused_locals(node):
+        report.issues.append(
+            Issue("REPO-MNT-006", path, line, name, f"Local variable `{name}` in `{node.name}` is assigned but never used.")
+        )
+    if not is_test and not node.name.startswith("_"):
+        report.documentable += 1
+        report.documented += ast.get_docstring(node) is not None
+        report.annotatable += 1
+        report.annotated += node.returns is not None and all(
+            argument.annotation is not None for argument in parameters
+        )
+
+
 def _analyse_python(path: str, source: str, report: QualityReport) -> None:
     try:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return
-
     is_test = bool(re.search(r"(^|/)(tests?|test_[^/]*|[^/]*_test)\.?", path))
-
-    if re.search(r"\b(flask|fastapi|django|starlette)\b", source) and re.search(r"@\w+\.(route|get|post|put|delete|api_view)", source):
+    if re.search(r"\b(flask|fastapi|django|starlette)\b", source) and re.search(
+        r"@\w+\.(route|get|post|put|delete|api_view)", source
+    ):
         report.has_web_api = True
-
     if not is_test:
         report.documentable += 1
         report.documented += ast.get_docstring(tree) is not None
-
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
-            methods = [child for child in node.body if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))]
-
-            if len(methods) > CLASS_METHODS or _span(node) > CLASS_LINES:
-                report.issues.append(
-                    Issue("REPO-MNT-004", path, node.lineno, node.name,
-                          f"Class `{node.name}` has {len(methods)} methods over {_span(node)} lines.",
-                          float(_span(node)), node.end_lineno or node.lineno)
-                )
-
-            if not is_test and not node.name.startswith("_"):
-                report.documentable += 1
-                report.documented += ast.get_docstring(node) is not None
-
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-
-        cyclomatic = cyclomatic_complexity(node)
-        cognitive = cognitive_complexity(node)
-
-        arguments = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
-        parameters = [argument for argument in arguments if argument.arg not in ("self", "cls")]
-
-        report.functions.append(
-            FunctionMetrics(path, node.name, node.lineno, _span(node), cyclomatic, cognitive, len(parameters))
-        )
-
-        end = node.end_lineno or node.lineno
-
-        if cyclomatic > COMPLEXITY_WARNING or cognitive > COGNITIVE_WARNING:
-            report.issues.append(
-                Issue("REPO-MNT-001", path, node.lineno, node.name,
-                      f"`{node.name}` has cyclomatic complexity {cyclomatic} and cognitive complexity {cognitive}.",
-                      float(cyclomatic), end)
-            )
-
-        if _span(node) > FUNCTION_LINES:
-            report.issues.append(
-                Issue("REPO-MNT-002", path, node.lineno, node.name,
-                      f"`{node.name}` is {_span(node)} lines long.", float(_span(node)), end)
-            )
-
-        if len(parameters) > PARAMETERS:
-            report.issues.append(
-                Issue("REPO-MNT-003", path, node.lineno, node.name,
-                      f"`{node.name}` takes {len(parameters)} parameters.", float(len(parameters)), end)
-            )
-
-        for name, line in _unused_locals(node):
-            report.issues.append(
-                Issue("REPO-MNT-006", path, line, name, f"Local variable `{name}` in `{node.name}` is assigned but never used.")
-            )
-
-        public = not node.name.startswith("_")
-
-        if public and not is_test:
-            report.documentable += 1
-            report.documented += ast.get_docstring(node) is not None
-
-            report.annotatable += 1
-            report.annotated += node.returns is not None and all(
-                argument.annotation is not None for argument in parameters
-            )
+            _record_python_class(path, node, is_test, report)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _record_python_function(path, node, is_test, report)
 
     for statement in _unreachable(tree.body):
         report.issues.append(
@@ -549,6 +544,48 @@ def _report_duplicate_blocks(
         reported += 1
 
 
+def _inspect_quality_file(
+    path: Path,
+    relative: str,
+    language: str,
+    report: QualityReport,
+    normalised: dict[str, list[tuple[int, str]]],
+) -> None:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    report.files += 1
+    code = _normalised_lines(text)
+    report.code_lines += len(code)
+    report.languages[language] = report.languages.get(language, 0) + len(code)
+    normalised[relative] = code
+    if language == "Python":
+        _analyse_python(relative, text, report)
+        if len(lines) > FILE_LINES:
+            _analyse_generic(relative, lines, report)
+        return
+    _analyse_generic(relative, lines, report)
+    if language in ("JavaScript", "TypeScript") and re.search(r"\b(express|fastify|koa)\b", text):
+        report.has_web_api = True
+
+
+def _coverage_findings(report: QualityReport) -> None:
+    if not report.has_readme and report.files:
+        report.issues.append(Issue("REPO-MNT-011", "README.md", 0, "", "The repository has no README at its root."))
+    if report.has_web_api and not report.api_specs:
+        report.issues.append(Issue("REPO-MNT-013", "", 0, "", "The code serves an HTTP API but no OpenAPI/Swagger specification was found."))
+    metrics = report.metrics()
+    if metrics["docstring_coverage"] is not None and report.documentable >= 10 and metrics["docstring_coverage"] < 0.5:
+        report.issues.append(
+            Issue("REPO-MNT-009", "", 0, "", f"Only {metrics['docstring_coverage']:.0%} of public modules, classes and functions have a docstring.",
+                  metrics["docstring_coverage"])
+        )
+    if metrics["type_annotation_coverage"] is not None and report.annotatable >= 10 and metrics["type_annotation_coverage"] < 0.5:
+        report.issues.append(
+            Issue("REPO-MNT-010", "", 0, "", f"Only {metrics['type_annotation_coverage']:.0%} of public functions are fully type-annotated.",
+                  metrics["type_annotation_coverage"])
+        )
+
+
 def analyse_quality(root: Path) -> QualityReport:
     report = QualityReport()
 
@@ -575,46 +612,8 @@ def analyse_quality(root: Path) -> QualityReport:
         if re.search(r"\.min\.(js|css)$|(^|/)(migrations|fixtures|generated)/", relative):
             continue
 
-        text = path.read_text(encoding="utf-8", errors="replace")
-        lines = text.splitlines()
-
-        report.files += 1
-
-        code = _normalised_lines(text)
-        report.code_lines += len(code)
-        report.languages[language] = report.languages.get(language, 0) + len(code)
-        normalised[relative] = code
-
-        if language == "Python":
-            _analyse_python(relative, text, report)
-            if len(lines) > FILE_LINES:
-                _analyse_generic(relative, lines, report)
-        else:
-            _analyse_generic(relative, lines, report)
-
-            if language in ("JavaScript", "TypeScript") and re.search(r"\b(express|fastify|koa)\b", text):
-                report.has_web_api = True
+        _inspect_quality_file(path, relative, language, report, normalised)
 
     _duplicates(normalised, report)
-
-    if not report.has_readme and report.files:
-        report.issues.append(Issue("REPO-MNT-011", "README.md", 0, "", "The repository has no README at its root."))
-
-    if report.has_web_api and not report.api_specs:
-        report.issues.append(Issue("REPO-MNT-013", "", 0, "", "The code serves an HTTP API but no OpenAPI/Swagger specification was found."))
-
-    metrics = report.metrics()
-
-    if metrics["docstring_coverage"] is not None and report.documentable >= 10 and metrics["docstring_coverage"] < 0.5:
-        report.issues.append(
-            Issue("REPO-MNT-009", "", 0, "", f"Only {metrics['docstring_coverage']:.0%} of public modules, classes and functions have a docstring.",
-                  metrics["docstring_coverage"])
-        )
-
-    if metrics["type_annotation_coverage"] is not None and report.annotatable >= 10 and metrics["type_annotation_coverage"] < 0.5:
-        report.issues.append(
-            Issue("REPO-MNT-010", "", 0, "", f"Only {metrics['type_annotation_coverage']:.0%} of public functions are fully type-annotated.",
-                  metrics["type_annotation_coverage"])
-        )
-
+    _coverage_findings(report)
     return report

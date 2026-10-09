@@ -347,21 +347,9 @@ def remediation(
     )
 
 
-def find_vulnerabilities(
-    dependencies: list[Dependency],
-    post: Poster | None = http_poster,
-    fetch: Fetcher | None = None,
-) -> tuple[dict[int, list[Vulnerability]], dict[int, Remediation]]:
-    """
-    Advisories per dependency (keyed by list index) and the remediation
-    for each vulnerable one. ``post=None`` disables lookups entirely.
-    """
-
-    if post is None:
-        return {}, {}
-
-    fetch = fetch or (lambda url: _get(url))
-
+def _query_vulnerability_ids(
+    dependencies: list[Dependency], post: Poster
+) -> dict[int, list[str]]:
     checkable = [
         (index, dependency)
         for index, dependency in enumerate(dependencies)
@@ -393,44 +381,62 @@ def find_vulnerabilities(
 
             if ids:
                 identifiers[index] = ids
+    return identifiers
 
+
+def _resolve_dependency_vulnerabilities(
+    dependency: Dependency,
+    identifiers: list[str],
+    records: dict[str, dict[str, Any]],
+    fetch: Fetcher,
+) -> tuple[list[Vulnerability], Remediation | None]:
+    parsed = []
+    ranges = {}
+    seen: set[str] = set()
+    # Prefer reviewed GitHub advisories over their PYSEC/CVE aliases.
+    ordered = sorted(identifiers, key=lambda value: (not value.startswith("GHSA-"), value))
+    for identifier in ordered:
+        if identifier in seen:
+            continue
+        if identifier not in records:
+            records[identifier] = fetch(OSV_VULN + identifier) or {}
+        record = records[identifier]
+        vulnerability = _parse(record, dependency)
+        if vulnerability is None:
+            continue
+        names = {vulnerability.id, *vulnerability.aliases}
+        if names & seen:
+            seen.update(names)
+            continue
+        seen.update(names)
+        parsed.append(vulnerability)
+        ranges[vulnerability.id] = _ranges_for(record, dependency)
+    return parsed, remediation(dependency, parsed, ranges) if parsed else None
+
+
+def find_vulnerabilities(
+    dependencies: list[Dependency],
+    post: Poster | None = http_poster,
+    fetch: Fetcher | None = None,
+) -> tuple[dict[int, list[Vulnerability]], dict[int, Remediation]]:
+    """
+    Advisories per dependency (keyed by list index) and the remediation
+    for each vulnerable one. ``post=None`` disables lookups entirely.
+    """
+    if post is None:
+        return {}, {}
+    fetch = fetch or (lambda url: _get(url))
+    identifiers = _query_vulnerability_ids(dependencies, post)
     records: dict[str, dict[str, Any]] = {}
-
     found: dict[int, list[Vulnerability]] = {}
     remediations: dict[int, Remediation] = {}
-
     for index, ids in identifiers.items():
-        dependency = dependencies[index]
-
-        parsed = []
-        ranges = {}
-        seen: set[str] = set()
-
-        # GitHub advisories carry a reviewed severity; prefer them over
-        # their PYSEC/CVE aliases, and report each issue once.
-        for identifier in sorted(ids, key=lambda value: (not value.startswith("GHSA-"), value)):
-            if identifier in seen:
-                continue
-
-            if identifier not in records:
-                records[identifier] = fetch(OSV_VULN + identifier) or {}
-
-            vulnerability = _parse(records[identifier], dependency)
-
-            if vulnerability is not None:
-                names = {vulnerability.id, *vulnerability.aliases}
-
-                if names & seen:
-                    seen.update(names)
-                    continue
-
-                seen.update(names)
-                parsed.append(vulnerability)
-                ranges[vulnerability.id] = _ranges_for(records[identifier], dependency)
-
-        if parsed:
+        parsed, fix = _resolve_dependency_vulnerabilities(
+            dependencies[index], ids, records, fetch
+        )
+        if parsed and fix is not None:
             found[index] = parsed
-            remediations[index] = remediation(dependency, parsed, ranges)
+            remediations[index] = fix
 
     return found, remediations
 

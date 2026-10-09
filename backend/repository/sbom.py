@@ -48,46 +48,59 @@ def _license_choice(license_text: str, spdx_id: bool) -> list[dict[str, Any]]:
     return [{"license": {"name": license_text}}]
 
 
-def cyclonedx(report: dict[str, Any]) -> dict[str, Any]:
-    repository = report.get("repository") or {}
-
+def _cyclonedx_components(report: dict[str, Any]) -> list[dict[str, Any]]:
     components = []
-
     for dependency in report.get("dependencies") or []:
-        reference = dependency.get("purl") or f"{dependency['ecosystem']}:{dependency['name']}@{dependency.get('version', '')}"
-
+        reference = dependency.get("purl") or (
+            f"{dependency['ecosystem']}:{dependency['name']}@{dependency.get('version', '')}"
+        )
         component: dict[str, Any] = {
             "type": "library",
             "bom-ref": reference,
             "name": dependency["name"],
             "scope": "optional" if dependency.get("scope") == "development" else "required",
         }
-
         if dependency.get("version"):
             component["version"] = dependency["version"]
-
         if dependency.get("purl"):
             component["purl"] = dependency["purl"]
-
-        licenses = _license_choice(dependency.get("license_spdx") or "", True) or _license_choice(dependency.get("license") or "", False)
-
+        licenses = _license_choice(
+            dependency.get("license_spdx") or "", True
+        ) or _license_choice(dependency.get("license") or "", False)
         if licenses:
             component["licenses"] = licenses
-
         components.append(component)
+    return components
 
-    vulnerabilities = [
+
+def _cyclonedx_vulnerabilities(report: dict[str, Any]) -> list[dict[str, Any]]:
+    return [
         {
             "bom-ref": f"{item['id']}:{item['package']}@{item['version']}",
             "id": item["id"],
             "source": {"name": "OSV", "url": item.get("url", "")},
-            "ratings": [{"severity": item.get("severity", "unknown"), **({"score": item["cvss"], "method": "CVSSv3"} if item.get("cvss") is not None else {})}],
+            "ratings": [
+                {
+                    "severity": item.get("severity", "unknown"),
+                    **(
+                        {"score": item["cvss"], "method": "CVSSv3"}
+                        if item.get("cvss") is not None
+                        else {}
+                    ),
+                }
+            ],
             "description": item.get("summary", ""),
             "recommendation": f"Upgrade to {item['minimum_fix']}" if item.get("minimum_fix") else "",
             "affects": [{"ref": item.get("purl") or ""}],
         }
         for item in report.get("vulnerabilities") or []
     ]
+
+
+def cyclonedx(report: dict[str, Any]) -> dict[str, Any]:
+    repository = report.get("repository") or {}
+    components = _cyclonedx_components(report)
+    vulnerabilities = _cyclonedx_vulnerabilities(report)
 
     document: dict[str, Any] = {
         "bomFormat": "CycloneDX",
