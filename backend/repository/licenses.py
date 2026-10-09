@@ -216,40 +216,60 @@ def evaluate(expression: str) -> LicenseVerdict:
         return LicenseVerdict("", UNKNOWN, [])
 
     text = _strip_outer_parentheses(expression)
-
-    # Some registries join alternatives as "MIT/Apache-2.0".
     if " " not in text and "/" in text:
         text = text.replace("/", " OR ")
 
     alternatives = _split(text, "OR")
-
     if len(alternatives) > 1:
-        verdicts = [evaluate(option) for option in alternatives]
-        best = min(verdicts, key=lambda verdict: RESTRICTIVENESS[verdict.category])
-        categories = {verdict.category for verdict in verdicts}
-
-        # "GPL-3.0 OR Commercial": the only free option is copyleft.
-        trap = NON_COMMERCIAL in categories and best.category in (STRONG_COPYLEFT, NETWORK_COPYLEFT)
-
-        return LicenseVerdict(expression, best.category, [normalize(option) for option in alternatives], trap)
+        return _evaluate_alternatives(expression, alternatives)
 
     conjunction = _split(text, "AND")
-
     if len(conjunction) > 1:
-        verdicts = [evaluate(part) for part in conjunction]
-        worst = max(verdicts, key=lambda verdict: RESTRICTIVENESS[verdict.category])
+        return _evaluate_conjunction(expression, conjunction)
 
-        return LicenseVerdict(expression, worst.category, [normalize(part) for part in conjunction])
+    return _evaluate_single(expression, text)
 
+
+def _evaluate_alternatives(
+    expression: str,
+    alternatives: list[str],
+) -> LicenseVerdict:
+    verdicts = [evaluate(option) for option in alternatives]
+    best = min(verdicts, key=lambda verdict: RESTRICTIVENESS[verdict.category])
+    categories = {verdict.category for verdict in verdicts}
+    # "GPL-3.0 OR Commercial": the only free option is copyleft.
+    trap = NON_COMMERCIAL in categories and best.category in (
+        STRONG_COPYLEFT,
+        NETWORK_COPYLEFT,
+    )
+    return LicenseVerdict(
+        expression,
+        best.category,
+        [normalize(option) for option in alternatives],
+        trap,
+    )
+
+
+def _evaluate_conjunction(
+    expression: str,
+    conjunction: list[str],
+) -> LicenseVerdict:
+    verdicts = [evaluate(part) for part in conjunction]
+    worst = max(verdicts, key=lambda verdict: RESTRICTIVENESS[verdict.category])
+    return LicenseVerdict(
+        expression,
+        worst.category,
+        [normalize(part) for part in conjunction],
+    )
+
+
+def _evaluate_single(expression: str, text: str) -> LicenseVerdict:
     base = re.split(r"\s+WITH\s+", text.strip("() "), flags=re.IGNORECASE)
-
     category = category_of(base[0])
-
     # GPL with a linking exception (Classpath, GCC runtime) behaves like
     # a weak copyleft for code that only links against it.
     if len(base) > 1 and category == STRONG_COPYLEFT:
         category = WEAK_COPYLEFT
-
     return LicenseVerdict(expression, category, [normalize(base[0])])
 
 
