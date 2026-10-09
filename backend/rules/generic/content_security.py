@@ -84,36 +84,17 @@ class CspAllowsUnsafeScriptSources(Rule):
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
         value = context.header("Content-Security-Policy")
-
         if not value.strip():
             return []
 
         policy = parse_policy(value)
-
         directive, sources = effective_sources(policy, "script-src")
-
         if not directive:
             return []
 
-        unsafe = [source for source in sources if source in UNSAFE_SOURCES]
-
+        unsafe = _unsafe_script_sources(sources)
         if not unsafe:
             return []
-
-        # A nonce or hash makes 'unsafe-inline' inert in browsers that
-        # support CSP level 2 or later.
-        neutralised = "'unsafe-inline'" in unsafe and any(
-            source.startswith(("'nonce-", "'sha256-", "'sha384-", "'sha512-"))
-            for source in sources
-        )
-
-        if neutralised:
-            unsafe = [
-                source for source in unsafe if source != "'unsafe-inline'"
-            ]
-
-            if not unsafe:
-                return []
 
         return [
             self.finding(
@@ -126,6 +107,22 @@ class CspAllowsUnsafeScriptSources(Rule):
                 },
             )
         ]
+
+
+def _unsafe_script_sources(sources: list[str]) -> list[str]:
+    unsafe = [source for source in sources if source in UNSAFE_SOURCES]
+
+    # A nonce or hash makes 'unsafe-inline' inert in browsers that
+    # support CSP level 2 or later.
+    neutralised = "'unsafe-inline'" in unsafe and any(
+        source.startswith(("'nonce-", "'sha256-", "'sha384-", "'sha512-"))
+        for source in sources
+    )
+
+    if neutralised:
+        unsafe = [source for source in unsafe if source != "'unsafe-inline'"]
+
+    return unsafe
 
 
 class CspAllowsWildcardSources(Rule):

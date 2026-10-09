@@ -2026,57 +2026,13 @@ def rename_repository_application(
 ):
     """Set the application name shown for a GitHub-connected application."""
 
-    full_name = f"{owner}/{name}"
-
-    if github_auth.enabled():
-
-        user = github_auth.current_user()
-
-        if user is None:
-
-            return jsonify(
-                {
-                    "success": False,
-                    "error": "Sign in with GitHub to rename an application.",
-                }
-            ), 401
-
-        repository = user.repositories.get(full_name.lower())
-
-        if repository is None:
-
-            return jsonify(
-                {
-                    "success": False,
-                    "error": "Application not found.",
-                }
-            ), 404
-
-        if not repository["can_trigger"]:
-
-            return jsonify(
-                {
-                    "success": False,
-                    "error": "Renaming needs write access to the application's GitHub repository.",
-                }
-            ), 403
-
-        full_name = repository["name"]
-
-    elif not request_is_authorized():
-
-        return jsonify(
-            {
-                "success": False,
-                "error": "Unauthorized. Set SECGUARD_API_TOKEN and send it as 'X-API-Key'.",
-            }
-        ), 401
+    full_name, authorization_error = _rename_authorization(f"{owner}/{name}")
+    if authorization_error:
+        return authorization_error
 
     value = (request.get_json(silent=True) or {}).get("name")
     problem = application_names.name_problem(value)
-
     if problem:
-
         return jsonify(
             {
                 "success": False,
@@ -2085,16 +2041,8 @@ def rename_repository_application(
         ), 400
 
     label = application_names.normalise(value)
-
     application_names.set_name(full_name, label)
-
-    for summary in list_applications():
-
-        if summary.get("platform") == "Repository" and github_auth.repository_name(summary).lower() == full_name.lower():
-
-            record = load_application(summary["id"])
-            record["name"] = label
-            save_application(record)
+    _rename_saved_applications(full_name, label)
 
     return jsonify(
         {
@@ -2102,6 +2050,55 @@ def rename_repository_application(
             "name": label,
         }
     )
+
+
+def _rename_authorization(full_name: str):
+    if github_auth.enabled():
+        user = github_auth.current_user()
+        if user is None:
+            return None, (
+                jsonify({"success": False, "error": "Sign in with GitHub to rename an application."}),
+                401,
+            )
+
+        repository = user.repositories.get(full_name.lower())
+        if repository is None:
+            return None, (jsonify({"success": False, "error": "Application not found."}), 404)
+        if not repository["can_trigger"]:
+            return None, (
+                jsonify(
+                    {
+                        "success": False,
+                        "error": "Renaming needs write access to the application's GitHub repository.",
+                    }
+                ),
+                403,
+            )
+        return repository["name"], None
+
+    if not request_is_authorized():
+        return None, (
+            jsonify(
+                {
+                    "success": False,
+                    "error": "Unauthorized. Set SECGUARD_API_TOKEN and send it as 'X-API-Key'.",
+                }
+            ),
+            401,
+        )
+
+    return full_name, None
+
+
+def _rename_saved_applications(full_name: str, label: str) -> None:
+    for summary in list_applications():
+        if (
+            summary.get("platform") == "Repository"
+            and github_auth.repository_name(summary).lower() == full_name.lower()
+        ):
+            record = load_application(summary["id"])
+            record["name"] = label
+            save_application(record)
 
 
 # ============================================================

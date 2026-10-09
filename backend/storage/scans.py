@@ -179,126 +179,55 @@ def delete_application(
     return True
 
 
-def list_applications() -> list[dict[str, Any]]:
+def _application_summary(data: dict[str, Any]) -> dict[str, Any]:
+    security = data.get("security", {}) or {}
+    repository = data.get("repository") or {}
+    return {
+        "id": data.get("id"),
+        "name": data.get("name"),
+        "url": data.get("final_url"),
+        "requested_url": data.get("requested_url"),
+        "platform": data.get("platform", "Unknown"),
+        "status": data.get("status", "unknown"),
+        "created_at": data.get("created_at"),
+        "updated_at": data.get("updated_at"),
+        "risk_score": security.get("risk_score", 0),
+        "risk_grade": security.get("risk_grade", ""),
+        "total_findings": security.get(
+            "total_findings",
+            len(security.get("findings", [])),
+        ),
+        "severity_counts": security.get("severity_counts", {}),
+        "repository": (repository.get("repository") or {}).get("name", ""),
+        "health": repository.get("health") or {},
+    }
 
+
+def list_applications() -> list[dict[str, Any]]:
     if db.use_database():
         return db.list_applications()
 
     ensure_storage()
+    applications = _stored_applications()
+    applications.sort(
+        key=lambda item: item.get("updated_at", ""),
+        reverse=True,
+    )
+    return applications
 
+
+def _stored_applications() -> list[dict[str, Any]]:
     applications = []
-
     for directory in APPLICATIONS_DIR.iterdir():
-
         if not directory.is_dir():
             continue
 
-        application_file = (
-            directory
-            / "application.json"
-        )
-
+        application_file = directory / "application.json"
         if not application_file.exists():
             continue
 
         try:
-
-            data = load_json(
-                application_file
-            )
-
-            security = data.get(
-                "security",
-                {},
-            ) or {}
-
-            applications.append(
-                {
-                    "id":
-                        data.get(
-                            "id"
-                        ),
-
-                    "name":
-                        data.get(
-                            "name"
-                        ),
-
-                    "url":
-                        data.get(
-                            "final_url"
-                        ),
-
-                    "requested_url":
-                        data.get(
-                            "requested_url"
-                        ),
-
-                    "platform":
-                        data.get(
-                            "platform",
-                            "Unknown",
-                        ),
-
-                    "status":
-                        data.get(
-                            "status",
-                            "unknown",
-                        ),
-
-                    "created_at":
-                        data.get(
-                            "created_at"
-                        ),
-
-                    "updated_at":
-                        data.get(
-                            "updated_at"
-                        ),
-
-                    "risk_score":
-                        security.get(
-                            "risk_score",
-                            0,
-                        ),
-
-                    "risk_grade":
-                        security.get(
-                            "risk_grade",
-                            "",
-                        ),
-
-                    "total_findings":
-                        security.get(
-                            "total_findings",
-                            len(
-                                security.get(
-                                    "findings",
-                                    [],
-                                )
-                            ),
-                        ),
-
-                    "severity_counts":
-                        security.get(
-                            "severity_counts",
-                            {},
-                        ),
-
-                    "repository":
-                        (
-                            (data.get("repository") or {})
-                            .get("repository")
-                            or {}
-                        ).get("name", ""),
-
-                    "health":
-                        (data.get("repository") or {})
-                        .get("health")
-                        or {},
-                }
-            )
-
+            data = load_json(application_file)
         except (
             json.JSONDecodeError,
             OSError,
@@ -307,13 +236,6 @@ def list_applications() -> list[dict[str, Any]]:
 
             continue
 
-    applications.sort(
-        key=lambda item:
-            item.get(
-                "updated_at",
-                "",
-            ),
-        reverse=True,
-    )
+        applications.append(_application_summary(data))
 
     return applications

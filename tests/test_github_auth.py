@@ -138,16 +138,25 @@ def test_pkce_verifier_is_sent_with_the_code(client, github):
 def test_results_only_visible_for_accessible_repositories(client, github, tmp_path):
     visible_id = ingest(client, tmp_path, "acme/api")
     hidden_id = ingest(client, tmp_path, "other/secret")
+    _assert_signed_out_results_are_hidden(client, visible_id)
 
+    sign_in(client)
+    _assert_signed_in_repository_visibility(client, visible_id, hidden_id)
+    client.post("/auth/logout")
+    assert client.get(f"/api/applications/{visible_id}").status_code == 404
+
+
+def _assert_signed_out_results_are_hidden(client, visible_id):
     assert client.get("/api/repositories").status_code == 401
     assert client.get("/api/applications").get_json()["applications"] == []
     assert client.get(f"/api/applications/{visible_id}/findings").status_code == 404
 
-    sign_in(client)
 
+def _assert_signed_in_repository_visibility(client, visible_id, hidden_id):
     listed = {item["id"] for item in client.get("/api/applications").get_json()["applications"]}
     assert listed == {visible_id}
     assert client.get(f"/api/applications/{visible_id}/quality").status_code == 200
+
     for path in ("", "/findings", "/sbom", "/quality"):
         assert client.get(f"/api/applications/{hidden_id}{path}").status_code == 404
 
@@ -155,9 +164,6 @@ def test_results_only_visible_for_accessible_repositories(client, github, tmp_pa
     assert [item["name"] for item in repositories] == ["acme/api", "acme/docs"]
     assert repositories[0]["latest_scan"]["id"] == visible_id
     assert repositories[1]["latest_scan"] is None
-
-    client.post("/auth/logout")
-    assert client.get(f"/api/applications/{visible_id}").status_code == 404
 
 
 def test_manual_scan_dispatches_the_workflow(client, github):
@@ -201,18 +207,31 @@ def test_rename_application(client, github, tmp_path):
     assert client.put("/api/repositories/acme/api/name", json={"name": "Billing"}).status_code == 401
 
     sign_in(client)
+    _assert_repositories_can_be_renamed(client)
+    _assert_application_rename_succeeds(client, application_id)
+    _assert_renamed_name_is_used_for_new_scans(client, tmp_path)
+    _assert_invalid_and_forbidden_renames(client)
+
+
+def _assert_repositories_can_be_renamed(client):
     listed = client.get("/api/repositories").get_json()["repositories"]
     assert [(item["display_name"], item["can_rename"]) for item in listed] == [("api", True), ("docs", False)]
 
+
+def _assert_application_rename_succeeds(client, application_id):
     response = client.put("/api/repositories/acme/api/name", json={"name": " Billing  Service "})
     assert response.status_code == 200 and response.get_json()["name"] == "Billing Service"
     assert client.get(f"/api/applications/{application_id}").get_json()["application"]["name"] == "Billing Service"
     assert client.get("/api/repositories").get_json()["repositories"][0]["display_name"] == "Billing Service"
 
+
+def _assert_renamed_name_is_used_for_new_scans(client, tmp_path):
     (tmp_path / "newer").mkdir()
     newer_id = ingest(client, tmp_path / "newer", "acme/api")
     assert client.get(f"/api/applications/{newer_id}").get_json()["application"]["name"] == "Billing Service"
 
+
+def _assert_invalid_and_forbidden_renames(client):
     assert client.put("/api/repositories/acme/api/name", json={"name": "   "}).status_code == 400
     assert client.put("/api/repositories/acme/docs/name", json={"name": "Docs"}).status_code == 403
     assert client.put("/api/repositories/other/secret/name", json={"name": "Mine"}).status_code == 404
