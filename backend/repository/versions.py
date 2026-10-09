@@ -124,6 +124,24 @@ def _npm_range_match(spec: str, version: str) -> bool:
     return False
 
 
+def _npm_caret_matches(base: tuple[int, int, int], wildcard: list[bool], current: tuple[int, int, int]) -> bool:
+    if base[0] > 0 or wildcard[1]:
+        return current[0] == base[0] and current >= base
+    if base[1] > 0 or wildcard[2]:
+        return current[:2] == base[:2] and current >= base
+    return current == base
+
+
+def _npm_tilde_or_wildcard_matches(
+    base: tuple[int, int, int],
+    wildcard: list[bool],
+    current: tuple[int, int, int],
+) -> bool:
+    if wildcard[1]:
+        return current[0] == base[0]
+    return current[:2] == base[:2] and current >= base
+
+
 def _npm_comparator(part: str, version: str) -> bool:
     match = re.match(r"^(\^|~|>=|<=|>|<|=)?v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?", part)
 
@@ -137,16 +155,10 @@ def _npm_comparator(part: str, version: str) -> bool:
     current = release_parts(NPM, version)
 
     if operator == "^":
-        if base[0] > 0 or wildcard[1]:
-            return current[0] == base[0] and current >= base
-        if base[1] > 0 or wildcard[2]:
-            return current[:2] == base[:2] and current >= base
-        return current == base
+        return _npm_caret_matches(base, wildcard, current)
 
     if operator == "~" or (operator == "=" and any(wildcard)):
-        if wildcard[1]:
-            return current[0] == base[0]
-        return current[:2] == base[:2] and current >= base
+        return _npm_tilde_or_wildcard_matches(base, wildcard, current)
 
     return {
         "=": current == base,

@@ -75,6 +75,59 @@ class MendixSecurityRules:
     # ENTITY ACCESS
     # ============================================================
 
+    def _technical_entity_risk(
+        self,
+        sensitivity: Dict[str, Any],
+        create: bool,
+        delete: bool,
+        write: bool,
+        xpath: bool,
+        broad_roles: bool,
+    ) -> Dict[str, Any] | None:
+        level = sensitivity["highest_severity"]
+        if not sensitivity["sensitive"] or not (delete or create):
+            return None
+        if level not in {"high", "critical"} or (not broad_roles and not delete):
+            return None
+        risk = self.risk.calculate(
+            base_score=35,
+            sensitive=True,
+            sensitivity_severity=level,
+            create=create,
+            delete=delete,
+            write=write,
+            xpath=xpath,
+            broad_roles=broad_roles,
+        )
+        return risk if risk["score"] >= 70 else None
+
+    def _application_entity_risk(
+        self,
+        sensitivity: Dict[str, Any],
+        create: bool,
+        delete: bool,
+        write: bool,
+        xpath: bool,
+        broad_roles: bool,
+    ) -> Dict[str, Any] | None:
+        sensitive = bool(sensitivity["sensitive"])
+        dangerous_write = write and (create or delete)
+        sensitive_modification = sensitive and (write or create or delete)
+        broad_dangerous_access = broad_roles and dangerous_write and not xpath
+        if not (sensitive_modification or broad_dangerous_access):
+            return None
+        risk = self.risk.calculate(
+            base_score=25,
+            sensitive=sensitive,
+            sensitivity_severity=sensitivity["highest_severity"],
+            create=create,
+            delete=delete,
+            write=write,
+            xpath=xpath,
+            broad_roles=broad_roles,
+        )
+        return risk if risk["score"] >= 55 else None
+
     def entity_access_rules(
         self,
     ) -> List[Dict[str, Any]]:
@@ -121,147 +174,16 @@ class MendixSecurityRules:
                     role_count >= 5
                 )
 
-                sensitive = bool(
-                    sensitivity["sensitive"]
+                risk_check = (
+                    self._technical_entity_risk
+                    if module_type == "technical"
+                    else self._application_entity_risk
                 )
-
-                sensitivity_level = (
-                    sensitivity[
-                        "highest_severity"
-                    ]
+                risk = risk_check(
+                    sensitivity, create, delete, write, xpath, broad_roles
                 )
-
-                # ------------------------------------------------
-                # Technical modules
-                #
-                # Framework entities are still parsed and analysed,
-                # but their names alone must never create a
-                # vulnerability.
-                # ------------------------------------------------
-
-                if module_type == "technical":
-
-                    # Technical entity + generic CRUD access
-                    # is not enough evidence.
-                    #
-                    # Only report when the entity contains
-                    # genuinely sensitive attributes AND has
-                    # dangerous modification rights.
-
-                    if not sensitive:
-
-                        continue
-
-                    if not (
-                        delete
-                        or create
-                    ):
-
-                        continue
-
-                    if sensitivity_level not in {
-                        "high",
-                        "critical",
-                    }:
-
-                        continue
-
-                    if not broad_roles and not delete:
-
-                        continue
-
-                    risk = self.risk.calculate(
-                        base_score=35,
-
-                        sensitive=True,
-
-                        sensitivity_severity=
-                            sensitivity_level,
-
-                        create=create,
-
-                        delete=delete,
-
-                        write=write,
-
-                        xpath=xpath,
-
-                        broad_roles=broad_roles,
-                    )
-
-                    if risk["score"] < 70:
-
-                        continue
-
-                # ------------------------------------------------
-                # Application modules
-                # ------------------------------------------------
-
-                else:
-
-                    # Generic ReadWrite is NOT a vulnerability.
-
-                    # We need at least one stronger condition.
-                    dangerous_write = (
-                        write
-                        and
-                        (
-                            create
-                            or
-                            delete
-                        )
-                    )
-
-                    sensitive_modification = (
-                        sensitive
-                        and
-                        (
-                            write
-                            or
-                            create
-                            or
-                            delete
-                        )
-                    )
-
-                    broad_dangerous_access = (
-                        broad_roles
-                        and
-                        dangerous_write
-                        and
-                        not xpath
-                    )
-
-                    if not (
-                        sensitive_modification
-                        or
-                        broad_dangerous_access
-                    ):
-
-                        continue
-
-                    risk = self.risk.calculate(
-                        base_score=25,
-
-                        sensitive=sensitive,
-
-                        sensitivity_severity=
-                            sensitivity_level,
-
-                        create=create,
-
-                        delete=delete,
-
-                        write=write,
-
-                        xpath=xpath,
-
-                        broad_roles=broad_roles,
-                    )
-
-                    if risk["score"] < 55:
-
-                        continue
+                if risk is None:
+                    continue
 
                 findings.append(
                     self._entity_finding(

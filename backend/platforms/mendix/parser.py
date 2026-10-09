@@ -458,6 +458,55 @@ class MendixModelParser:
     # ENTITY
     # ============================================================
 
+    def _register_entity(
+        self,
+        entity: Entity,
+        entity_id: str,
+        qualified_name: str,
+        module: str,
+    ) -> None:
+        self.entities_by_name[qualified_name] = entity
+        if entity_id:
+            self.entities_by_id[entity_id] = entity
+        self.model.entities.append(entity)
+        module_object = self._ensure_module(module)
+        if module_object:
+            self._append_unique(module_object.entities, entity)
+
+    def _parse_entity_attributes(
+        self, node: Dict[str, Any], entity: Entity
+    ) -> None:
+        raw_attributes = node.get("attributes", [])
+        if not isinstance(raw_attributes, list):
+            return
+        for raw_attribute in raw_attributes:
+            if not isinstance(raw_attribute, dict):
+                continue
+            attribute = self._parse_embedded_attribute(raw_attribute, entity)
+            if attribute is None:
+                continue
+            self._append_unique(entity.attributes, attribute)
+            attribute_name = (
+                getattr(attribute, "qualified_name", "")
+                or getattr(attribute, "name", "")
+            )
+            if attribute_name and attribute_name not in self.attributes_by_name:
+                self.attributes_by_name[attribute_name] = attribute
+                self.model.attributes.append(attribute)
+
+    def _parse_entity_access_rules(
+        self, node: Dict[str, Any], entity: Entity
+    ) -> None:
+        raw_rules = node.get("accessRules", [])
+        if not isinstance(raw_rules, list):
+            return
+        for raw_rule in raw_rules:
+            if not isinstance(raw_rule, dict):
+                continue
+            rule = self._parse_embedded_access_rule(raw_rule, entity)
+            if rule is not None:
+                self._append_unique(entity.access_rules, rule)
+
     def _parse_entity(
         self,
         node: Dict[str, Any],
@@ -630,148 +679,9 @@ class MendixModelParser:
             "access_rules",
         )
 
-        # --------------------------------------------------------
-        # Store entity
-        # --------------------------------------------------------
-
-        self.entities_by_name[
-            qualified_name
-        ] = entity
-
-        if entity_id:
-
-            self.entities_by_id[
-                entity_id
-            ] = entity
-
-        self.model.entities.append(
-            entity
-        )
-
-        # --------------------------------------------------------
-        # Module relationship
-        # --------------------------------------------------------
-
-        module_object = (
-            self._ensure_module(
-                module
-            )
-        )
-
-        if module_object:
-
-            self._append_unique(
-                module_object.entities,
-                entity,
-            )
-
-        # ========================================================
-        # ATTRIBUTES
-        # ========================================================
-
-        raw_attributes = node.get(
-            "attributes",
-            [],
-        )
-
-        if isinstance(
-            raw_attributes,
-            list,
-        ):
-
-            for raw_attribute in raw_attributes:
-
-                if not isinstance(
-                    raw_attribute,
-                    dict,
-                ):
-
-                    continue
-
-                attribute = (
-                    self._parse_embedded_attribute(
-                        raw_attribute,
-                        entity,
-                    )
-                )
-
-                if attribute is None:
-
-                    continue
-
-                self._append_unique(
-                    entity.attributes,
-                    attribute,
-                )
-
-                attribute_name = (
-                    getattr(
-                        attribute,
-                        "qualified_name",
-                        "",
-                    )
-                    or
-                    getattr(
-                        attribute,
-                        "name",
-                        "",
-                    )
-                )
-
-                if (
-                    attribute_name
-                    and
-                    attribute_name
-                    not in
-                    self.attributes_by_name
-                ):
-
-                    self.attributes_by_name[
-                        attribute_name
-                    ] = attribute
-
-                    self.model.attributes.append(
-                        attribute
-                    )
-
-        # ========================================================
-        # ACCESS RULES
-        # ========================================================
-
-        raw_access_rules = node.get(
-            "accessRules",
-            [],
-        )
-
-        if isinstance(
-            raw_access_rules,
-            list,
-        ):
-
-            for raw_rule in raw_access_rules:
-
-                if not isinstance(
-                    raw_rule,
-                    dict,
-                ):
-
-                    continue
-
-                rule = (
-                    self._parse_embedded_access_rule(
-                        raw_rule,
-                        entity,
-                    )
-                )
-
-                if rule is None:
-
-                    continue
-
-                self._append_unique(
-                    entity.access_rules,
-                    rule,
-                )
+        self._register_entity(entity, entity_id, qualified_name, module)
+        self._parse_entity_attributes(node, entity)
+        self._parse_entity_access_rules(node, entity)
 
         return entity
 

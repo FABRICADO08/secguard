@@ -45,6 +45,24 @@ def _with_params(url: str, params: dict[str, str]) -> str:
     return urlunparse(parts._replace(query=urlencode(query)))
 
 
+def _form_targets(
+    forms: list[dict[str, Any]], add: Any
+) -> None:
+    for form in forms:
+        if str(form.get("method", "GET")).upper() != "GET":
+            continue
+        action = str(form.get("action") or form.get("page") or "")
+        for field in form.get("inputs") or []:
+            if str(field.get("type", "")).lower() not in SKIPPED_INPUT_TYPES:
+                add(action, str(field.get("name") or ""), "form")
+
+
+def _link_targets(links: list[str], add: Any) -> None:
+    for link in links:
+        for name, _value in parse_qsl(urlparse(link).query):
+            add(link, name, "link")
+
+
 def probe_targets(
     forms: list[dict[str, Any]],
     links: list[str],
@@ -79,21 +97,8 @@ def probe_targets(
             }
         )
 
-    for form in forms:
-        if str(form.get("method", "GET")).upper() != "GET":
-            continue
-
-        action = str(form.get("action") or form.get("page") or "")
-
-        for field in form.get("inputs") or []:
-            if str(field.get("type", "")).lower() in SKIPPED_INPUT_TYPES:
-                continue
-
-            add(action, str(field.get("name") or ""), "form")
-
-    for link in links:
-        for name, _value in parse_qsl(urlparse(link).query):
-            add(link, name, "link")
+    _form_targets(forms, add)
+    _link_targets(links, add)
 
     return targets
 
