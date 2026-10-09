@@ -280,11 +280,7 @@ async function load() {
             )
         );
     } catch (error) {
-        view.innerHTML = `
-            <div class="notice notice--error">
-                ${escapeHtml(error.message || "Could not load the system.")}
-            </div>
-        `;
+        renderLoadError(view, error, "Could not load the system.");
     }
 }
 

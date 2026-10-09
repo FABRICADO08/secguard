@@ -1,31 +1,7 @@
-import json
+from backend.platforms.mendix.inspect_utils import load_model, walk
 
 
-with open(
-    "model.json",
-    "r",
-    encoding="utf-8"
-) as f:
-    data = json.load(f)
-
-
-def walk(value):
-
-    if isinstance(value, dict):
-
-        yield value
-
-        for child in value.values():
-
-            if isinstance(child, (dict, list)):
-
-                yield from walk(child)
-
-    elif isinstance(value, list):
-
-        for child in value:
-
-            yield from walk(child)
+data = load_model()
 
 
 microflows = []

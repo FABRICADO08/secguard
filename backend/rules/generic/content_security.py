@@ -1,3 +1,5 @@
+"""Rules for restrictive Content-Security-Policy and CORS configurations."""
+
 from __future__ import annotations
 
 from backend.rules.base import (
@@ -64,6 +66,8 @@ def effective_sources(
 
 
 class CspAllowsUnsafeScriptSources(Rule):
+    """Detect CSP script sources that allow inline or evaluated code."""
+
     id = "GEN-CSP-001"
     title = "Content-Security-Policy allows unsafe script sources"
     severity = "medium"
@@ -83,6 +87,7 @@ class CspAllowsUnsafeScriptSources(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report unsafe script-source directives unless neutralized."""
         value = context.header("Content-Security-Policy")
 
         if not value.strip():
@@ -129,6 +134,8 @@ class CspAllowsUnsafeScriptSources(Rule):
 
 
 class CspAllowsWildcardSources(Rule):
+    """Detect CSP source lists that allow arbitrary origins."""
+
     id = "GEN-CSP-002"
     title = "Content-Security-Policy allows scripts from any origin"
     severity = "medium"
@@ -147,6 +154,7 @@ class CspAllowsWildcardSources(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report wildcard, scheme-wide, or data sources in a CSP."""
         value = context.header("Content-Security-Policy")
 
         if not value.strip():
@@ -184,6 +192,8 @@ class CspAllowsWildcardSources(Rule):
 
 
 class CspMissingRestrictiveDirectives(Rule):
+    """Check CSP policies for object, base, and frame restrictions."""
+
     id = "GEN-CSP-003"
     title = "Content-Security-Policy omits key restrictions"
     severity = "low"
@@ -202,6 +212,7 @@ class CspMissingRestrictiveDirectives(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report missing directives that do not fall back to default-src."""
         value = context.header("Content-Security-Policy")
 
         if not value.strip():
@@ -239,6 +250,8 @@ class CspMissingRestrictiveDirectives(Rule):
 
 
 class CorsAllowsNullOrigin(Rule):
+    """Detect CORS policies that trust the opaque null origin."""
+
     id = "GEN-CORS-001"
     title = "Cross-origin resource sharing allows the null origin"
     severity = "high"
@@ -257,6 +270,7 @@ class CorsAllowsNullOrigin(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report responses granting access to the null origin."""
         origin = context.header("Access-Control-Allow-Origin").strip()
 
         if origin.lower() != "null":
@@ -279,6 +293,8 @@ class CorsAllowsNullOrigin(Rule):
 
 
 class CorsExposesUnsafeMethods(Rule):
+    """Detect cross-origin access to state-changing methods."""
+
     id = "GEN-CORS-002"
     title = "Cross-origin requests are allowed to use state-changing methods"
     severity = "medium"
@@ -298,6 +314,7 @@ class CorsExposesUnsafeMethods(Rule):
     UNSAFE_METHODS = ("put", "delete", "patch")
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report permissive CORS policies for unsafe HTTP methods."""
         origin = context.header("Access-Control-Allow-Origin").strip()
 
         if origin not in ("*",) and origin.lower() != "null":
@@ -333,6 +350,7 @@ class CorsExposesUnsafeMethods(Rule):
 
 
 def rules() -> list[Rule]:
+    """Return the CSP and CORS security rules."""
     return [
         CspAllowsUnsafeScriptSources(),
         CspAllowsWildcardSources(),

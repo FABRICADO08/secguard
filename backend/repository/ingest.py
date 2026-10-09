@@ -53,29 +53,29 @@ def _clean_finding(raw: Any) -> dict[str, Any]:
     ).to_dict()
 
 
-def application_from_report(report: Any) -> tuple[Application, list[dict[str, Any]]]:
+def _validated_report(report: Any) -> tuple[dict[str, Any], str, list, dict]:
     if not isinstance(report, dict) or report.get("schema") != SCHEMA:
         raise InvalidReportError(f"Expected a SecGuard repository report with schema '{SCHEMA}'.")
 
     repository = report.get("repository")
-
     if not isinstance(repository, dict):
         raise InvalidReportError("The report has no repository section.")
 
     name = str(repository.get("name") or "")
-
     if not REPOSITORY_NAME.match(name):
         raise InvalidReportError("Repository name must look like 'owner/repo'.")
 
     raw_findings = report.get("findings") or []
     quality = report.get("quality") or {}
-
     if not isinstance(raw_findings, list) or not isinstance(quality, dict) or not isinstance(quality.get("findings") or [], list):
         raise InvalidReportError("Findings must be lists.")
 
     findings = [_clean_finding(item) for item in raw_findings]
     quality_findings = [_clean_finding(item) for item in quality.get("findings") or []]
+    return repository, name, findings, {**quality, "findings": quality_findings}
 
+
+def _application_label(repository: dict[str, Any], name: str) -> str:
     chosen = repository.get("application_name")
 
     try:
@@ -83,12 +83,18 @@ def application_from_report(report: Any) -> tuple[Application, list[dict[str, An
     except ValueError as exc:
         raise InvalidReportError(str(exc)) from exc
 
+    return application_names.name_for(name) or label or name.rsplit("/", 1)[-1]
+
+
+def application_from_report(report: Any) -> tuple[Application, list[dict[str, Any]]]:
+    """Validate a scanner report and convert it to a stored application."""
+    repository, name, findings, quality = _validated_report(report)
     provider = "github" if repository.get("provider") == "github" else "repository"
 
     application = Application.create(
         requested_url=f"{provider}://{name}",
         final_url=str(repository.get("url") or f"{provider}://{name}"),
-        name=application_names.name_for(name) or label or name.rsplit("/", 1)[-1],
+        name=_application_label(repository, name),
     )
 
     application.platform = PLATFORM
@@ -110,7 +116,7 @@ def application_from_report(report: Any) -> tuple[Application, list[dict[str, An
     application.repository["quality"] = {
         "metrics": quality.get("metrics") or {},
         "hotspots": quality.get("hotspots") or [],
-        "findings": quality_findings,
+        "findings": quality["findings"],
     }
 
     return application, findings

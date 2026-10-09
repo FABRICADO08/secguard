@@ -1,3 +1,5 @@
+"""Generic security rules for HTTP headers, transport, and response content."""
+
 from __future__ import annotations
 
 import re
@@ -19,6 +21,7 @@ class SecurityHeaderRule(Rule):
     category = CONFIGURATION
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report when this rule's required response header is absent."""
         if context.has_header(self.header_name):
             return []
 
@@ -35,6 +38,8 @@ class SecurityHeaderRule(Rule):
 
 
 class MissingContentSecurityPolicy(SecurityHeaderRule):
+    """Detect an absent Content-Security-Policy response header."""
+
     id = "GEN-HDR-001"
     header_name = "Content-Security-Policy"
     title = "Content-Security-Policy header is missing"
@@ -56,6 +61,8 @@ class MissingContentSecurityPolicy(SecurityHeaderRule):
 
 
 class MissingStrictTransportSecurity(Rule):
+    """Check whether HTTPS responses enforce a durable HSTS policy."""
+
     id = "GEN-HDR-002"
     title = "Strict-Transport-Security header is missing"
     severity = "medium"
@@ -75,6 +82,7 @@ class MissingStrictTransportSecurity(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report missing or too-short HSTS policies on HTTPS responses."""
         # HSTS is meaningless over plain HTTP; that is reported separately.
         if not context.is_https:
             return []
@@ -122,6 +130,8 @@ class MissingStrictTransportSecurity(Rule):
 
 
 class MissingXContentTypeOptions(SecurityHeaderRule):
+    """Detect responses that omit MIME-sniffing protection."""
+
     id = "GEN-HDR-003"
     header_name = "X-Content-Type-Options"
     title = "X-Content-Type-Options header is missing"
@@ -138,6 +148,8 @@ class MissingXContentTypeOptions(SecurityHeaderRule):
 
 
 class MissingFrameProtection(Rule):
+    """Check for headers that prevent untrusted framing."""
+
     id = "GEN-HDR-004"
     title = "Clickjacking protection is missing"
     severity = "medium"
@@ -156,6 +168,7 @@ class MissingFrameProtection(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report absent or permissive frame-protection headers."""
         frame_options = context.header("X-Frame-Options")
 
         csp = context.header("Content-Security-Policy").lower()
@@ -175,6 +188,8 @@ class MissingFrameProtection(Rule):
 
 
 class MissingReferrerPolicy(SecurityHeaderRule):
+    """Detect responses without an explicit Referrer-Policy."""
+
     id = "GEN-HDR-005"
     header_name = "Referrer-Policy"
     title = "Referrer-Policy header is missing"
@@ -192,6 +207,8 @@ class MissingReferrerPolicy(SecurityHeaderRule):
 
 
 class MissingPermissionsPolicy(SecurityHeaderRule):
+    """Detect responses without an explicit Permissions-Policy."""
+
     id = "GEN-HDR-006"
     header_name = "Permissions-Policy"
     title = "Permissions-Policy header is missing"
@@ -211,6 +228,8 @@ class MissingPermissionsPolicy(SecurityHeaderRule):
 
 
 class PermissiveCorsPolicy(Rule):
+    """Check whether CORS headers permit unsafe cross-origin access."""
+
     id = "GEN-HDR-007"
     title = "Cross-origin resource sharing is unrestricted"
     severity = "medium"
@@ -228,6 +247,7 @@ class PermissiveCorsPolicy(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report wildcard or credentialed cross-origin access policies."""
         origin = context.header("Access-Control-Allow-Origin").strip()
 
         if origin != "*":
@@ -261,6 +281,8 @@ class PermissiveCorsPolicy(Rule):
 
 
 class InsecureTransport(Rule):
+    """Detect applications whose requested URL uses plain HTTP."""
+
     id = "GEN-TLS-001"
     title = "Application is served over plain HTTP"
     severity = "high"
@@ -277,6 +299,7 @@ class InsecureTransport(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report an application served without HTTPS."""
         if context.is_https:
             return []
 
@@ -292,6 +315,8 @@ class InsecureTransport(Rule):
 
 
 class MissingHttpsRedirect(Rule):
+    """Check whether the HTTP origin redirects clients to HTTPS."""
+
     id = "GEN-TLS-002"
     title = "Plain HTTP is served without redirecting to HTTPS"
     severity = "medium"
@@ -309,6 +334,7 @@ class MissingHttpsRedirect(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report a missing or ineffective HTTP-to-HTTPS redirect."""
         redirect = context.response.get("http_redirect") or {}
 
         if not redirect.get("tested"):
@@ -327,6 +353,8 @@ class MissingHttpsRedirect(Rule):
 
 
 class MixedContent(Rule):
+    """Detect HTTP resources embedded in an HTTPS page."""
+
     id = "GEN-TLS-003"
     title = "HTTPS page loads resources over HTTP"
     severity = "medium"
@@ -345,6 +373,7 @@ class MixedContent(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report insecure resource URLs found in an HTTPS response."""
         if not context.is_https:
             return []
 
@@ -369,6 +398,8 @@ class MixedContent(Rule):
 
 
 class ServerBannerDisclosure(Rule):
+    """Detect server headers that reveal implementation details."""
+
     id = "GEN-INF-001"
     title = "Server software version is disclosed"
     severity = "informational"
@@ -396,6 +427,7 @@ class ServerBannerDisclosure(Rule):
     VERSION_PATTERN = re.compile(r"\d+\.\d+")
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report product or version information exposed by response headers."""
         disclosed = {
             name: context.headers[name]
             for name in self.BANNER_HEADERS
@@ -415,6 +447,8 @@ class ServerBannerDisclosure(Rule):
 
 
 class DirectoryListingEnabled(Rule):
+    """Detect directory-index pages that disclose stored files."""
+
     id = "GEN-INF-002"
     title = "Directory listing is enabled"
     severity = "medium"
@@ -444,6 +478,7 @@ class DirectoryListingEnabled(Rule):
     LINK_PATTERN = re.compile(r"<a\s[^>]*href=", re.IGNORECASE)
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report a response body that appears to be a directory listing."""
         body = context.body
 
         matched = [
@@ -464,6 +499,7 @@ class DirectoryListingEnabled(Rule):
 
 
 def rules() -> list[Rule]:
+    """Return the generic web-security rules in evaluation order."""
     return [
         MissingContentSecurityPolicy(),
         MissingStrictTransportSecurity(),

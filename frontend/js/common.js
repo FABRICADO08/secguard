@@ -79,6 +79,109 @@ function rememberApplication(applicationId) {
 }
 
 
+function systemsCardHeader(actionMarkup) {
+    return `
+        <div class="card__head">
+            <h2>Systems</h2>
+            <div class="toolbar">
+                <input
+                    type="search"
+                    id="systemSearch"
+                    placeholder="Search by system name"
+                    aria-label="Search by system name"
+                >
+                ${actionMarkup}
+            </div>
+        </div>
+    `;
+}
+
+
+function portfolioEmptyState() {
+    return `
+        <section class="card empty">
+            <p>No system has been analyzed yet.</p>
+            <p><a class="button" href="/index.html">
+                Run the first scan
+            </a></p>
+        </section>
+    `;
+}
+
+
+function csvExportButton() {
+    return '<button class="chip" id="exportCsv" type="button">Export as CSV</button>';
+}
+
+
+function navigateWithParameters(parameters, applicationId) {
+    parameters.set("application", applicationId);
+    window.location.search = parameters.toString();
+}
+
+
+function wireCsvExport(buttonId, filename, rows) {
+    document
+        .getElementById(buttonId)
+        .addEventListener("click", () => downloadCsv(filename, rows()));
+}
+
+
+const FINDING_CSV_COLUMNS = {
+    rule: ["Rule", finding => finding.rule_id],
+    title: ["Title", finding => finding.title],
+    severity: ["Severity", finding => finding.severity],
+    risk: ["Risk", finding => (finding.risk || {}).score],
+    category: ["Category", finding => finding.category],
+    owasp: ["OWASP", finding => finding.owasp],
+    cwe: ["CWE", finding => finding.cwe],
+    location: ["Location", finding => finding.location],
+    confidence: ["Confidence", finding => finding.confidence],
+    platform: ["Platform", finding => platformLabel(finding.platform)],
+    detectedAt: ["Detected at", finding => finding.detected_at],
+};
+
+
+function findingsCsvRows(findings, columnNames) {
+    const columns = columnNames.map(name => FINDING_CSV_COLUMNS[name]);
+    return [
+        columns.map(([header]) => header),
+        ...findings.map(finding =>
+            columns.map(([, value]) => value(finding))
+        ),
+    ];
+}
+
+
+function renderLoadError(view, error, fallback) {
+    view.innerHTML = `
+        <div class="notice notice--error">
+            ${escapeHtml(error.message || fallback)}
+        </div>
+    `;
+}
+
+
+function requireApplication(view, applicationId) {
+    if (applicationId) {
+        return true;
+    }
+
+    view.innerHTML = `
+        <div class="notice notice--warning">
+            No application selected.
+            <a href="/dashboard.html">Pick one from the portfolio</a>.
+        </div>
+    `;
+    return false;
+}
+
+
+function showLoading(view, label) {
+    view.innerHTML = `<div class="card empty">Loading ${escapeHtml(label)}…</div>`;
+}
+
+
 const API_TOKEN_KEY = "secguardApiToken";
 
 
