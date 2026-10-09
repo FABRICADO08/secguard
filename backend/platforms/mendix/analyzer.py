@@ -190,6 +190,19 @@ class MendixSecurityAnalyzer:
 
         return accesses
 
+    def _member_access_rights(self, member) -> str:
+        return self._normalise(
+            self._get(
+                member,
+                "access_rights",
+                self._get(
+                    member,
+                    "accessRights",
+                    "",
+                ),
+            )
+        )
+
     @staticmethod
     def _allow_create(rule) -> bool:
         return bool(

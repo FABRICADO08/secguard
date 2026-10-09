@@ -1,6 +1,6 @@
 import json
 
-from backend.platforms.mendix.inspect_utils import load_model, walk
+from backend.platforms.mendix.inspect_utils import load_model, node_type, walk
 
 
 data = load_model()
@@ -10,19 +10,7 @@ found = []
 
 
 for node in walk(data):
-
-    if not isinstance(node, dict):
-        continue
-
-    node_type = str(
-        node.get(
-            "$Type",
-            ""
-        )
-        or ""
-    )
-
-    if "DomainModels$Association" in node_type:
+    if "DomainModels$Association" in node_type(node):
 
         found.append(node)
 

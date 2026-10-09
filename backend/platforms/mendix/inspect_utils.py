@@ -19,3 +19,7 @@ def walk(value):
     elif isinstance(value, list):
         for child in value:
             yield from walk(child)
+
+
+def node_type(node):
+    return str(node.get("$Type", "") or "")

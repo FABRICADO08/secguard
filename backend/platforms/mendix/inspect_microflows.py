@@ -1,4 +1,4 @@
-from backend.platforms.mendix.inspect_utils import load_model, walk
+from backend.platforms.mendix.inspect_utils import load_model, node_type, walk
 
 
 data = load_model()
@@ -9,23 +9,13 @@ pages = []
 
 
 for node in walk(data):
+    kind = node_type(node)
 
-    if not isinstance(node, dict):
-        continue
-
-    node_type = str(
-        node.get(
-            "$Type",
-            ""
-        )
-        or ""
-    )
-
-    if node_type == "Microflows$Microflow":
+    if kind == "Microflows$Microflow":
 
         microflows.append(node)
 
-    elif node_type == "Pages$Page":
+    elif kind == "Pages$Page":
 
         pages.append(node)
 

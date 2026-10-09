@@ -71,6 +71,15 @@ function currentApplicationId() {
     );
 }
 
+function renderNoApplicationSelected(view) {
+    view.innerHTML = `
+        <div class="notice notice--warning">
+            No application selected.
+            <a href="/dashboard.html">Pick one from the portfolio</a>.
+        </div>
+    `;
+}
+
 
 function rememberApplication(applicationId) {
     if (applicationId) {

@@ -16,22 +16,9 @@ const grouping = GROUPINGS[queryParameter("grouping")]
     ? queryParameter("grouping")
     : "owasp";
 
-const view = renderShell({
-    scope: "system",
-    active: "findings",
-    applicationId,
-    period: false,
-    breadcrumbs: [
-        { text: "Portfolio", href: "/dashboard.html" },
-        {
-            text: "Security",
-            href: `/system-security.html?application=${
-                encodeURIComponent(applicationId)
-            }`,
-        },
-        { text: groupName || "All findings" },
-    ],
-});
+const view = renderFindingPage(applicationId, [
+    { text: groupName || "All findings" },
+]);
 
 const FILTER_KEYS = ["severity", "category", "platform"];
 

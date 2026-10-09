@@ -5,6 +5,8 @@ from datetime import datetime, timezone
 from typing import Any
 from uuid import uuid4
 
+from .normalized import create_empty_model
+
 
 @dataclass
 class Application:
@@ -47,19 +49,7 @@ class Application:
     )
 
     model: dict[str, Any] = field(
-        default_factory=lambda: {
-            "modules": [],
-            "entities": [],
-            "attributes": [],
-            "associations": [],
-            "microflows": [],
-            "nanoflows": [],
-            "pages": [],
-            "roles": [],
-            "module_roles": [],
-            "access_rules": [],
-            "apis": [],
-        }
+        default_factory=create_empty_model
     )
 
     repository: dict[str, Any] = field(

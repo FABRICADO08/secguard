@@ -252,12 +252,7 @@ function render(application, statistics, system) {
 
 async function load() {
     if (!applicationId) {
-        view.innerHTML = `
-            <div class="notice notice--warning">
-                No application selected.
-                <a href="/dashboard.html">Pick one from the portfolio</a>.
-            </div>
-        `;
+        renderNoApplicationSelected(view);
 
         return;
     }
