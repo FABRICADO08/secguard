@@ -18,68 +18,59 @@ API_MARKERS = (
 )
 
 
+def _add_endpoint(
+    endpoints: list[dict],
+    seen: set[tuple[str, str]],
+    url: str,
+    endpoint_type: str,
+    method: str = "GET",
+) -> None:
+    method = method.upper()
+    key = (method, url)
+
+    if key in seen:
+        return
+
+    seen.add(key)
+    parsed = urlparse(url)
+    endpoints.append(
+        {
+            "url": url,
+            "path": parsed.path,
+            "method": method,
+            "type": endpoint_type,
+        }
+    )
+
+
+def _add_link_endpoint(
+    endpoints: list[dict],
+    seen: set[tuple[str, str]],
+    url: str,
+) -> None:
+    path = urlparse(url).path.lower()
+    endpoint_type = (
+        "api"
+        if any(marker in path for marker in API_MARKERS)
+        else "page"
+    )
+    _add_endpoint(endpoints, seen, url, endpoint_type)
+
+
 def discover_endpoints(
     links: list[str],
     forms: list[dict],
 ) -> list[dict]:
-
     endpoints = []
-
     seen = set()
 
-    def add(
-        url: str,
-        endpoint_type: str,
-        method: str = "GET",
-    ) -> None:
-
-        key = (
-            method.upper(),
-            url,
-        )
-
-        if key in seen:
-            return
-
-        seen.add(key)
-
-        parsed = urlparse(url)
-
-        endpoints.append(
-            {
-                "url": url,
-                "path": parsed.path,
-                "method": method.upper(),
-                "type": endpoint_type,
-            }
-        )
-
     for url in links:
-
-        path = urlparse(
-            url
-        ).path.lower()
-
-        if any(
-            marker in path
-            for marker in API_MARKERS
-        ):
-
-            add(
-                url,
-                "api",
-            )
-
-        else:
-
-            add(
-                url,
-                "page",
-            )
+        _add_link_endpoint(endpoints, seen, url)
 
     for form in forms:
-
-        add(
+        _add_endpoint(
+            endpoints,
+            seen,
             form.get(
                 "action",
                 "",

@@ -326,6 +326,86 @@ BLOCKED_TARGET_MESSAGE = (
 CERTIFICATE_REJECTED_MESSAGE = "The server's TLS certificate failed validation."
 
 
+def _apply_security_analysis(
+    application: Application,
+    response: dict,
+    *,
+    response_observed: bool = True,
+) -> list[dict]:
+    analysis = analyze(
+        ScanContext(
+            application_id=application.id,
+            requested_url=application.requested_url,
+            final_url=application.final_url,
+            platform=application.platform,
+            response=response,
+            technologies=application.technologies,
+            attack_surface=application.attack_surface,
+            response_observed=response_observed,
+        )
+    )
+    findings = analysis["findings"]
+    application.security = {
+        **summarize(findings),
+        "findings": findings,
+        "recommendations": build_recommendations(findings),
+        "rules_evaluated": analysis["rules_evaluated"],
+        "rule_errors": analysis["rule_errors"],
+    }
+    return findings
+
+
+def _certificate_response(requested_url: str, final_url: str) -> dict:
+    return {
+        "requested_url": requested_url,
+        "final_url": final_url,
+        "status_code": None,
+        "https": True,
+        "headers": {},
+        "cookies": [],
+        "body": "",
+        "redirect_chain": [],
+        "http_redirect": {"tested": False},
+    }
+
+
+def _certificate_attack_surface(tls_result: dict) -> dict:
+    return {
+        "pages": [],
+        "links": [],
+        "forms": [],
+        "scripts": [],
+        "endpoints": [],
+        "potential_api_paths": [],
+        "exposed_paths": [],
+        "pages_scanned": 0,
+        "tls": tls_result,
+    }
+
+
+def _save_certificate_scan(
+    application: Application,
+    findings: list[dict],
+) -> None:
+    application.status = "certificate_rejected"
+    application.update_timestamp()
+    save_application(application.to_dict())
+    save_findings(application.id, findings)
+
+
+def _certificate_scan_response(application: Application, error: str):
+    return jsonify(
+        {
+            "success": True,
+            "partial": True,
+            "reason": "certificate_rejected",
+            "error": error,
+            "application_id": application.id,
+            "application": application.to_dict(),
+        }
+    )
+
+
 def _certificate_only_scan(
     url: str,
     error: str,
@@ -361,34 +441,7 @@ def _certificate_only_scan(
     tls_result = analyze_tls(
         final_url
     )
-
-    response = {
-        "requested_url":
-            requested_url,
-
-        "final_url":
-            final_url,
-
-        "status_code":
-            None,
-
-        "https":
-            True,
-
-        "headers": {},
-
-        "cookies": [],
-
-        "body":
-            "",
-
-        "redirect_chain": [],
-
-        "http_redirect": {
-            "tested":
-                False,
-        },
-    }
+    response = _certificate_response(requested_url, final_url)
 
     application = Application.create(
         requested_url=requested_url,
@@ -398,528 +451,200 @@ def _certificate_only_scan(
     application.set_platform(
         "Generic"
     )
-
-    application.attack_surface = {
-        "pages": [],
-        "links": [],
-        "forms": [],
-        "scripts": [],
-        "endpoints": [],
-        "potential_api_paths": [],
-        "exposed_paths": [],
-        "pages_scanned": 0,
-
-        "tls":
-            tls_result,
-    }
-
-    analysis = analyze(
-        ScanContext(
-            application_id=
-                application.id,
-
-            requested_url=
-                application.requested_url,
-
-            final_url=
-                application.final_url,
-
-            platform=
-                "Generic",
-
-            response=
-                response,
-
-            technologies=[],
-
-            attack_surface=
-                application.attack_surface,
-
-            response_observed=
-                False,
-        )
+    application.attack_surface = _certificate_attack_surface(tls_result)
+    findings = _apply_security_analysis(
+        application,
+        response,
+        response_observed=False,
     )
-
-    findings = analysis["findings"]
-
-    application.security = {
-        **summarize(findings),
-
-        "findings":
-            findings,
-
-        "recommendations":
-            build_recommendations(findings),
-
-        "rules_evaluated":
-            analysis["rules_evaluated"],
-
-        "rule_errors":
-            analysis["rule_errors"],
-    }
-
-    application.status = (
-        "certificate_rejected"
-    )
-
-    application.update_timestamp()
-
-    save_application(
-        application.to_dict()
-    )
-
-    save_findings(
-        application.id,
-        findings,
-    )
-
-    return jsonify(
-        {
-            "success":
-                True,
-
-            "partial":
-                True,
-
-            "reason":
-                "certificate_rejected",
-
-            "error":
-                error,
-
-            "application_id":
-                application.id,
-
-            "application":
-                application.to_dict(),
-        }
-    )
+    _save_certificate_scan(application, findings)
+    return _certificate_scan_response(application, error)
 
 
 # ============================================================
 # Start discovery
 # ============================================================
 
+
+def _collect_attack_surface(response: dict) -> dict:
+    crawl_result = crawl(response["final_url"], max_pages=20)
+    endpoints = discover_endpoints(
+        crawl_result["links"],
+        crawl_result["forms"],
+    )
+    robots_result = discover_robots_and_sitemaps(response["final_url"])
+    script_result = analyze_scripts(
+        crawl_result["scripts"],
+        response["final_url"],
+    )
+    libraries = detect_libraries(
+        crawl_result["scripts"],
+        response["body"],
+        response["headers"],
+        extra=script_result["libraries"],
+    )
+    reflection_result = probe_reflection(
+        crawl_result["forms"],
+        crawl_result["links"],
+        response["final_url"],
+    )
+
+    return {
+        "pages": crawl_result["pages"],
+        "links": crawl_result["links"],
+        "forms": crawl_result["forms"],
+        "scripts": crawl_result["scripts"],
+        "endpoints": endpoints,
+        "script_endpoints": script_result["endpoints"],
+        "script_analysis": {"scripts": script_result["scripts"]},
+        "libraries": libraries,
+        "robots": robots_result["robots"],
+        "sitemap": robots_result["sitemap"],
+        "reflection": reflection_result,
+        "potential_api_paths": discover_common_api_paths(
+            response["final_url"]
+        ),
+        "exposed_paths": scan_exposed_paths(response["final_url"]),
+        "pages_scanned": crawl_result["pages_scanned"],
+        "tls": analyze_tls(response["final_url"]),
+    }
+
+
+def _detected_platform(technologies: list[dict]) -> str:
+    detected = {technology["name"] for technology in technologies}
+    return next(
+        (
+            candidate
+            for candidate in ("Mendix", "OutSystems")
+            if candidate in detected
+        ),
+        "Generic",
+    )
+
+
+def _persist_discovered_application(
+    response: dict,
+    technologies: list[dict],
+    platform: str,
+    attack_surface: dict,
+) -> Application:
+    application = Application.create(
+        requested_url=response["requested_url"],
+        final_url=response["final_url"],
+    )
+    application.set_platform(platform)
+    application.status_code = response["status_code"]
+    application.response_time_ms = response["response_time_ms"]
+    application.technologies = technologies
+    application.attack_surface = attack_surface
+    findings = _apply_security_analysis(application, response)
+    application.status = "analyzed"
+    application.update_timestamp()
+    save_application(application.to_dict())
+    save_findings(application.id, findings)
+    return application
+
+
+def _run_discovery(url: str):
+    assert_target_allowed(url)
+    response = fetch_application(url)
+    technologies = detect_technologies(response)
+    attack_surface = _collect_attack_surface(response)
+    application = _persist_discovered_application(
+        response,
+        technologies,
+        _detected_platform(technologies),
+        attack_surface,
+    )
+    return jsonify(
+        {
+            "success": True,
+            "application_id": application.id,
+            "application": application.to_dict(),
+        }
+    )
+
+
+def _blocked_discovery_response():
+    return jsonify(
+        {
+            "success": False,
+            "error": BLOCKED_TARGET_MESSAGE,
+            "reason": "blocked_target",
+        }
+    ), 403
+
+
+def _certificate_error_response(url: str, error: CertificateRejectedError):
+    try:
+        return _certificate_only_scan(
+            url,
+            CERTIFICATE_REJECTED_MESSAGE,
+            error.url,
+        )
+    except BlockedTargetError:
+        return _blocked_discovery_response()
+
+
+def _handle_discovery_error(url: str, error: Exception):
+    if isinstance(error, BlockedTargetError):
+        return _blocked_discovery_response()
+
+    if isinstance(error, ValueError):
+        return jsonify(
+            {
+                "success": False,
+                "error": "Enter a valid http:// or https:// application URL.",
+            }
+        ), 400
+
+    if isinstance(error, CertificateRejectedError):
+        return _certificate_error_response(url, error)
+
+    if isinstance(error, TargetUnreachableError):
+        return jsonify(
+            {
+                "success": False,
+                "error": f"Could not connect to {url}.",
+                "reason": "unreachable",
+            }
+        ), 502
+
+    app.logger.error(
+        "Application discovery failed.",
+        exc_info=(type(error), error, error.__traceback__),
+    )
+    return jsonify(
+        {
+            "success": False,
+            "error": "Application discovery failed.",
+        }
+    ), 500
+
+
+def _discover_with_error_handling(url: str):
+    try:
+        return _run_discovery(url)
+    except Exception as error:
+        return _handle_discovery_error(url, error)
+
+
 @app.post("/api/discover")
 @require_api_token
 @rate_limited
 def discover():
-
-    data = (
-        request.get_json(
-            silent=True
-        )
-        or {}
-    )
-
-    url = str(
-        data.get(
-            "url",
-            "",
-        )
-        or ""
-    ).strip()
+    data = request.get_json(silent=True) or {}
+    url = str(data.get("url", "") or "").strip()
 
     if not url:
-
         return jsonify(
             {
-                "success":
-                    False,
-
-                "error":
-                    "Application URL is required.",
+                "success": False,
+                "error": "Application URL is required.",
             }
         ), 400
 
-    try:
-
-        # ----------------------------------------------------
-        # Target policy
-        # ----------------------------------------------------
-
-        assert_target_allowed(
-            url
-        )
-
-        # ----------------------------------------------------
-        # Initial HTTP discovery
-        # ----------------------------------------------------
-
-        response = fetch_application(
-            url
-        )
-
-        # ----------------------------------------------------
-        # Technology detection
-        # ----------------------------------------------------
-
-        technologies = detect_technologies(
-            response
-        )
-
-        # ----------------------------------------------------
-        # Same-origin crawl
-        # ----------------------------------------------------
-
-        crawl_result = crawl(
-            response["final_url"],
-            max_pages=20,
-        )
-
-        # ----------------------------------------------------
-        # Endpoint discovery
-        # ----------------------------------------------------
-
-        endpoints = discover_endpoints(
-            crawl_result["links"],
-            crawl_result["forms"],
-        )
-
-        # ----------------------------------------------------
-        # robots.txt and sitemaps
-        # ----------------------------------------------------
-
-        robots_result = (
-            discover_robots_and_sitemaps(
-                response["final_url"]
-            )
-        )
-
-        # ----------------------------------------------------
-        # Script analysis (endpoints, secrets, source maps)
-        # ----------------------------------------------------
-
-        script_result = analyze_scripts(
-            crawl_result["scripts"],
-            response["final_url"],
-        )
-
-        # ----------------------------------------------------
-        # Component versions
-        # ----------------------------------------------------
-
-        libraries = detect_libraries(
-            crawl_result["scripts"],
-            response["body"],
-            response["headers"],
-            extra=script_result["libraries"],
-        )
-
-        # ----------------------------------------------------
-        # Reflected input probes
-        # ----------------------------------------------------
-
-        reflection_result = probe_reflection(
-            crawl_result["forms"],
-            crawl_result["links"],
-            response["final_url"],
-        )
-
-        # ----------------------------------------------------
-        # Potential API discovery
-        # ----------------------------------------------------
-
-        potential_api_paths = (
-            discover_common_api_paths(
-                response["final_url"]
-            )
-        )
-
-        # ----------------------------------------------------
-        # Exposed sensitive files
-        # ----------------------------------------------------
-
-        exposed_paths = scan_exposed_paths(
-            response["final_url"]
-        )
-
-        # ----------------------------------------------------
-        # TLS/certificate analysis
-        # ----------------------------------------------------
-
-        tls_result = analyze_tls(
-            response["final_url"]
-        )
-
-        # ----------------------------------------------------
-        # Platform detection
-        # ----------------------------------------------------
-
-        detected = {
-            technology["name"]
-            for technology
-            in technologies
-        }
-
-        platform = "Generic"
-
-        for candidate in ("Mendix", "OutSystems"):
-
-            if candidate in detected:
-
-                platform = candidate
-
-                break
-
-        # ----------------------------------------------------
-        # Create persistent application
-        # ----------------------------------------------------
-
-        application = Application.create(
-            requested_url=
-                response[
-                    "requested_url"
-                ],
-
-            final_url=
-                response[
-                    "final_url"
-                ],
-        )
-
-        application.set_platform(
-            platform
-        )
-
-        application.status_code = (
-            response["status_code"]
-        )
-
-        application.response_time_ms = (
-            response["response_time_ms"]
-        )
-
-        application.technologies = (
-            technologies
-        )
-
-        application.attack_surface = {
-            "pages":
-                crawl_result[
-                    "pages"
-                ],
-
-            "links":
-                crawl_result[
-                    "links"
-                ],
-
-            "forms":
-                crawl_result[
-                    "forms"
-                ],
-
-            "scripts":
-                crawl_result[
-                    "scripts"
-                ],
-
-            "endpoints":
-                endpoints,
-
-            "script_endpoints":
-                script_result[
-                    "endpoints"
-                ],
-
-            "script_analysis": {
-                "scripts":
-                    script_result[
-                        "scripts"
-                    ],
-            },
-
-            "libraries":
-                libraries,
-
-            "robots":
-                robots_result["robots"],
-
-            "sitemap":
-                robots_result["sitemap"],
-
-            "reflection":
-                reflection_result,
-
-            "potential_api_paths":
-                potential_api_paths,
-
-            "exposed_paths":
-                exposed_paths,
-
-            "pages_scanned":
-                crawl_result[
-                    "pages_scanned"
-                ],
-
-            "tls":
-                tls_result,
-        }
-
-        # ----------------------------------------------------
-        # Security analysis
-        # ----------------------------------------------------
-
-        analysis = analyze(
-            ScanContext(
-                application_id=
-                    application.id,
-
-                requested_url=
-                    application.requested_url,
-
-                final_url=
-                    application.final_url,
-
-                platform=
-                    platform,
-
-                response=
-                    response,
-
-                technologies=
-                    technologies,
-
-                attack_surface=
-                    application.attack_surface,
-            )
-        )
-
-        findings = analysis["findings"]
-
-        application.security = {
-            **summarize(findings),
-
-            "findings":
-                findings,
-
-            "recommendations":
-                build_recommendations(findings),
-
-            "rules_evaluated":
-                analysis["rules_evaluated"],
-
-            "rule_errors":
-                analysis["rule_errors"],
-        }
-
-        application.status = "analyzed"
-
-        application.update_timestamp()
-
-        # ----------------------------------------------------
-        # Save
-        # ----------------------------------------------------
-
-        save_application(
-            application.to_dict()
-        )
-
-        save_findings(
-            application.id,
-            findings,
-        )
-
-        # ----------------------------------------------------
-        # Response
-        # ----------------------------------------------------
-
-        return jsonify(
-            {
-                "success":
-                    True,
-
-                "application_id":
-                    application.id,
-
-                "application":
-                    application.to_dict(),
-            }
-        )
-
-    except BlockedTargetError:
-
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    BLOCKED_TARGET_MESSAGE,
-
-                "reason":
-                    "blocked_target",
-            }
-        ), 403
-
-    except ValueError:
-
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    "Enter a valid http:// or https:// application URL.",
-            }
-        ), 400
-
-    except CertificateRejectedError as exc:
-
-        # The certificate is the finding here, so the scan is recorded
-        # from the TLS diagnosis alone rather than discarded.
-        try:
-
-            return _certificate_only_scan(
-                url,
-                CERTIFICATE_REJECTED_MESSAGE,
-                exc.url,
-            )
-
-        except BlockedTargetError:
-
-            return jsonify(
-                {
-                    "success":
-                        False,
-
-                    "error":
-                        BLOCKED_TARGET_MESSAGE,
-
-                    "reason":
-                        "blocked_target",
-                }
-            ), 403
-
-    except TargetUnreachableError:
-
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    f"Could not connect to {url}.",
-
-                "reason":
-                    "unreachable",
-            }
-        ), 502
-
-    except Exception:
-
-        app.logger.exception("Application discovery failed.")
-
-        return jsonify(
-            {
-                "success":
-                    False,
-
-                "error":
-                    "Application discovery failed.",
-            }
-        ), 500
+    return _discover_with_error_handling(url)
 
 
 # ============================================================
@@ -1450,6 +1175,17 @@ def remove_application(
 # Findings
 # ============================================================
 
+
+def _filter_findings(findings: list[dict], filters: dict[str, str]) -> list[dict]:
+    for key, value in filters.items():
+        findings = [
+            finding
+            for finding in findings
+            if str(finding.get(key, "")).lower() == value
+        ]
+    return findings
+
+
 @app.get(
     "/api/applications/<application_id>/findings"
 )
@@ -1488,15 +1224,7 @@ def application_findings(
         if request.args.get(key)
     }
 
-    for key, value in filters.items():
-
-        findings = [
-            finding
-            for finding in findings
-            if str(
-                finding.get(key, "")
-            ).lower() == value
-        ]
+    findings = _filter_findings(findings, filters)
 
     return jsonify(
         {

@@ -90,15 +90,9 @@ def check_http_redirect(
     }
 
 
-def fetch_application(url: str) -> dict:
-    url = validate_url(url)
-
-    session = build_session()
-
-    started = perf_counter()
-
+def _request_application(url: str, session: requests.Session):
     try:
-        response = session.get(
+        return session.get(
             url,
             timeout=FETCH_TIMEOUT,
             allow_redirects=True,
@@ -142,31 +136,18 @@ def fetch_application(url: str) -> dict:
             "machine."
         ) from exc
 
-    elapsed_ms = round(
-        (perf_counter() - started) * 1000,
-        2,
-    )
 
+def _application_result(url: str, response, elapsed_ms: float, session) -> dict:
     parsed = urlparse(response.url)
-
     return {
         "requested_url": url,
         "final_url": response.url,
         "status_code": response.status_code,
         "response_time_ms": elapsed_ms,
         "https": parsed.scheme == "https",
-        "content_type": response.headers.get(
-            "Content-Type",
-            "",
-        ),
-        "server": response.headers.get(
-            "Server",
-            "",
-        ),
-        "powered_by": response.headers.get(
-            "X-Powered-By",
-            "",
-        ),
+        "content_type": response.headers.get("Content-Type", ""),
+        "server": response.headers.get("Server", ""),
+        "powered_by": response.headers.get("X-Powered-By", ""),
         "headers": {
             key: value
             for key, value in response.headers.items()
@@ -183,12 +164,21 @@ def fetch_application(url: str) -> dict:
             }
             for step in response.history
         ],
-        "http_redirect": check_http_redirect(
-            response.url,
-            session,
-        ),
+        "http_redirect": check_http_redirect(response.url, session),
         "body": response.text,
     }
+
+
+def fetch_application(url: str) -> dict:
+    url = validate_url(url)
+    session = build_session()
+    started = perf_counter()
+    response = _request_application(url, session)
+    elapsed_ms = round(
+        (perf_counter() - started) * 1000,
+        2,
+    )
+    return _application_result(url, response, elapsed_ms, session)
 
 
 __all__ = [
