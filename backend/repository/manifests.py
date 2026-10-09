@@ -432,39 +432,45 @@ def parse_pom(text: str, manifest: str) -> list[Dependency]:
         return []
 
     namespace = root.tag.split("}")[0] + "}" if root.tag.startswith("{") else ""
-
     properties = {
         element.tag.replace(namespace, ""): (element.text or "").strip()
         for element in root.findall(f"{namespace}properties/*")
     }
+    return [
+        dependency
+        for element in root.iter(f"{namespace}dependency")
+        if (dependency := _parse_pom_dependency(element, namespace, properties, text, manifest))
+    ]
 
-    dependencies = []
 
-    for element in root.iter(f"{namespace}dependency"):
-        group = (element.findtext(f"{namespace}groupId") or "").strip()
-        artifact = (element.findtext(f"{namespace}artifactId") or "").strip()
-        version = (element.findtext(f"{namespace}version") or "").strip()
-        scope = (element.findtext(f"{namespace}scope") or "").strip()
+def _parse_pom_dependency(
+    element,
+    namespace: str,
+    properties: dict[str, str],
+    text: str,
+    manifest: str,
+) -> Dependency | None:
+    group = (element.findtext(f"{namespace}groupId") or "").strip()
+    artifact = (element.findtext(f"{namespace}artifactId") or "").strip()
+    version = (element.findtext(f"{namespace}version") or "").strip()
+    scope = (element.findtext(f"{namespace}scope") or "").strip()
 
-        reference = re.fullmatch(r"\$\{([^}]+)\}", version)
+    reference = re.fullmatch(r"\$\{([^}]+)\}", version)
 
-        if reference:
-            version = properties.get(reference.group(1), "")
+    if reference:
+        version = properties.get(reference.group(1), "")
 
-        if group and artifact:
-            dependencies.append(
-                Dependency(
-                    name=f"{group}:{artifact}",
-                    ecosystem=MAVEN,
-                    version=version,
-                    spec=version,
-                    manifest=manifest,
-                    line=_line_of(text, f"<artifactId>{artifact}</artifactId>"),
-                    scope=DEVELOPMENT if scope == "test" else RUNTIME,
-                )
-            )
-
-    return dependencies
+    if not group or not artifact:
+        return None
+    return Dependency(
+        name=f"{group}:{artifact}",
+        ecosystem=MAVEN,
+        version=version,
+        spec=version,
+        manifest=manifest,
+        line=_line_of(text, f"<artifactId>{artifact}</artifactId>"),
+        scope=DEVELOPMENT if scope == "test" else RUNTIME,
+    )
 
 
 def parse_composer_lock(text: str, manifest: str) -> list[Dependency]:
@@ -551,35 +557,43 @@ def _merge(found: list[Dependency]) -> list[Dependency]:
             resolved.setdefault(dependency.key(), set()).add(dependency.version)
 
     merged: dict[tuple[str, str, str], Dependency] = {}
-
-    for dependency in declared:
-        versions = resolved.get(dependency.key(), set())
-
-        if not dependency.version and len(versions) == 1:
-            dependency.version = next(iter(versions))
-
-        identity = (*dependency.key(), dependency.version)
-
-        current = merged.get(identity)
-
-        if current is None or (current.scope == DEVELOPMENT and dependency.scope == RUNTIME):
-            merged[identity] = dependency
-
-    for dependency in locked:
-        if not dependency.version:
-            continue
-
-        identity = (*dependency.key(), dependency.version)
-
-        if identity in merged:
-            continue
-
-        merged[identity] = dependency
+    _merge_declared(declared, resolved, merged)
+    _merge_locked(locked, merged)
 
     return sorted(
         merged.values(),
         key=lambda item: (item.ecosystem, normalize_package(item.ecosystem, item.name), item.version),
     )
+
+
+def _merge_declared(
+    declared: list[Dependency],
+    resolved: dict[tuple[str, str], set[str]],
+    merged: dict[tuple[str, str, str], Dependency],
+) -> None:
+    for dependency in declared:
+        versions = resolved.get(dependency.key(), set())
+        if not dependency.version and len(versions) == 1:
+            dependency.version = next(iter(versions))
+
+        identity = (*dependency.key(), dependency.version)
+        current = merged.get(identity)
+        if current is None or (
+            current.scope == DEVELOPMENT and dependency.scope == RUNTIME
+        ):
+            merged[identity] = dependency
+
+
+def _merge_locked(
+    locked: list[Dependency],
+    merged: dict[tuple[str, str, str], Dependency],
+) -> None:
+    for dependency in locked:
+        if not dependency.version:
+            continue
+        identity = (*dependency.key(), dependency.version)
+        if identity not in merged:
+            merged[identity] = dependency
 
 
 def discover_dependencies(root: Path) -> list[Dependency]:

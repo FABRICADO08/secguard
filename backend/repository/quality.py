@@ -83,27 +83,62 @@ class QualityReport:
     has_web_api: bool = False
 
     def metrics(self) -> dict[str, Any]:
-        complexities = [function.cyclomatic for function in self.functions]
-        lines_in_complex = sum(function.lines for function in self.functions if function.cyclomatic > COMPLEXITY_WARNING)
-        function_lines = sum(function.lines for function in self.functions) or 1
-
         return {
             "files": self.files,
             "code_lines": self.code_lines,
             "languages": self.languages,
-            "functions": len(self.functions),
-            "average_complexity": round(sum(complexities) / len(complexities), 2) if complexities else 0,
-            "max_complexity": max(complexities, default=0),
-            "complex_functions": sum(1 for value in complexities if value > COMPLEXITY_WARNING),
-            "complex_code_ratio": round(lines_in_complex / function_lines, 4) if self.functions else 0,
+            **self._complexity_metrics(),
             "duplicated_lines": self.duplicated_lines,
-            "duplication_ratio": round(self.duplicated_lines / self.code_lines, 4) if self.code_lines else 0,
-            "docstring_coverage": round(self.documented / self.documentable, 4) if self.documentable else None,
-            "type_annotation_coverage": round(self.annotated / self.annotatable, 4) if self.annotatable else None,
+            **self._coverage_metrics(),
             "has_readme": self.has_readme,
             "api_specs": self.api_specs,
             "has_web_api": self.has_web_api,
             "technical_debt_minutes": technical_debt_minutes(self.issues),
+        }
+
+    def _complexity_metrics(self) -> dict[str, Any]:
+        complexities = [function.cyclomatic for function in self.functions]
+        lines_in_complex = sum(
+            function.lines
+            for function in self.functions
+            if function.cyclomatic > COMPLEXITY_WARNING
+        )
+        function_lines = sum(function.lines for function in self.functions) or 1
+        return {
+            "functions": len(self.functions),
+            "average_complexity": (
+                round(sum(complexities) / len(complexities), 2)
+                if complexities
+                else 0
+            ),
+            "max_complexity": max(complexities, default=0),
+            "complex_functions": sum(
+                1 for value in complexities if value > COMPLEXITY_WARNING
+            ),
+            "complex_code_ratio": (
+                round(lines_in_complex / function_lines, 4)
+                if self.functions
+                else 0
+            ),
+        }
+
+    def _coverage_metrics(self) -> dict[str, Any]:
+        return {
+            "duplication_ratio": (
+                round(self.duplicated_lines / self.code_lines, 4)
+                if self.code_lines
+                else 0
+            ),
+            "docstring_coverage": (
+                round(self.documented / self.documentable, 4)
+                if self.documentable
+                else None
+            ),
+            "type_annotation_coverage": (
+                round(self.annotated / self.annotatable, 4)
+                if self.annotatable
+                else None
+            ),
         }
 
     def hotspots(self, limit: int = 10) -> list[dict[str, Any]]:
@@ -155,37 +190,58 @@ def cognitive_complexity(node: ast.AST) -> int:
     flow costs one, plus one per level of nesting it sits at.
     """
 
-    total = 0
+    total = [0]
+    _visit_cognitive(node, 0, total)
+    return total[0]
 
-    def visit(current: ast.AST, nesting: int) -> None:
-        nonlocal total
 
-        for child in ast.iter_child_nodes(current):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
-                visit(child, nesting + 1) if isinstance(child, ast.Lambda) else None
-                continue
+def _visit_cognitive(current: ast.AST, nesting: int, total: list[int]) -> None:
+    for child in ast.iter_child_nodes(current):
+        points, child_nesting, recurse = _cognitive_child(
+            current,
+            child,
+            nesting,
+        )
+        total[0] += points
+        if recurse:
+            _visit_cognitive(child, child_nesting, total)
 
-            if isinstance(child, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler, ast.IfExp)):
-                is_elif = (
-                    isinstance(current, ast.If)
-                    and isinstance(child, ast.If)
-                    and current.orelse == [child]
-                )
-                total += 1 if is_elif else 1 + nesting
-                visit(child, nesting if is_elif else nesting + 1)
-                continue
 
-            if isinstance(child, ast.BoolOp):
-                total += 1
+def _cognitive_child(
+    current: ast.AST,
+    child: ast.AST,
+    nesting: int,
+) -> tuple[int, int, bool]:
+    nested_scope = isinstance(
+        child,
+        (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef),
+    )
+    if nested_scope:
+        if isinstance(child, ast.Lambda):
+            return 0, nesting + 1, True
+        return 0, nesting, False
 
-            if isinstance(child, (ast.Break, ast.Continue)) and nesting > 1:
-                total += 1
+    if isinstance(
+        child,
+        (ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler, ast.IfExp),
+    ):
+        is_elif = _is_elif(current, child)
+        return (1 if is_elif else 1 + nesting), (
+            nesting if is_elif else nesting + 1
+        ), True
 
-            visit(child, nesting)
+    points = int(isinstance(child, ast.BoolOp))
+    if isinstance(child, (ast.Break, ast.Continue)) and nesting > 1:
+        points += 1
+    return points, nesting, True
 
-    visit(node, 0)
 
-    return total
+def _is_elif(current: ast.AST, child: ast.AST) -> bool:
+    return (
+        isinstance(current, ast.If)
+        and isinstance(child, ast.If)
+        and current.orelse == [child]
+    )
 
 
 def _walk_own(node: ast.AST):
@@ -357,8 +413,16 @@ def _analyse_python(path: str, source: str, report: QualityReport) -> None:
 
 
 def _unused_imports(path: str, tree: ast.Module, report: QualityReport) -> None:
-    imported: dict[str, int] = {}
+    imported = _imported_names(tree)
+    used = _used_names(tree)
 
+    for name, line in imported.items():
+        if name not in used:
+            report.issues.append(Issue("REPO-MNT-005", path, line, name, f"`{name}` is imported but never used."))
+
+
+def _imported_names(tree: ast.Module) -> dict[str, int]:
+    imported: dict[str, int] = {}
     for node in tree.body:
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -367,9 +431,11 @@ def _unused_imports(path: str, tree: ast.Module, report: QualityReport) -> None:
             for alias in node.names:
                 if alias.name != "*":
                     imported[alias.asname or alias.name] = node.lineno
+    return imported
 
+
+def _used_names(tree: ast.Module) -> set[str]:
     used: set[str] = set()
-
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
             used.add(node.id)
@@ -382,10 +448,8 @@ def _unused_imports(path: str, tree: ast.Module, report: QualityReport) -> None:
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             # Names referenced from string annotations and __all__.
             used.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", node.value))
+    return used
 
-    for name, line in imported.items():
-        if name not in used:
-            report.issues.append(Issue("REPO-MNT-005", path, line, name, f"`{name}` is imported but never used."))
 
 
 # ---------------------------------------------------- language-neutral
@@ -418,55 +482,60 @@ def _normalised_lines(text: str) -> list[tuple[int, str]]:
 
 
 def _duplicates(sources: dict[str, list[tuple[int, str]]], report: QualityReport) -> None:
-    windows: dict[str, list[tuple[str, int]]] = {}
+    windows = _duplicate_windows(sources)
+    duplicated, first_copy = _duplicate_occurrences(windows)
+    report.duplicated_lines = sum(len(indexes) for indexes in duplicated.values())
+    _report_duplicate_blocks(sources, first_copy, report)
 
+
+def _duplicate_windows(
+    sources: dict[str, list[tuple[int, str]]],
+) -> dict[str, list[tuple[str, int]]]:
+    windows: dict[str, list[tuple[str, int]]] = {}
     for path, lines in sources.items():
         for index in range(len(lines) - DUPLICATE_WINDOW + 1):
             chunk = "\n".join(text for _, text in lines[index:index + DUPLICATE_WINDOW])
-
             if len(chunk) < DUPLICATE_WINDOW * 8:
                 continue
-
             digest = hashlib.sha1(chunk.encode("utf-8")).hexdigest()
             windows.setdefault(digest, []).append((path, index))
+    return windows
 
+
+def _duplicate_occurrences(
+    windows: dict[str, list[tuple[str, int]]],
+) -> tuple[dict[str, set[int]], dict[tuple[str, int], tuple[str, int]]]:
     duplicated: dict[str, set[int]] = {}
     first_copy: dict[tuple[str, int], tuple[str, int]] = {}
-
     for occurrences in windows.values():
         if len(occurrences) < 2:
             continue
-
         original = occurrences[0]
-
         for path, index in occurrences:
             duplicated.setdefault(path, set()).update(range(index, index + DUPLICATE_WINDOW))
-
             if (path, index) != original:
                 first_copy.setdefault((path, index), original)
+    return duplicated, first_copy
 
-    report.duplicated_lines = sum(len(indexes) for indexes in duplicated.values())
 
-    # Collapse overlapping windows into one block per copy.
+def _report_duplicate_blocks(
+    sources: dict[str, list[tuple[int, str]]],
+    first_copy: dict[tuple[str, int], tuple[str, int]],
+    report: QualityReport,
+) -> None:
     reported = 0
     covered: dict[str, int] = {}
-
     for (path, index), (original_path, original_index) in sorted(first_copy.items()):
         if index < covered.get(path, -1) or reported >= MAX_DUPLICATE_BLOCKS:
             continue
-
         end = index + DUPLICATE_WINDOW
-
         while (path, end - DUPLICATE_WINDOW + 1) in first_copy:
             end += 1
-
         covered[path] = end
-
         lines = sources[path]
         start_line = lines[index][0]
         end_line = lines[min(end, len(lines)) - 1][0]
         original_line = sources[original_path][original_index][0]
-
         report.issues.append(
             Issue("REPO-MNT-008", path, start_line, "",
                   f"Lines {start_line}-{end_line} duplicate {original_path}:{original_line}.",

@@ -354,62 +354,10 @@ class MendixSecurityRules:
             sensitivity["sensitive"]
         )
 
-        if (
-            sensitive
-            and
-            rule.allow_delete
-        ):
-
-            title = (
-                "Sensitive entity allows deletion"
-            )
-
-        elif (
-            sensitive
-            and
-            rule.has_write_access
-            and
-            rule.allow_create
-            and
-            not rule.has_xpath_constraint
-        ):
-
-            title = (
-                "Sensitive entity has broad "
-                "write access without row-level restriction"
-            )
-
-        elif (
-            rule.allow_delete
-            and
-            rule.has_write_access
-            and
-            not rule.has_xpath_constraint
-        ):
-
-            title = (
-                "Entity has broad delete/write access "
-                "without row-level restriction"
-            )
-
-        elif (
-            rule.allow_create
-            and
-            rule.has_write_access
-            and
-            not rule.has_xpath_constraint
-        ):
-
-            title = (
-                "Entity has broad write access "
-                "without row-level restriction"
-            )
-
-        else:
-
-            title = (
-                "Potential excessive entity access"
-            )
+        title = self._entity_finding_title(
+            rule,
+            sensitive,
+        )
 
         return {
             "rule_id":
@@ -501,6 +449,69 @@ class MendixSecurityRules:
                 ),
         }
 
+    @staticmethod
+    def _entity_finding_title(rule, sensitive) -> str:
+        if MendixSecurityRules._sensitive_delete(rule, sensitive):
+            return "Sensitive entity allows deletion"
+        if MendixSecurityRules._sensitive_broad_write(rule, sensitive):
+            return (
+                "Sensitive entity has broad "
+                "write access without row-level restriction"
+            )
+        if MendixSecurityRules._broad_delete_write(rule):
+            return (
+                "Entity has broad delete/write access "
+                "without row-level restriction"
+            )
+        if MendixSecurityRules._broad_write(rule):
+            return (
+                "Entity has broad write access "
+                "without row-level restriction"
+            )
+        return (
+            "Potential excessive entity access"
+        )
+
+    @staticmethod
+    def _sensitive_delete(rule, sensitive) -> bool:
+        return sensitive and rule.allow_delete
+
+    @staticmethod
+    def _sensitive_broad_write(rule, sensitive) -> bool:
+        return (
+            sensitive
+            and rule.has_write_access
+            and rule.allow_create
+            and not rule.has_xpath_constraint
+        )
+
+    @staticmethod
+    def _broad_delete_write(rule) -> bool:
+        return (
+            rule.allow_delete
+            and rule.has_write_access
+            and not rule.has_xpath_constraint
+        )
+
+    @staticmethod
+    def _broad_write(rule) -> bool:
+        return (
+            rule.allow_create
+            and rule.has_write_access
+            and not rule.has_xpath_constraint
+        )
+
+    @staticmethod
+    def _unneeded_row_constraint(rule) -> bool:
+        return (
+            not rule.has_xpath_constraint
+            and (
+                rule.allow_create
+                or rule.allow_delete
+                or rule.has_write_access
+            )
+        )
+
     # ============================================================
     # CONFIDENCE
     # ============================================================
@@ -555,6 +566,23 @@ class MendixSecurityRules:
         sensitivity,
     ) -> str:
 
+        recommendations = MendixSecurityRules._access_recommendations(rule)
+        recommendations.extend(
+            MendixSecurityRules._sensitivity_recommendations(
+                sensitivity
+            )
+        )
+
+        if not recommendations:
+            return (
+                "Review the entity security configuration "
+                "and apply least-privilege access."
+            )
+
+        return " ".join(recommendations)
+
+    @staticmethod
+    def _access_recommendations(rule) -> List[str]:
         recommendations = []
 
         if rule.allow_delete:
@@ -579,23 +607,19 @@ class MendixSecurityRules:
                 "permissions."
             )
 
-        if (
-            not rule.has_xpath_constraint
-            and
-            (
-                rule.allow_create
-                or
-                rule.allow_delete
-                or
-                rule.has_write_access
-            )
-        ):
+        if MendixSecurityRules._unneeded_row_constraint(rule):
 
             recommendations.append(
                 "Consider an XPath constraint when "
                 "users should only access records "
                 "within their permitted business scope."
             )
+
+        return recommendations
+
+    @staticmethod
+    def _sensitivity_recommendations(sensitivity) -> List[str]:
+        recommendations = []
 
         if sensitivity["sensitive"]:
 
@@ -614,16 +638,7 @@ class MendixSecurityRules:
                     "required access."
                 )
 
-        if not recommendations:
-
-            return (
-                "Review the entity security configuration "
-                "and apply least-privilege access."
-            )
-
-        return " ".join(
-            recommendations
-        )
+        return recommendations
 
     # ============================================================
     # DEDUPLICATION

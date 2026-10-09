@@ -132,42 +132,47 @@ def scan_exposed_paths(
     exposures: list[dict[str, Any]] = []
 
     for entry in SENSITIVE_PATHS:
-        url = absolute_url(base_url, entry["path"])
-
-        result = probe(url, session)
-
-        status = result.get("status_code")
-
-        if status is None or not 200 <= status < 300:
-            continue
-
-        if _matches_baseline(result, baseline):
-            continue
-
-        body = str(result.get("body_preview") or "").lower()
-
-        signatures = [
-            signature
-            for signature in entry["signatures"]
-            if signature.lower() in body
-        ]
-
-        # A signature-backed hit is confirmed; a bare 200 is only a lead.
-        if entry["signatures"] and not signatures:
-            continue
-
-        exposures.append(
-            {
-                "url": url,
-                "path": entry["path"],
-                "label": entry["label"],
-                "severity": entry["severity"],
-                "status_code": status,
-                "content_type": result.get("content_type", ""),
-                "content_length": result.get("content_length", 0),
-                "matched_signatures": signatures,
-                "confidence": "confirmed" if signatures else "tentative",
-            }
-        )
+        exposure = _probe_exposure(base_url, session, baseline, entry)
+        if exposure:
+            exposures.append(exposure)
 
     return exposures
+
+
+def _probe_exposure(
+    base_url: str,
+    session: requests.Session,
+    baseline: dict[str, Any],
+    entry: dict[str, Any],
+) -> dict[str, Any] | None:
+    url = absolute_url(base_url, entry["path"])
+    result = probe(url, session)
+    status = result.get("status_code")
+
+    if status is None or not 200 <= status < 300:
+        return None
+    if _matches_baseline(result, baseline):
+        return None
+
+    body = str(result.get("body_preview") or "").lower()
+    signatures = [
+        signature
+        for signature in entry["signatures"]
+        if signature.lower() in body
+    ]
+
+    # A signature-backed hit is confirmed; a bare 200 is only a lead.
+    if entry["signatures"] and not signatures:
+        return None
+
+    return {
+        "url": url,
+        "path": entry["path"],
+        "label": entry["label"],
+        "severity": entry["severity"],
+        "status_code": status,
+        "content_type": result.get("content_type", ""),
+        "content_length": result.get("content_length", 0),
+        "matched_signatures": signatures,
+        "confidence": "confirmed" if signatures else "tentative",
+    }
