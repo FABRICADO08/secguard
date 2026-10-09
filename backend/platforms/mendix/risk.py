@@ -77,17 +77,12 @@ class RiskEngine:
     def severity_from_score(
         score: int,
     ) -> str:
-
         if score >= 85:
             return "critical"
-
         if score >= 65:
             return "high"
-
         if score >= 40:
             return "medium"
-
         if score >= 20:
             return "low"
-
         return "informational"

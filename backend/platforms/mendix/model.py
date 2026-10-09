@@ -1,3 +1,5 @@
+"""Typed records and lookup helpers for normalized Mendix exports."""
+
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
@@ -8,6 +10,8 @@ from typing import Any, Dict, List, Optional
 
 @dataclass
 class Attribute:
+    """A named entity attribute and its normalized model metadata."""
+
     name: str
 
     qualified_name: str = ""
@@ -92,20 +96,24 @@ class AccessRule:
 
     @property
     def has_xpath_constraint(self) -> bool:
+        """Whether the rule restricts visible records with an XPath clause."""
         return bool(
             self.xpath_constraint.strip()
         )
 
     @property
     def has_create_access(self) -> bool:
+        """Whether the rule permits record creation."""
         return self.allow_create
 
     @property
     def has_delete_access(self) -> bool:
+        """Whether the rule permits record deletion."""
         return self.allow_delete
 
     @property
     def has_write_access(self) -> bool:
+        """Whether the rule permits any write operation."""
 
         if self.allow_create:
             return True
@@ -132,6 +140,8 @@ class AccessRule:
 
 @dataclass
 class Association:
+    """A relationship between two normalized Mendix entities."""
+
     name: str
 
     qualified_name: str = ""
@@ -153,6 +163,8 @@ class Association:
 
 @dataclass
 class Entity:
+    """A Mendix entity with its attributes and access rules."""
+
     name: str
 
     qualified_name: str = ""
@@ -183,12 +195,14 @@ class Entity:
 
     @property
     def has_access_rules(self) -> bool:
+        """Whether any access rule is defined for this entity."""
         return len(
             self.access_rules
         ) > 0
 
     @property
     def has_write_access(self) -> bool:
+        """Whether an entity-level access rule permits writes."""
 
         for rule in self.access_rules:
 
@@ -199,6 +213,7 @@ class Entity:
 
     @property
     def has_delete_access(self) -> bool:
+        """Whether an access rule permits deleting entity records."""
 
         for rule in self.access_rules:
 
@@ -209,6 +224,7 @@ class Entity:
 
     @property
     def has_create_access(self) -> bool:
+        """Whether an access rule permits creating entity records."""
 
         for rule in self.access_rules:
 
@@ -219,6 +235,7 @@ class Entity:
 
     @property
     def has_xpath_restriction(self) -> bool:
+        """Whether any access rule limits records with an XPath clause."""
 
         for rule in self.access_rules:
 
@@ -234,6 +251,8 @@ class Entity:
 
 @dataclass
 class ModuleRole:
+    """A role defined within a Mendix module."""
+
     name: str
 
     qualified_name: str = ""
@@ -249,6 +268,8 @@ class ModuleRole:
 
 @dataclass
 class Module:
+    """A Mendix module and its directly owned model elements."""
+
     name: str
 
     qualified_name: str = ""
@@ -269,12 +290,14 @@ class Module:
 
     @property
     def entity_count(self) -> int:
+        """Return the number of entities in this module."""
         return len(
             self.entities
         )
 
     @property
     def role_count(self) -> int:
+        """Return the number of roles in this module."""
         return len(
             self.module_roles
         )
@@ -286,6 +309,8 @@ class Module:
 
 @dataclass
 class Microflow:
+    """A server-side flow and its role/access-control settings."""
+
     name: str
 
     qualified_name: str = ""
@@ -308,12 +333,14 @@ class Microflow:
 
     @property
     def is_restricted(self) -> bool:
+        """Whether the flow is limited to one or more module roles."""
         return len(
             self.allowed_module_roles
         ) > 0
 
     @property
     def bypasses_entity_access(self) -> bool:
+        """Whether the flow runs without entity access checks."""
         return not self.apply_entity_access
 
 
@@ -323,6 +350,8 @@ class Microflow:
 
 @dataclass
 class Page:
+    """A Mendix page and its role-based visibility settings."""
+
     name: str
 
     qualified_name: str = ""
@@ -341,6 +370,7 @@ class Page:
 
     @property
     def is_restricted(self) -> bool:
+        """Whether the page is limited to one or more module roles."""
         return len(
             self.allowed_module_roles
         ) > 0
@@ -352,6 +382,7 @@ class Page:
 
 @dataclass
 class MendixModel:
+    """Normalized collections of the model elements in a Mendix export."""
 
     modules: List[Module] = field(
         default_factory=list
@@ -390,6 +421,7 @@ class MendixModel:
     # ========================================================
 
     def statistics(self) -> Dict[str, int]:
+        """Count the principal model element types."""
 
         return {
             "modules":
@@ -424,6 +456,7 @@ class MendixModel:
     def security_statistics(
         self,
     ) -> Dict[str, int]:
+        """Summarize entity and microflow access-control characteristics."""
 
         entities_without_rules = 0
 
@@ -484,6 +517,7 @@ class MendixModel:
         self,
         name: str,
     ) -> Optional[Entity]:
+        """Find an entity by simple or qualified name."""
 
         for entity in self.entities:
 
@@ -505,6 +539,7 @@ class MendixModel:
         self,
         name: str,
     ) -> Optional[Module]:
+        """Find a module by simple or qualified name."""
 
         for module in self.modules:
 
@@ -526,6 +561,7 @@ class MendixModel:
         self,
         name: str,
     ) -> Optional[ModuleRole]:
+        """Find a role by simple or qualified name."""
 
         for role in self.module_roles:
 
@@ -547,6 +583,7 @@ class MendixModel:
         self,
         name: str,
     ) -> Optional[Microflow]:
+        """Find a microflow by simple or qualified name."""
 
         for microflow in self.microflows:
 
@@ -568,6 +605,7 @@ class MendixModel:
         self,
         name: str,
     ) -> Optional[Page]:
+        """Find a page by simple or qualified name."""
 
         for page in self.pages:
 
@@ -588,6 +626,7 @@ class MendixModel:
     def to_dict(
         self,
     ) -> Dict[str, Any]:
+        """Serialize model collections to JSON-compatible dictionaries."""
 
         return {
             "modules": [

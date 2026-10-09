@@ -1,3 +1,5 @@
+"""Rules for restrictive Content-Security-Policy and CORS configurations."""
+
 from __future__ import annotations
 
 from backend.rules.base import (
@@ -63,7 +65,21 @@ def effective_sources(
     return "", []
 
 
+def _script_sources(context: ScanContext) -> tuple[str, list[str]]:
+    value = context.header("Content-Security-Policy")
+
+    if not value.strip():
+        return "", []
+
+    return effective_sources(
+        parse_policy(value),
+        "script-src",
+    )
+
+
 class CspAllowsUnsafeScriptSources(Rule):
+    """Detect CSP script sources that allow inline or evaluated code."""
+
     id = "GEN-CSP-001"
     title = "Content-Security-Policy allows unsafe script sources"
     severity = "medium"
@@ -83,37 +99,14 @@ class CspAllowsUnsafeScriptSources(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
-        value = context.header("Content-Security-Policy")
-
-        if not value.strip():
-            return []
-
-        policy = parse_policy(value)
-
-        directive, sources = effective_sources(policy, "script-src")
-
+        """Report unsafe script-source directives unless neutralized."""
+        directive, sources = _script_sources(context)
         if not directive:
             return []
 
-        unsafe = [source for source in sources if source in UNSAFE_SOURCES]
-
+        unsafe = _unsafe_script_sources(sources)
         if not unsafe:
             return []
-
-        # A nonce or hash makes 'unsafe-inline' inert in browsers that
-        # support CSP level 2 or later.
-        neutralised = "'unsafe-inline'" in unsafe and any(
-            source.startswith(("'nonce-", "'sha256-", "'sha384-", "'sha512-"))
-            for source in sources
-        )
-
-        if neutralised:
-            unsafe = [
-                source for source in unsafe if source != "'unsafe-inline'"
-            ]
-
-            if not unsafe:
-                return []
 
         return [
             self.finding(
@@ -128,7 +121,25 @@ class CspAllowsUnsafeScriptSources(Rule):
         ]
 
 
+def _unsafe_script_sources(sources: list[str]) -> list[str]:
+    unsafe = [source for source in sources if source in UNSAFE_SOURCES]
+
+    # A nonce or hash makes 'unsafe-inline' inert in browsers that
+    # support CSP level 2 or later.
+    neutralised = "'unsafe-inline'" in unsafe and any(
+        source.startswith(("'nonce-", "'sha256-", "'sha384-", "'sha512-"))
+        for source in sources
+    )
+
+    if neutralised:
+        unsafe = [source for source in unsafe if source != "'unsafe-inline'"]
+
+    return unsafe
+
+
 class CspAllowsWildcardSources(Rule):
+    """Detect CSP source lists that allow arbitrary origins."""
+
     id = "GEN-CSP-002"
     title = "Content-Security-Policy allows scripts from any origin"
     severity = "medium"
@@ -147,16 +158,10 @@ class CspAllowsWildcardSources(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
-        value = context.header("Content-Security-Policy")
-
-        if not value.strip():
-            return []
-
-        policy = parse_policy(value)
-
+        """Report wildcard, scheme-wide, or data sources in a CSP."""
         # script-src overrides default-src, so only the directive the
         # browser actually applies to scripts is worth reporting.
-        directive, sources = effective_sources(policy, "script-src")
+        directive, sources = _script_sources(context)
 
         if not directive:
             return []
@@ -184,6 +189,8 @@ class CspAllowsWildcardSources(Rule):
 
 
 class CspMissingRestrictiveDirectives(Rule):
+    """Check CSP policies for object, base, and frame restrictions."""
+
     id = "GEN-CSP-003"
     title = "Content-Security-Policy omits key restrictions"
     severity = "low"
@@ -202,6 +209,7 @@ class CspMissingRestrictiveDirectives(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report missing directives that do not fall back to default-src."""
         value = context.header("Content-Security-Policy")
 
         if not value.strip():
@@ -239,6 +247,8 @@ class CspMissingRestrictiveDirectives(Rule):
 
 
 class CorsAllowsNullOrigin(Rule):
+    """Detect CORS policies that trust the opaque null origin."""
+
     id = "GEN-CORS-001"
     title = "Cross-origin resource sharing allows the null origin"
     severity = "high"
@@ -257,6 +267,7 @@ class CorsAllowsNullOrigin(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report responses granting access to the null origin."""
         origin = context.header("Access-Control-Allow-Origin").strip()
 
         if origin.lower() != "null":
@@ -279,6 +290,8 @@ class CorsAllowsNullOrigin(Rule):
 
 
 class CorsExposesUnsafeMethods(Rule):
+    """Detect cross-origin access to state-changing methods."""
+
     id = "GEN-CORS-002"
     title = "Cross-origin requests are allowed to use state-changing methods"
     severity = "medium"
@@ -298,6 +311,7 @@ class CorsExposesUnsafeMethods(Rule):
     UNSAFE_METHODS = ("put", "delete", "patch")
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report permissive CORS policies for unsafe HTTP methods."""
         origin = context.header("Access-Control-Allow-Origin").strip()
 
         if origin not in ("*",) and origin.lower() != "null":
@@ -333,6 +347,7 @@ class CorsExposesUnsafeMethods(Rule):
 
 
 def rules() -> list[Rule]:
+    """Return the CSP and CORS security rules."""
     return [
         CspAllowsUnsafeScriptSources(),
         CspAllowsWildcardSources(),

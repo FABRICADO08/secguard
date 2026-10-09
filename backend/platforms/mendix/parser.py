@@ -38,64 +38,20 @@ class MendixModelParser(
         cls,
         path: Path | str,
     ) -> "MendixModelParser":
-
         path = Path(path)
-
         if not path.exists():
-
-            raise FileNotFoundError(
-                f"Model file does not exist: {path}"
-            )
-
-        with path.open(
-            "r",
-            encoding="utf-8",
-        ) as file:
-
+            raise FileNotFoundError(f"Model file does not exist: {path}")
+        with path.open("r", encoding="utf-8") as file:
             data = json.load(file)
-
-        if not isinstance(
-            data,
-            dict,
-        ):
-
-            raise ValueError(
-                "Mendix model JSON root must be an object."
-            )
-
+        if not isinstance(data, dict):
+            raise ValueError("Mendix model JSON root must be an object.")
         return cls(data)
 
-    def parse(
-        self,
-    ) -> MendixModel:
-
-        # --------------------------------------------------------
-        # Parse explicitly declared modules.
-        # --------------------------------------------------------
-
+    def parse(self) -> MendixModel:
         self._parse_modules()
-
-        # --------------------------------------------------------
-        # Parse entities, microflows, pages and roles.
-        # --------------------------------------------------------
-
-        self._walk_model(
-            self.data
-        )
-
-        # --------------------------------------------------------
-        # Associations are standalone Mendix model objects.
-        # Parse them after entities so their GUIDs can be resolved.
-        # --------------------------------------------------------
-
+        self._walk_model(self.data)
         self._parse_associations()
-
-        # --------------------------------------------------------
-        # Resolve all GUID/name relationships.
-        # --------------------------------------------------------
-
         self._resolve_references()
-
         return self.model
 
 

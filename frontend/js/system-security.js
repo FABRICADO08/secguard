@@ -241,9 +241,7 @@ function render(application, findings, system) {
                             encodeURIComponent(applicationId)
                         }"
                     >All findings</a>
-                    <button class="chip" id="exportCsv" type="button">
-                        Export as CSV
-                    </button>
+                    ${csvExportButton()}
                 </div>
             </div>
 
@@ -275,55 +273,26 @@ function render(application, findings, system) {
                 window.location.search
             );
 
-            parameters.set("application", applicationId);
             parameters.set("grouping", event.target.value);
 
-            window.location.search = parameters.toString();
+            navigateWithParameters(parameters, applicationId);
         });
 
-    document
-        .getElementById("exportCsv")
-        .addEventListener("click", () =>
-            downloadCsv(
-                "secguard-findings.csv",
-                [
-                    [
-                        "Rule",
-                        "Title",
-                        "Severity",
-                        "Category",
-                        "OWASP",
-                        "Location",
-                        "Detected at",
-                    ],
-                    ...findings.map(finding => [
-                        finding.rule_id,
-                        finding.title,
-                        finding.severity,
-                        finding.category,
-                        finding.owasp,
-                        finding.location,
-                        finding.detected_at,
-                    ]),
-                ]
-            )
-        );
+    wireCsvExport("exportCsv", "secguard-findings.csv", () =>
+        findingsCsvRows(findings, [
+            "rule", "title", "severity", "category", "owasp", "location",
+            "detectedAt",
+        ])
+    );
 }
 
 
 async function load() {
-    if (!applicationId) {
-        view.innerHTML = `
-            <div class="notice notice--warning">
-                No application selected.
-                <a href="/dashboard.html">Pick one from the portfolio</a>.
-            </div>
-        `;
-
+    if (!requireApplication(view, applicationId)) {
         return;
     }
 
-    view.innerHTML = '<div class="card empty">Loading system…</div>';
+    showLoading(view, "system");
 
     try {
         const [details, findingsPayload, summary] = await Promise.all([
@@ -348,11 +317,7 @@ async function load() {
             system
         );
     } catch (error) {
-        view.innerHTML = `
-            <div class="notice notice--error">
-                ${escapeHtml(error.message || "Could not load the system.")}
-            </div>
-        `;
+        renderLoadError(view, error, "Could not load the system.");
     }
 }
 

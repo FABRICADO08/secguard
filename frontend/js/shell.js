@@ -428,3 +428,23 @@ function renderShell(options) {
 
     return document.getElementById("view");
 }
+
+
+function renderFindingPage(applicationId, trailingBreadcrumbs) {
+    return renderShell({
+        scope: "system",
+        active: "findings",
+        applicationId,
+        period: false,
+        breadcrumbs: [
+            { text: "Portfolio", href: "/dashboard.html" },
+            {
+                text: "Security",
+                href: `/system-security.html?application=${
+                    encodeURIComponent(applicationId)
+                }`,
+            },
+            ...trailingBreadcrumbs,
+        ],
+    });
+}

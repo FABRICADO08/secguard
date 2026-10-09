@@ -21,29 +21,12 @@ class MendixSecurityRules(EntityAccessRulesMixin, FindingHelpersMixin):
         self,
         model: MendixModel,
     ):
-
         self.model = model
-
-        self.sensitivity = (
-            SensitivityDetector()
-        )
-
+        self.sensitivity = SensitivityDetector()
         self.risk = RiskEngine()
 
-    def run(
-        self,
-    ) -> List[Dict[str, Any]]:
-
+    def run(self) -> List[Dict[str, Any]]:
         findings = []
-
-        findings.extend(
-            self.entity_access_rules()
-        )
-
-        findings.extend(
-            self.microflow_bypass_rules()
-        )
-
-        return self._deduplicate(
-            findings
-        )
+        findings.extend(self.entity_access_rules())
+        findings.extend(self.microflow_bypass_rules())
+        return self._deduplicate(findings)

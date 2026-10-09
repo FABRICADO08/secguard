@@ -114,6 +114,40 @@ def _stable_latest(ecosystem: str, versions: list[str], fallback: str) -> str:
     return best
 
 
+def _pypi_release_dates(releases: dict[str, Any]) -> dict[str, str]:
+    dates = {}
+    for version, files in releases.items():
+        uploads = sorted(
+            str(item.get("upload_time_iso_8601") or "")
+            for item in files or []
+            if not item.get("yanked")
+        )
+        if uploads and uploads[0]:
+            dates[version] = uploads[0]
+    return dates
+
+
+def _pypi_license(info: dict[str, Any]) -> str:
+    classifiers = info.get("classifiers") or []
+    license_text = str(info.get("license_expression") or "")
+    if license_text:
+        return license_text
+    declared = str(info.get("license") or "").strip()
+    if 0 < len(declared) <= 80:
+        return declared
+    return " OR ".join(
+        item.rsplit("::", 1)[-1].strip()
+        for item in classifiers
+        if item.startswith("License ::") and "OSI Approved ::" in item
+    )
+
+
+def _npm_repository(document: dict[str, Any]) -> str:
+    repository = document.get("repository") or {}
+    value = repository.get("url") if isinstance(repository, dict) else repository
+    return _github_repository(str(value))
+
+
 def _pypi(name: str, fetch: Fetcher) -> PackageInfo | None:
     document = fetch(f"https://pypi.org/pypi/{quote(name)}/json")
 
@@ -122,32 +156,9 @@ def _pypi(name: str, fetch: Fetcher) -> PackageInfo | None:
 
     info = document.get("info") or {}
 
-    dates: dict[str, str] = {}
-
-    for version, files in (document.get("releases") or {}).items():
-        uploads = sorted(
-            str(item.get("upload_time_iso_8601") or "")
-            for item in files or []
-            if not item.get("yanked")
-        )
-
-        if uploads and uploads[0]:
-            dates[version] = uploads[0]
-
+    dates = _pypi_release_dates(document.get("releases") or {})
     classifiers = info.get("classifiers") or []
-
-    license_text = str(info.get("license_expression") or "")
-
-    if not license_text:
-        declared = str(info.get("license") or "").strip()
-        license_text = declared if 0 < len(declared) <= 80 else ""
-
-    if not license_text:
-        license_text = " OR ".join(
-            item.rsplit("::", 1)[-1].strip()
-            for item in classifiers
-            if item.startswith("License ::") and "OSI Approved ::" in item
-        )
+    license_text = _pypi_license(info)
 
     downloads = fetch(f"https://pypistats.org/api/packages/{quote(name.lower())}/recent")
 
@@ -176,14 +187,18 @@ def _pypi(name: str, fetch: Fetcher) -> PackageInfo | None:
         latest_release=ordered[-1] if ordered else "",
         release_dates=dates,
         repository=next(
-            (
-                _github_repository(str(url))
-                for url in [*urls.values(), info.get("home_page") or ""]
-                if _github_repository(str(url))
-            ),
+            (_github_repository(str(url)) for url in [*urls.values(), info.get("home_page") or ""]
+             if _github_repository(str(url))),
             "",
         ),
     )
+
+
+def _npm_license(manifest: dict[str, Any], document: dict[str, Any]) -> str:
+    value = manifest.get("license") or document.get("license") or ""
+    if isinstance(value, dict):
+        value = value.get("type") or ""
+    return str(value)
 
 
 def _npm(name: str, fetch: Fetcher) -> PackageInfo | None:
@@ -205,29 +220,20 @@ def _npm(name: str, fetch: Fetcher) -> PackageInfo | None:
 
     manifest = (document.get("versions") or {}).get(latest) or {}
 
-    license_value = manifest.get("license") or document.get("license") or ""
-
-    if isinstance(license_value, dict):
-        license_value = license_value.get("type") or ""
-
+    license_value = _npm_license(manifest, document)
     downloads = fetch(f"https://api.npmjs.org/downloads/point/last-week/{name}")
-
-    repository = document.get("repository") or {}
-
     ordered = sorted(times.values())
 
     return PackageInfo(
         latest=latest,
-        license=str(license_value),
+        license=license_value,
         deprecated=str(manifest.get("deprecated") or ""),
         maintainers=len(document.get("maintainers") or []) or None,
         weekly_downloads=(downloads or {}).get("downloads") if isinstance(downloads, dict) else None,
         first_release=str((document.get("time") or {}).get("created") or (ordered[0] if ordered else "")),
         latest_release=times.get(latest, ordered[-1] if ordered else ""),
         release_dates=times,
-        repository=_github_repository(
-            str(repository.get("url") if isinstance(repository, dict) else repository)
-        ),
+        repository=_npm_repository(document),
     )
 
 

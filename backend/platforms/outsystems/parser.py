@@ -152,19 +152,22 @@ class OutSystemsModelParser:
 
         module.rest_methods = self._rest_methods(raw, name)
 
-        module.consumed_apis = [
+        module.consumed_apis = self._consumed_apis(raw, name)
+        module.site_properties = self._site_properties(raw, name)
+        module.queries = [
+            self._query(item, name)
+            for item in _items(raw, "queries", "Queries")
+        ]
+
+        return module
+
+    def _consumed_apis(self, raw: dict[str, Any], module: str) -> list[ConsumedApi]:
+        return [
             ConsumedApi(
                 name=_text(_get(item, "name", "Name")),
-                module=name,
+                module=module,
                 base_url=_text(
-                    _get(
-                        item,
-                        "baseUrl",
-                        "base_url",
-                        "BaseUrl",
-                        "url",
-                        "Url",
-                    )
+                    _get(item, "baseUrl", "base_url", "BaseUrl", "url", "Url")
                 ),
             )
             for item in _items(
@@ -176,38 +179,22 @@ class OutSystemsModelParser:
             )
         ]
 
-        module.site_properties = [
+    def _site_properties(
+        self,
+        raw: dict[str, Any],
+        module: str,
+    ) -> list[SiteProperty]:
+        return [
             SiteProperty(
                 name=_text(_get(item, "name", "Name")),
-                module=name,
-                data_type=_text(
-                    _get(item, "dataType", "data_type", "DataType")
-                ),
+                module=module,
+                data_type=_text(_get(item, "dataType", "data_type", "DataType")),
                 default_value=_text(
-                    _get(
-                        item,
-                        "defaultValue",
-                        "default_value",
-                        "DefaultValue",
-                        "value",
-                        "Value",
-                    )
+                    _get(item, "defaultValue", "default_value", "DefaultValue", "value", "Value")
                 ),
             )
-            for item in _items(
-                raw,
-                "siteProperties",
-                "site_properties",
-                "SiteProperties",
-            )
+            for item in _items(raw, "siteProperties", "site_properties", "SiteProperties")
         ]
-
-        module.queries = [
-            self._query(item, name)
-            for item in _items(raw, "queries", "Queries")
-        ]
-
-        return module
 
     def _entity(self, raw: dict[str, Any], module: str) -> Entity:
         name = _text(_get(raw, "name", "Name"))

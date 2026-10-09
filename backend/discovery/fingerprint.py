@@ -90,15 +90,9 @@ def check_http_redirect(
     }
 
 
-def fetch_application(url: str) -> dict:
-    url = validate_url(url)
-
-    session = build_session()
-
-    started = perf_counter()
-
+def _get_application_response(url: str, session: requests.Session) -> requests.Response:
     try:
-        response = session.get(
+        return session.get(
             url,
             timeout=FETCH_TIMEOUT,
             allow_redirects=True,
@@ -142,11 +136,9 @@ def fetch_application(url: str) -> dict:
             "machine."
         ) from exc
 
-    elapsed_ms = round(
-        (perf_counter() - started) * 1000,
-        2,
-    )
-
+def _application_result(
+    url: str, response: requests.Response, elapsed_ms: float, session: requests.Session
+) -> dict:
     parsed = urlparse(response.url)
 
     return {
@@ -189,6 +181,15 @@ def fetch_application(url: str) -> dict:
         ),
         "body": response.text,
     }
+
+
+def fetch_application(url: str) -> dict:
+    url = validate_url(url)
+    session = build_session()
+    started = perf_counter()
+    response = _get_application_response(url, session)
+    elapsed_ms = round((perf_counter() - started) * 1000, 2)
+    return _application_result(url, response, elapsed_ms, session)
 
 
 __all__ = [
