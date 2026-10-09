@@ -83,42 +83,11 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
     )
 
     findings = [*(report.get("findings") or []), *((report.get("quality") or {}).get("findings") or [])]
-<<<<<<< HEAD
-    rules, rule_index = _sarif_rules(findings)
-
-    return {
-        "$schema": SCHEMA,
-        "version": "2.1.0",
-        "runs": [
-            {
-                "tool": {
-                    "driver": {
-                        "name": TOOL_NAME,
-                        "version": TOOL_VERSION,
-                        "informationUri": "https://github.com/FABRICADO08/secguard",
-                        "rules": rules,
-                    }
-                },
-                "results": [_result(finding, rule_index, fallback) for finding in findings],
-            }
-        ],
-    }
-
-
-def _sarif_rules(
-    findings: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], dict[str, int]]:
-
-=======
->>>>>>> origin/main
     rule_ids = sorted({finding["rule_id"] for finding in findings})
     rule_index = {rule_id: index for index, rule_id in enumerate(rule_ids)}
     worst = _worst_severity(findings)
     rules = _sarif_rules(rule_ids, worst)
 
-<<<<<<< HEAD
-    return rules, rule_index
-=======
     return {
         "$schema": SCHEMA,
         "version": "2.1.0",
@@ -193,4 +162,3 @@ def _sarif_rule(
     if rule_id in QUALITY_RECOMMENDATIONS:
         rule["help"] = {"text": QUALITY_RECOMMENDATIONS[rule_id]}
     return rule
->>>>>>> origin/main

@@ -69,53 +69,6 @@ def upload(report: dict[str, Any], server: str, api_token: str) -> dict[str, Any
     return response.json()
 
 
-def _repository_metadata(arguments: argparse.Namespace, root: Path) -> dict[str, Any]:
-    return {
-        "name": arguments.name or os.environ.get("GITHUB_REPOSITORY") or root.name,
-        "commit": arguments.commit or os.environ.get("GITHUB_SHA", ""),
-        "ref": arguments.ref or os.environ.get("GITHUB_REF", ""),
-        "provider": "github" if os.environ.get("GITHUB_ACTIONS") or arguments.name else "local",
-        "trigger": os.environ.get("GITHUB_EVENT_NAME", "manual"),
-    }
-
-
-def _set_application_name(arguments: argparse.Namespace, repository: dict[str, Any]) -> None:
-    name = arguments.application_name or os.environ.get("SECGUARD_APPLICATION_NAME", "")
-    if not name.strip():
-        return
-
-    problem = application_names.name_problem(name)
-    if problem:
-        raise SystemExit(f"--application-name: {problem}")
-
-    repository["application_name"] = application_names.normalise(name)
-
-
-def _write_scan_outputs(arguments: argparse.Namespace, report: dict[str, Any]) -> None:
-    if arguments.output:
-        _write(arguments.output, report)
-    if arguments.sarif:
-        _write(arguments.sarif, to_sarif(report))
-    if arguments.cyclonedx:
-        _write(arguments.cyclonedx, cyclonedx(report))
-    if arguments.spdx:
-        _write(arguments.spdx, spdx(report))
-
-
-def _report_failure(report: dict[str, Any], fail_on: str) -> int:
-    if fail_on == "none":
-        return 0
-
-    threshold = SEVERITY_RANK[fail_on]
-    if any(
-        SEVERITY_RANK.get(finding["severity"], 0) >= threshold
-        for finding in report["findings"]
-    ):
-        print(f"Failing: findings at or above '{fail_on}'.", file=sys.stderr)
-        return 1
-    return 0
-
-
 def command_scan(arguments: argparse.Namespace) -> int:
     root = Path(arguments.path).resolve()
 
@@ -132,10 +85,6 @@ def command_scan(arguments: argparse.Namespace) -> int:
     else:
         options["fetch"] = offline_fetcher
 
-<<<<<<< HEAD
-    repository = _repository_metadata(arguments, root)
-    _set_application_name(arguments, repository)
-=======
     report = scan_repository(root, _repository_metadata(arguments, root), **options)
     _write_scan_outputs(arguments, report)
 
@@ -175,7 +124,6 @@ def _repository_metadata(
         if problem:
             raise SystemExit(f"--application-name: {problem}")
         repository["application_name"] = application_names.normalise(application_name)
->>>>>>> origin/main
 
     server_url = os.environ.get("GITHUB_SERVER_URL")
     repository_name = os.environ.get("GITHUB_REPOSITORY")
@@ -184,12 +132,6 @@ def _repository_metadata(
     return repository
 
 
-<<<<<<< HEAD
-    _write_scan_outputs(arguments, report)
-
-    health = report["health"]["overall"]
-    counts = report["summary"]["severity_counts"]
-=======
 def _write_scan_outputs(
     arguments: argparse.Namespace,
     report: dict[str, Any],
@@ -204,7 +146,6 @@ def _write_scan_outputs(
         if path:
             _write(path, document)
 
->>>>>>> origin/main
 
 def _print_scan_summary(
     report: dict[str, Any],
@@ -219,9 +160,6 @@ def _print_scan_summary(
     )
 
 
-<<<<<<< HEAD
-    return _report_failure(report, arguments.fail_on)
-=======
 def _should_fail(report: dict[str, Any], fail_on: str) -> bool:
     if fail_on == "none":
         return False
@@ -230,7 +168,6 @@ def _should_fail(report: dict[str, Any], fail_on: str) -> bool:
         SEVERITY_RANK.get(finding["severity"], 0) >= threshold
         for finding in report["findings"]
     )
->>>>>>> origin/main
 
 
 def command_review(arguments: argparse.Namespace) -> int:

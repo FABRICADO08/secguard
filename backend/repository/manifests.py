@@ -177,27 +177,10 @@ def _pep508(requirement: str) -> tuple[str, str]:
     return (match.group(1), match.group(3).strip())
 
 
-<<<<<<< HEAD
-def _project_dependencies(
-    text: str,
-    project: dict[str, Any],
-    manifest: str,
-) -> list[Dependency]:
-    dependencies = []
-    groups: list[tuple[str, list[Any]]] = [
-        (RUNTIME, list(project.get("dependencies") or []))
-    ]
-
-    for name, items in (project.get("optional-dependencies") or {}).items():
-        scope = DEVELOPMENT if re.search(r"dev|test|lint|doc", name, re.IGNORECASE) else RUNTIME
-        groups.append((scope, list(items or [])))
-
-=======
 def _pep508_dependencies(
     text: str, manifest: str, groups: list[tuple[str, list[Any]]]
 ) -> list[Dependency]:
     dependencies = []
->>>>>>> origin/main
     for scope, items in groups:
         for item in items:
             name, spec = _pep508(str(item))
@@ -216,23 +199,6 @@ def _pep508_dependencies(
     return dependencies
 
 
-<<<<<<< HEAD
-def _poetry_dependencies(
-    text: str,
-    poetry: dict[str, Any],
-    manifest: str,
-) -> list[Dependency]:
-    dependencies = []
-    poetry_groups = [(RUNTIME, poetry.get("dependencies") or {}),
-                     (DEVELOPMENT, poetry.get("dev-dependencies") or {})]
-
-    for name, group in (poetry.get("group") or {}).items():
-        poetry_groups.append(
-            (
-                RUNTIME if name == "main" else DEVELOPMENT,
-                (group or {}).get("dependencies") or {},
-            )
-=======
 def _poetry_groups(poetry: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
     groups = [
         (RUNTIME, poetry.get("dependencies") or {}),
@@ -242,7 +208,6 @@ def _poetry_groups(poetry: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
         (
             RUNTIME if name == "main" else DEVELOPMENT,
             (group or {}).get("dependencies") or {},
->>>>>>> origin/main
         )
         for name, group in (poetry.get("group") or {}).items()
     )
@@ -273,24 +238,13 @@ def _poetry_dependencies(
 
 
 def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
-<<<<<<< HEAD
-=======
     """Read PEP 621 and Poetry dependency declarations from TOML."""
->>>>>>> origin/main
     try:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
         return []
 
     project = document.get("project") or {}
-<<<<<<< HEAD
-    poetry = (document.get("tool") or {}).get("poetry") or {}
-    return [
-        *_project_dependencies(text, project, manifest),
-        *_poetry_dependencies(text, poetry, manifest),
-    ]
-
-=======
 
     groups: list[tuple[str, list[Any]]] = [
         (RUNTIME, list(project.get("dependencies") or []))
@@ -305,7 +259,6 @@ def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
         text, manifest, poetry
     )
 
->>>>>>> origin/main
 
 def parse_poetry_lock(text: str, manifest: str) -> list[Dependency]:
     """Parse locked package versions from a Poetry lockfile."""
