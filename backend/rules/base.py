@@ -125,6 +125,19 @@ class Finding:
         return asdict(self)
 
 
+@dataclass
+class FindingOptions:
+    """Optional finding overrides supplied to a rule."""
+
+    title: str | None = None
+    severity: str | None = None
+    confidence: str | None = None
+    description: str | None = None
+    recommendation: str | None = None
+    location: str | None = None
+    evidence: dict[str, Any] | None = None
+
+
 class Rule:
     """
     Base class for every generic rule.
@@ -155,29 +168,24 @@ class Rule:
     def finding(
         self,
         context: ScanContext,
-        *,
-        title: str | None = None,
-        severity: str | None = None,
-        confidence: str | None = None,
-        description: str | None = None,
-        recommendation: str | None = None,
-        location: str | None = None,
-        evidence: dict[str, Any] | None = None,
+        options: FindingOptions | None = None,
+        **overrides: Any,
     ) -> Finding:
         """Build a finding pre-filled from this rule's metadata."""
 
+        options = options or FindingOptions(**overrides)
         return Finding(
             rule_id=self.id,
-            title=title or self.title,
-            severity=severity or self.severity,
+            title=options.title or self.title,
+            severity=options.severity or self.severity,
             category=self.category,
-            description=description or self.description,
-            recommendation=recommendation or self.recommendation,
-            confidence=confidence or self.confidence,
+            description=options.description or self.description,
+            recommendation=options.recommendation or self.recommendation,
+            confidence=options.confidence or self.confidence,
             platform=self.platform,
-            location=location or context.final_url,
+            location=options.location or context.final_url,
             cwe=self.cwe,
             owasp=self.owasp,
             references=list(self.references),
-            evidence=evidence or {},
+            evidence=options.evidence or {},
         )

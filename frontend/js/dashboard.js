@@ -137,20 +137,9 @@ function render(summary) {
 
         <section class="card">
 
-            <div class="card__head">
-                <h2>Systems</h2>
-                <div class="toolbar">
-                    <input
-                        type="search"
-                        id="systemSearch"
-                        placeholder="Search by system name"
-                        aria-label="Search by system name"
-                    >
-                    <a class="chip" href="/portfolio-security.html">
-                        Security view
-                    </a>
-                </div>
-            </div>
+            ${systemsCardHeader(
+                '<a class="chip" href="/portfolio-security.html">Security view</a>'
+            )}
 
             <div class="table-wrap">
                 <table class="data">
@@ -249,25 +238,14 @@ async function load() {
         const summary = await getJson("/api/portfolio/summary");
 
         if (!summary.systems.length) {
-            view.innerHTML = `
-                <section class="card empty">
-                    <p>No system has been analyzed yet.</p>
-                    <p><a class="button" href="/index.html">
-                        Run the first scan
-                    </a></p>
-                </section>
-            `;
+            view.innerHTML = portfolioEmptyState();
 
             return;
         }
 
         render(summary);
     } catch (error) {
-        view.innerHTML = `
-            <div class="notice notice--error">
-                ${escapeHtml(error.message || "Could not load portfolio.")}
-            </div>
-        `;
+        renderLoadError(view, error, "Could not load portfolio.");
     }
 }
 

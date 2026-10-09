@@ -8,28 +8,13 @@ const applicationId = currentApplicationId();
 
 const findingId = queryParameter("finding") || "";
 
-const view = renderShell({
-    scope: "system",
-    active: "findings",
-    applicationId,
-    period: false,
-    breadcrumbs: [
-        { text: "Portfolio", href: "/dashboard.html" },
-        {
-            text: "Security",
-            href: `/system-security.html?application=${
-                encodeURIComponent(applicationId)
-            }`,
-        },
-        {
-            text: "Findings",
-            href: `/findings.html?application=${
-                encodeURIComponent(applicationId)
-            }`,
-        },
-        { text: "Finding" },
-    ],
-});
+const view = renderFindingPage(applicationId, [
+    {
+        text: "Findings",
+        href: `/findings.html?application=${encodeURIComponent(applicationId)}`,
+    },
+    { text: "Finding" },
+]);
 
 
 function references(finding) {

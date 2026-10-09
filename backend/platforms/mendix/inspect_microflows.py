@@ -1,31 +1,7 @@
-import json
+from backend.platforms.mendix.inspect_utils import load_model, node_type, walk
 
 
-with open(
-    "model.json",
-    "r",
-    encoding="utf-8"
-) as f:
-    data = json.load(f)
-
-
-def walk(value):
-
-    if isinstance(value, dict):
-
-        yield value
-
-        for child in value.values():
-
-            if isinstance(child, (dict, list)):
-
-                yield from walk(child)
-
-    elif isinstance(value, list):
-
-        for child in value:
-
-            yield from walk(child)
+data = load_model()
 
 
 microflows = []
@@ -33,23 +9,13 @@ pages = []
 
 
 for node in walk(data):
+    kind = node_type(node)
 
-    if not isinstance(node, dict):
-        continue
-
-    node_type = str(
-        node.get(
-            "$Type",
-            ""
-        )
-        or ""
-    )
-
-    if node_type == "Microflows$Microflow":
+    if kind == "Microflows$Microflow":
 
         microflows.append(node)
 
-    elif node_type == "Pages$Page":
+    elif kind == "Pages$Page":
 
         pages.append(node)
 

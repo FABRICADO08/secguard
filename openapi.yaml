@@ -1,0 +1,339 @@
+openapi: 3.1.0
+info:
+  title: SecGuard API
+  version: 0.2.0
+  description: API for application discovery, model analysis, repository scans, and stored findings.
+servers:
+  - url: /
+paths:
+  /api/health:
+    get:
+      summary: Check service health
+      responses:
+        "200":
+          description: Service is available.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [status, service, version]
+                properties:
+                  status: { type: string, example: ok }
+                  service: { type: string }
+                  version: { type: string }
+  /api/auth/me:
+    get:
+      summary: Get the current authentication status
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /auth/github/login:
+    get:
+      summary: Start GitHub OAuth sign-in
+      description: Redirects the browser to GitHub authorization when OAuth is configured.
+      parameters:
+        - in: query
+          name: next
+          schema: { type: string }
+      responses:
+        "302": { description: Redirect to GitHub authorization or the configured sign-in fallback. }
+        "404": { $ref: "#/components/responses/Error" }
+  /auth/github/callback:
+    get:
+      summary: Complete GitHub OAuth sign-in
+      parameters:
+        - in: query
+          name: code
+          required: true
+          schema: { type: string }
+        - in: query
+          name: state
+          required: true
+          schema: { type: string }
+      responses:
+        "302": { description: Redirect to the requested SecGuard page. }
+        "400": { description: OAuth state or authorization code was invalid. }
+        "502": { description: GitHub could not be reached. }
+  /auth/logout:
+    post:
+      summary: Sign out the current user
+      security:
+        - cookieAuth: []
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /api/discover:
+    post:
+      summary: Discover and analyze an authorized application
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url: { type: string, format: uri }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /api/mendix/analyze:
+    post:
+      summary: Analyze a Mendix model export
+      description: Accepts a JSON body containing model and optional name, or a multipart model file.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelRequest" }
+          multipart/form-data:
+            schema:
+              type: object
+              required: [model]
+              properties:
+                model: { type: string, format: binary }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /api/outsystems/analyze:
+    post:
+      summary: Analyze an OutSystems model export
+      description: Accepts a JSON body containing model and optional name, or a multipart model file.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ModelRequest" }
+          multipart/form-data:
+            schema:
+              type: object
+              required: [model]
+              properties:
+                model: { type: string, format: binary }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "500": { $ref: "#/components/responses/Error" }
+  /api/applications:
+    get:
+      summary: List stored applications
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /api/portfolio/summary:
+    get:
+      summary: Get the portfolio summary
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /api/applications/{application_id}:
+    parameters:
+      - $ref: "#/components/parameters/ApplicationId"
+    get:
+      summary: Get an application and its model statistics
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "404": { $ref: "#/components/responses/Error" }
+    delete:
+      summary: Delete an application and its findings
+      security:
+        - apiKey: []
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/applications/{application_id}/findings:
+    parameters:
+      - $ref: "#/components/parameters/ApplicationId"
+    get:
+      summary: List an application's findings
+      parameters:
+        - in: query
+          name: severity
+          schema: { type: string }
+        - in: query
+          name: category
+          schema: { type: string }
+        - in: query
+          name: platform
+          schema: { type: string }
+        - in: query
+          name: rule_id
+          schema: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/applications/{application_id}/findings/{finding_id}:
+    parameters:
+      - $ref: "#/components/parameters/ApplicationId"
+      - in: path
+        name: finding_id
+        required: true
+        schema: { type: string }
+    get:
+      summary: Get one finding
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/rules:
+    get:
+      summary: List the rules evaluated by SecGuard
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+  /api/repository/scans:
+    post:
+      summary: Store a repository scanner report
+      description: Accepts the JSON report emitted by `python -m backend.repository scan`.
+      security:
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { type: object, additionalProperties: true }
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "413": { $ref: "#/components/responses/Error" }
+  /api/applications/{application_id}/sbom:
+    parameters:
+      - $ref: "#/components/parameters/ApplicationId"
+    get:
+      summary: Download a repository software bill of materials
+      parameters:
+        - in: query
+          name: format
+          schema:
+            type: string
+            enum: [cyclonedx, spdx]
+            default: cyclonedx
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/applications/{application_id}/quality:
+    parameters:
+      - $ref: "#/components/parameters/ApplicationId"
+    get:
+      summary: Get repository quality metrics and health
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "404": { $ref: "#/components/responses/Error" }
+  /api/repositories:
+    get:
+      summary: List repositories available to the current user
+      security:
+        - cookieAuth: []
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+  /api/repositories/refresh:
+    post:
+      summary: Refresh the signed-in user's repository list
+      security:
+        - cookieAuth: []
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /api/repositories/{owner}/{name}/scan:
+    parameters:
+      - in: path
+        name: owner
+        required: true
+        schema: { type: string }
+      - in: path
+        name: name
+        required: true
+        schema: { type: string }
+    post:
+      summary: Trigger the SecGuard workflow for a repository
+      security:
+        - cookieAuth: []
+      responses:
+        "202": { $ref: "#/components/responses/Success" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "502": { $ref: "#/components/responses/Error" }
+  /api/repositories/{owner}/{name}/name:
+    parameters:
+      - in: path
+        name: owner
+        required: true
+        schema: { type: string }
+      - in: path
+        name: name
+        required: true
+        schema: { type: string }
+    put:
+      summary: Rename a repository application
+      security:
+        - cookieAuth: []
+        - apiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+components:
+  securitySchemes:
+    apiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Required when SECGUARD_API_TOKEN is configured.
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: session
+      description: GitHub sign-in session cookie.
+  parameters:
+    ApplicationId:
+      in: path
+      name: application_id
+      required: true
+      schema: { type: string }
+  schemas:
+    ModelRequest:
+      type: object
+      required: [model]
+      properties:
+        model: { type: object, additionalProperties: true }
+        name: { type: string }
+    Error:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        error: { type: string }
+    Success:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+      additionalProperties: true
+  responses:
+    Error:
+      description: Request failed.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    Success:
+      description: Request completed successfully.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Success" }

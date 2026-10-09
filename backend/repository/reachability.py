@@ -64,24 +64,31 @@ def _python_modules(root: Path) -> set[str]:
     modules: set[str] = set()
 
     for path in iter_files(root):
-        if path.suffix != ".py":
-            continue
-
-        try:
-            tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
-        except (SyntaxError, ValueError):
-            continue
-
-        for node in ast.walk(tree):
-            if isinstance(node, ast.Import):
-                for alias in node.names:
-                    parts = alias.name.split(".")
-                    modules.update(".".join(parts[: index + 1]) for index in range(len(parts)))
-            elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
-                parts = node.module.split(".")
-                modules.update(".".join(parts[: index + 1]) for index in range(len(parts)))
+        if path.suffix == ".py":
+            modules.update(_python_file_modules(path))
 
     return modules
+
+
+def _python_file_modules(path: Path) -> set[str]:
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8", errors="replace"))
+    except (SyntaxError, ValueError):
+        return set()
+
+    modules = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            for alias in node.names:
+                modules.update(_module_prefixes(alias.name))
+        elif isinstance(node, ast.ImportFrom) and node.module and not node.level:
+            modules.update(_module_prefixes(node.module))
+    return modules
+
+
+def _module_prefixes(module: str) -> set[str]:
+    parts = module.split(".")
+    return {".".join(parts[: index + 1]) for index in range(len(parts))}
 
 
 def _js_packages(root: Path) -> set[str]:
@@ -141,23 +148,13 @@ class ReachabilityIndex:
             return UNKNOWN
 
         if dependency.ecosystem == PYPI:
-            candidates = PYTHON_IMPORT_NAMES.get(name) or [
-                name.replace("-", "_"),
-                name.removeprefix("python-").replace("-", "_"),
-                name.replace("-", "."),
-            ]
-            found = any(candidate in self.python for candidate in candidates)
-
+            found = self._python_reachable(name)
         elif dependency.ecosystem == NPM:
-            # Type declarations are consumed by the compiler, never imported.
             if name.startswith("@types/"):
                 return UNKNOWN
-
-            found = name in self.js
-
+            found = self._javascript_reachable(name)
         elif dependency.ecosystem == GO:
-            found = any(path == dependency.name or path.startswith(dependency.name + "/") for path in self.go)
-
+            found = self._go_reachable(dependency.name)
         else:
             return UNKNOWN
 
@@ -165,3 +162,20 @@ class ReachabilityIndex:
             return IMPORTED
 
         return NOT_IMPORTED if dependency.direct else TRANSITIVE
+
+    def _python_reachable(self, name: str) -> bool:
+        candidates = PYTHON_IMPORT_NAMES.get(name) or [
+            name.replace("-", "_"),
+            name.removeprefix("python-").replace("-", "_"),
+            name.replace("-", "."),
+        ]
+        return any(candidate in self.python for candidate in candidates)
+
+    def _javascript_reachable(self, name: str) -> bool:
+        return name in self.js
+
+    def _go_reachable(self, package: str) -> bool:
+        return any(
+            path == package or path.startswith(package + "/")
+            for path in self.go
+        )

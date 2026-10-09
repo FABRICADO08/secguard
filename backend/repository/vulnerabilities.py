@@ -142,49 +142,82 @@ _GHSA_SEVERITY = {"CRITICAL": "critical", "HIGH": "high", "MODERATE": "medium", 
 
 def _ranges_for(record: dict[str, Any], dependency: Dependency) -> list[list[dict[str, str]]]:
     wanted = normalize_package(dependency.ecosystem, dependency.name)
-
     ranges = []
 
     for affected in record.get("affected") or []:
-        package = affected.get("package") or {}
-
-        if package.get("ecosystem", "").split(":")[0] != dependency.ecosystem:
+        if not _affected_package_matches(affected, dependency, wanted):
             continue
-
-        if normalize_package(dependency.ecosystem, str(package.get("name") or "")) != wanted:
-            continue
-
-        for entry in affected.get("ranges") or []:
-            if entry.get("type") in ("ECOSYSTEM", "SEMVER"):
-                ranges.append(list(entry.get("events") or []))
+        ranges.extend(_supported_ranges(affected))
 
     return ranges
 
 
+def _supported_ranges(affected: dict[str, Any]) -> list[list[dict[str, str]]]:
+    return [
+        list(entry.get("events") or [])
+        for entry in affected.get("ranges") or []
+        if entry.get("type") in ("ECOSYSTEM", "SEMVER")
+    ]
+
+
+def _affected_package_matches(
+    affected: dict[str, Any],
+    dependency: Dependency,
+    wanted: str,
+) -> bool:
+    package = affected.get("package") or {}
+    if package.get("ecosystem", "").split(":")[0] != dependency.ecosystem:
+        return False
+
+    name = normalize_package(dependency.ecosystem, str(package.get("name") or ""))
+    return name == wanted
+
+
 def _affected_by(ranges: list[list[dict[str, str]]], ecosystem: str, version: str) -> bool:
     for events in ranges:
-        introduced = None
-
-        for event in events:
-            if "introduced" in event:
-                introduced = event["introduced"]
-            elif introduced is not None and ("fixed" in event or "last_affected" in event):
-                upper = event.get("fixed") or event.get("last_affected")
-                inclusive = "last_affected" in event
-
-                lower_ok = introduced == "0" or compare(ecosystem, version, introduced) >= 0
-                cmp = compare(ecosystem, version, upper)
-                upper_ok = cmp <= 0 if inclusive else cmp < 0
-
-                if lower_ok and upper_ok:
-                    return True
-
-                introduced = None
-
-        if introduced is not None and (introduced == "0" or compare(ecosystem, version, introduced) >= 0):
+        if _events_affect_version(events, ecosystem, version):
             return True
 
     return False
+
+
+def _events_affect_version(
+    events: list[dict[str, str]],
+    ecosystem: str,
+    version: str,
+) -> bool:
+    introduced = None
+
+    for event in events:
+        if "introduced" in event:
+            introduced = event["introduced"]
+        elif introduced is not None and (
+            "fixed" in event or "last_affected" in event
+        ):
+            if _bounded_range_affects(introduced, event, ecosystem, version):
+                return True
+            introduced = None
+
+    return introduced is not None and (
+        introduced == "0" or compare(ecosystem, version, introduced) >= 0
+    )
+
+
+def _bounded_range_affects(
+    introduced: str,
+    event: dict[str, str],
+    ecosystem: str,
+    version: str,
+) -> bool:
+    upper = event.get("fixed") or event.get("last_affected")
+    lower_matches = introduced == "0" or compare(ecosystem, version, introduced) >= 0
+    upper_comparison = compare(ecosystem, version, upper)
+    upper_matches = (
+        upper_comparison <= 0
+        if "last_affected" in event
+        else upper_comparison < 0
+    )
+    return lower_matches and upper_matches
 
 
 def _fixed_versions(ranges: list[list[dict[str, str]]]) -> list[str]:
@@ -200,23 +233,10 @@ def _parse(record: dict[str, Any], dependency: Dependency) -> Vulnerability | No
         return None
 
     ranges = _ranges_for(record, dependency)
-
-    fixed = _sorted(dependency.ecosystem, _fixed_versions(ranges))
-
-    later = [version for version in fixed if compare(dependency.ecosystem, version, dependency.version) > 0]
-
+    fixed, later = _fixed_and_later(ranges, dependency)
     database = record.get("database_specific") or {}
-
-    cvss = None
-
-    for entry in record.get("severity") or []:
-        if entry.get("type") == "CVSS_V3":
-            cvss = cvss3_base_score(str(entry.get("score") or ""))
-
-    severity = _GHSA_SEVERITY.get(str(database.get("severity") or "").upper())
-
-    if severity is None:
-        severity = severity_from_cvss(cvss) if cvss is not None else "medium"
+    cvss = _cvss_score(record)
+    severity = _vulnerability_severity(database, cvss)
 
     return Vulnerability(
         id=str(record.get("id")),
@@ -229,9 +249,48 @@ def _parse(record: dict[str, Any], dependency: Dependency) -> Vulnerability | No
         aliases=list(record.get("aliases") or []),
         cwes=list(database.get("cwe_ids") or []),
         fixed=fixed,
-        minimum_fix=later[0] if later else "",
-        references=[str(item.get("url")) for item in (record.get("references") or [])[:5] if item.get("url")],
+        minimum_fix=_minimum_fix(later),
+        references=_reference_urls(record),
     )
+
+
+def _fixed_and_later(
+    ranges: list[list[dict[str, str]]],
+    dependency: Dependency,
+) -> tuple[list[str], list[str]]:
+    fixed = _sorted(dependency.ecosystem, _fixed_versions(ranges))
+    later = [
+        version
+        for version in fixed
+        if compare(dependency.ecosystem, version, dependency.version) > 0
+    ]
+    return fixed, later
+
+
+def _minimum_fix(later: list[str]) -> str:
+    return later[0] if later else ""
+
+
+def _reference_urls(record: dict[str, Any]) -> list[str]:
+    return [
+        str(item.get("url"))
+        for item in (record.get("references") or [])[:5]
+        if item.get("url")
+    ]
+
+
+def _cvss_score(record: dict[str, Any]) -> float | None:
+    for entry in record.get("severity") or []:
+        if entry.get("type") == "CVSS_V3":
+            return cvss3_base_score(str(entry.get("score") or ""))
+    return None
+
+
+def _vulnerability_severity(database: dict[str, Any], cvss: float | None) -> str:
+    severity = _GHSA_SEVERITY.get(str(database.get("severity") or "").upper())
+    if severity:
+        return severity
+    return severity_from_cvss(cvss) if cvss is not None else "medium"
 
 
 @dataclass
@@ -288,21 +347,9 @@ def remediation(
     )
 
 
-def find_vulnerabilities(
-    dependencies: list[Dependency],
-    post: Poster | None = http_poster,
-    fetch: Fetcher | None = None,
-) -> tuple[dict[int, list[Vulnerability]], dict[int, Remediation]]:
-    """
-    Advisories per dependency (keyed by list index) and the remediation
-    for each vulnerable one. ``post=None`` disables lookups entirely.
-    """
-
-    if post is None:
-        return {}, {}
-
-    fetch = fetch or (lambda url: _get(url))
-
+def _query_vulnerability_ids(
+    dependencies: list[Dependency], post: Poster
+) -> dict[int, list[str]]:
     checkable = [
         (index, dependency)
         for index, dependency in enumerate(dependencies)
@@ -334,44 +381,62 @@ def find_vulnerabilities(
 
             if ids:
                 identifiers[index] = ids
+    return identifiers
 
+
+def _resolve_dependency_vulnerabilities(
+    dependency: Dependency,
+    identifiers: list[str],
+    records: dict[str, dict[str, Any]],
+    fetch: Fetcher,
+) -> tuple[list[Vulnerability], Remediation | None]:
+    parsed = []
+    ranges = {}
+    seen: set[str] = set()
+    # Prefer reviewed GitHub advisories over their PYSEC/CVE aliases.
+    ordered = sorted(identifiers, key=lambda value: (not value.startswith("GHSA-"), value))
+    for identifier in ordered:
+        if identifier in seen:
+            continue
+        if identifier not in records:
+            records[identifier] = fetch(OSV_VULN + identifier) or {}
+        record = records[identifier]
+        vulnerability = _parse(record, dependency)
+        if vulnerability is None:
+            continue
+        names = {vulnerability.id, *vulnerability.aliases}
+        if names & seen:
+            seen.update(names)
+            continue
+        seen.update(names)
+        parsed.append(vulnerability)
+        ranges[vulnerability.id] = _ranges_for(record, dependency)
+    return parsed, remediation(dependency, parsed, ranges) if parsed else None
+
+
+def find_vulnerabilities(
+    dependencies: list[Dependency],
+    post: Poster | None = http_poster,
+    fetch: Fetcher | None = None,
+) -> tuple[dict[int, list[Vulnerability]], dict[int, Remediation]]:
+    """
+    Advisories per dependency (keyed by list index) and the remediation
+    for each vulnerable one. ``post=None`` disables lookups entirely.
+    """
+    if post is None:
+        return {}, {}
+    fetch = fetch or (lambda url: _get(url))
+    identifiers = _query_vulnerability_ids(dependencies, post)
     records: dict[str, dict[str, Any]] = {}
-
     found: dict[int, list[Vulnerability]] = {}
     remediations: dict[int, Remediation] = {}
-
     for index, ids in identifiers.items():
-        dependency = dependencies[index]
-
-        parsed = []
-        ranges = {}
-        seen: set[str] = set()
-
-        # GitHub advisories carry a reviewed severity; prefer them over
-        # their PYSEC/CVE aliases, and report each issue once.
-        for identifier in sorted(ids, key=lambda value: (not value.startswith("GHSA-"), value)):
-            if identifier in seen:
-                continue
-
-            if identifier not in records:
-                records[identifier] = fetch(OSV_VULN + identifier) or {}
-
-            vulnerability = _parse(records[identifier], dependency)
-
-            if vulnerability is not None:
-                names = {vulnerability.id, *vulnerability.aliases}
-
-                if names & seen:
-                    seen.update(names)
-                    continue
-
-                seen.update(names)
-                parsed.append(vulnerability)
-                ranges[vulnerability.id] = _ranges_for(records[identifier], dependency)
-
-        if parsed:
+        parsed, fix = _resolve_dependency_vulnerabilities(
+            dependencies[index], ids, records, fetch
+        )
+        if parsed and fix is not None:
             found[index] = parsed
-            remediations[index] = remediation(dependency, parsed, ranges)
+            remediations[index] = fix
 
     return found, remediations
 

@@ -82,80 +82,42 @@ class SensitivityDetector:
         self,
         entity: Entity,
     ) -> Dict:
+        sensitive_attributes, categories = self._sensitive_attributes(entity)
+        entity_categories = self._classify(entity.name)
+        categories.update(entity_categories)
 
+        return {
+            "entity": entity.qualified_name or entity.name,
+            "categories": sorted(categories),
+            "sensitive": bool(sensitive_attributes or entity_categories),
+            "attributes": sensitive_attributes,
+            "entity_name_categories": entity_categories,
+            "highest_severity": self._highest_severity(categories),
+        }
+
+    def _sensitive_attributes(
+        self,
+        entity: Entity,
+    ) -> tuple[List[Dict], set[str]]:
         categories = set()
-
         sensitive_attributes = []
 
-        # ----------------------------------------------------
-        # Attribute analysis
-        # ----------------------------------------------------
-
         for attribute in entity.attributes:
-
-            attribute_categories = (
-                self.classify_attribute(
-                    attribute
-                )
-            )
-
+            attribute_categories = self.classify_attribute(attribute)
             if not attribute_categories:
                 continue
-
             categories.update(
                 attribute_categories
             )
-
             sensitive_attributes.append(
                 {
-                    "name":
-                        attribute.name,
-
-                    "qualified_name":
-                        attribute.qualified_name,
-
-                    "categories":
-                        attribute_categories,
+                    "name": attribute.name,
+                    "qualified_name": attribute.qualified_name,
+                    "categories": attribute_categories,
                 }
             )
 
-        # ----------------------------------------------------
-        # Entity name analysis
-        # ----------------------------------------------------
-
-        entity_categories = self._classify(
-            entity.name
-        )
-
-        categories.update(
-            entity_categories
-        )
-
-        return {
-            "entity":
-                entity.qualified_name
-                or entity.name,
-
-            "categories":
-                sorted(categories),
-
-            "sensitive":
-                bool(
-                    sensitive_attributes
-                    or entity_categories
-                ),
-
-            "attributes":
-                sensitive_attributes,
-
-            "entity_name_categories":
-                entity_categories,
-
-            "highest_severity":
-                self._highest_severity(
-                    categories
-                ),
-        }
+        return sensitive_attributes, categories
 
     def analyze_model(
         self,

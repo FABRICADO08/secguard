@@ -194,6 +194,11 @@ def test_reachability(repo):
 
 
 def test_vulnerabilities_are_deduplicated_and_get_minimum_fix(report):
+    _assert_jinja_vulnerability(report)
+    _assert_lodash_vulnerability(report)
+
+
+def _assert_jinja_vulnerability(report):
     jinja = [finding for finding in report["findings"] if finding["rule_id"] == "REPO-DEP-001" and finding["evidence"]["package"] == "jinja2"]
     assert len(jinja) == 1
     assert jinja[0]["evidence"]["upgrade_to"] == "2.10.1"
@@ -201,22 +206,37 @@ def test_vulnerabilities_are_deduplicated_and_get_minimum_fix(report):
     assert jinja[0]["confidence"] == "tentative"
     assert jinja[0]["location"] == "requirements.txt:1"
 
+
+def _assert_lodash_vulnerability(report):
     lodash = next(finding for finding in report["findings"] if finding["evidence"].get("package") == "lodash" and finding["rule_id"] == "REPO-DEP-001")
     assert lodash["severity"] == "critical" and lodash["confidence"] == "confirmed"
     assert "4.17.19" in lodash["recommendation"]
 
 
 def test_supply_chain_and_license_findings(report):
+    _assert_typosquat_findings(report)
+    _assert_license_findings(report)
+    _assert_deprecated_package_finding(report)
+    assert report["licenses"]["project"] == "MIT"
+
+
+def _assert_typosquat_findings(report):
     rules = _rules(report)
     squats = {finding["evidence"]["package"]: finding for finding in report["findings"] if finding["rule_id"] == "REPO-SUP-001"}
     assert squats["expresss"]["severity"] == "critical"
     assert squats["reqeusts"]["severity"] == "high"
+
+
+def _assert_license_findings(report):
+    rules = _rules(report)
     assert "REPO-DEP-002" in rules
     assert "REPO-LIC-001" in rules
+
+
+def _assert_deprecated_package_finding(report):
     assert any(f["rule_id"] == "REPO-DEP-003" and f["evidence"]["package"] == "oldlib" for f in report["findings"])
     flask = next(record for record in report["dependencies"] if record["name"] == "flask")
     assert flask["version"] == "3.1.0" and flask["resolved_from_range"]
-    assert report["licenses"]["project"] == "MIT"
 
 
 def test_quality_metrics(repo):
@@ -256,14 +276,26 @@ def test_health_and_benchmark(report):
 
 
 def test_sbom_and_sarif(report):
+    _assert_cyclonedx(report)
+    _assert_spdx(report)
+    _assert_sarif(report)
+
+
+def _assert_cyclonedx(report):
     assert purl(NPM, "@scope/pkg", "1.0.0") == "pkg:npm/%40scope/pkg@1.0.0"
     bom = cyclonedx(report)
     assert bom["bomFormat"] == "CycloneDX" and bom["specVersion"] == "1.5"
     assert any(component["name"] == "lodash" for component in bom["components"])
     assert bom["vulnerabilities"]
+
+
+def _assert_spdx(report):
     document = spdx(report)
     assert document["spdxVersion"] == "SPDX-2.3"
     assert len({package["SPDXID"] for package in document["packages"]}) == len(document["packages"])
+
+
+def _assert_sarif(report):
     sarif = to_sarif(report)
     run = sarif["runs"][0]
     assert run["results"] and all(result["ruleIndex"] < len(run["tool"]["driver"]["rules"]) for result in run["results"])
@@ -302,24 +334,39 @@ def client(tmp_path, monkeypatch):
 
 
 def test_ingest_and_serve_repository_scan(client, report):
+    application_id = _ingest_repository_scan(client, report)
+    _assert_repository_listing(client)
+    _assert_repository_findings(client, application_id)
+    _assert_repository_sbom(client, application_id)
+    _assert_repository_quality(client, application_id)
+
+
+def _ingest_repository_scan(client, report):
     response = client.post("/api/repository/scans", json=report)
     assert response.status_code == 201
-    application_id = response.get_json()["application_id"]
+    return response.get_json()["application_id"]
 
+
+def _assert_repository_listing(client):
     listed = client.get("/api/applications").get_json()["applications"]
     assert listed[0]["repository"] == "acme/demo" and listed[0]["platform"] == "Repository"
     assert listed[0]["health"]["overall"]["grade"]
 
+
+def _assert_repository_findings(client, application_id):
     findings = client.get(f"/api/applications/{application_id}/findings").get_json()["findings"]
     assert {finding["platform"] for finding in findings} == {"Repository"}
 
+
+def _assert_repository_sbom(client, application_id):
     bom = client.get(f"/api/applications/{application_id}/sbom?format=spdx")
     assert bom.status_code == 200 and "attachment" in bom.headers["Content-Disposition"]
     assert client.get(f"/api/applications/{application_id}/sbom?format=xml").status_code == 400
 
+
+def _assert_repository_quality(client, application_id):
     quality = client.get(f"/api/applications/{application_id}/quality").get_json()
     assert quality["quality"]["findings"]
-
     assert client.get("/api/portfolio/summary").status_code == 200
 
 

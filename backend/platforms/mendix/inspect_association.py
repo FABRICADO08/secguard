@@ -1,50 +1,16 @@
 import json
 
-
-with open(
-    "model.json",
-    "r",
-    encoding="utf-8"
-) as f:
-    data = json.load(f)
+from backend.platforms.mendix.inspect_utils import load_model, node_type, walk
 
 
-def walk(value):
-
-    if isinstance(value, dict):
-
-        yield value
-
-        for child in value.values():
-
-            if isinstance(child, (dict, list)):
-
-                yield from walk(child)
-
-    elif isinstance(value, list):
-
-        for child in value:
-
-            yield from walk(child)
+data = load_model()
 
 
 found = []
 
 
 for node in walk(data):
-
-    if not isinstance(node, dict):
-        continue
-
-    node_type = str(
-        node.get(
-            "$Type",
-            ""
-        )
-        or ""
-    )
-
-    if "DomainModels$Association" in node_type:
+    if "DomainModels$Association" in node_type(node):
 
         found.append(node)
 
