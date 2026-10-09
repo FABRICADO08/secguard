@@ -722,109 +722,60 @@ class MendixSecurityAnalyzer:
     # ------------------------------------------------------------------
 
     def _check_associations(self):
-
-        associations = (
-            self._get(
-                self.model,
-                "associations",
-                [],
-            )
-            or []
-        )
-
+        associations = self._get(self.model, "associations", []) or []
         for association in associations:
+            finding = self._association_finding(association)
+            if finding is not None:
+                self.findings.append(finding)
 
-            name = (
-                self._get(
-                    association,
-                    "qualified_name",
-                )
-                or self._get(
-                    association,
-                    "name",
-                )
-                or ""
-            )
+    def _association_finding(self, association):
+        name = (
+            self._get(association, "qualified_name")
+            or self._get(association, "name")
+            or ""
+        )
+        if not name:
+            return None
+        parent_behavior, child_behavior = self._association_delete_behaviors(association)
+        dangerous = {"DeleteMeAndReferences", "DeleteMeButKeepReferences"}
+        if parent_behavior not in dangerous and child_behavior not in dangerous:
+            return None
+        return {
+            "rule_id": "MXSEC-401",
+            "severity": "medium",
+            "title": "Association has cascading delete behaviour",
+            "association": name,
+            "roles": [], "access": {}, "xpath": "", "sensitive": False,
+            "sensitive_categories": [],
+            "evidence": {
+                "parent_delete_behavior": parent_behavior,
+                "child_delete_behavior": child_behavior,
+            },
+            "risk": (
+                "Deleting one object may cause related objects to be deleted "
+                "or references to be altered automatically."
+            ),
+            "recommendation": (
+                "Review the association delete behaviour and confirm that "
+                "cascading deletion is required for the application's business logic."
+            ),
+        }
 
-            if not name:
-                continue
-
-            delete_behavior = self._get(
-                association,
-                "delete_behavior",
-                self._get(
-                    association,
-                    "deleteBehavior",
-                    None,
-                ),
-            )
-
-            # Parsed associations carry the behaviour as flat fields
-            # while raw dump nodes nest it in a delete behaviour object.
-            behavior = delete_behavior or association
-
-            parent_behavior = self._get(
-                behavior,
-                "parent_delete_behavior",
-                self._get(
-                    behavior,
-                    "parentDeleteBehavior",
-                    "",
-                ),
-            )
-
-            child_behavior = self._get(
-                behavior,
-                "child_delete_behavior",
-                self._get(
-                    behavior,
-                    "childDeleteBehavior",
-                    "",
-                ),
-            )
-
-            dangerous_values = {
-                "DeleteMeAndReferences",
-                "DeleteMeButKeepReferences",
-            }
-
-            if (
-                parent_behavior in dangerous_values
-                or child_behavior in dangerous_values
-            ):
-                self.findings.append({
-                    "rule_id": "MXSEC-401",
-                    "severity": "medium",
-                    "title": (
-                        "Association has cascading delete "
-                        "behaviour"
-                    ),
-                    "association": name,
-                    "roles": [],
-                    "access": {},
-                    "xpath": "",
-                    "sensitive": False,
-                    "sensitive_categories": [],
-                    "evidence": {
-                        "parent_delete_behavior": (
-                            parent_behavior
-                        ),
-                        "child_delete_behavior": (
-                            child_behavior
-                        ),
-                    },
-                    "risk": (
-                        "Deleting one object may cause related "
-                        "objects to be deleted or references "
-                        "to be altered automatically."
-                    ),
-                    "recommendation": (
-                        "Review the association delete behaviour "
-                        "and confirm that cascading deletion is "
-                        "required for the application's business "
-                        "logic."
-                    ),
-                })
+    def _association_delete_behaviors(self, association):
+        delete_behavior = self._get(
+            association, "delete_behavior",
+            self._get(association, "deleteBehavior"),
+        )
+        behavior = delete_behavior or association
+        parent = self._get(
+            behavior, "parent_delete_behavior",
+            self._get(behavior, "parentDeleteBehavior", ""),
+        )
+        child = self._get(
+            behavior, "child_delete_behavior",
+            self._get(behavior, "childDeleteBehavior", ""),
+        )
+        return parent, child
 
     # ------------------------------------------------------------------
     # FORMATTING HELPERS

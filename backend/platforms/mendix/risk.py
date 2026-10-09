@@ -1,6 +1,20 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Dict
+
+
+@dataclass(frozen=True)
+class RiskInputs:
+    base_score: int = 0
+    sensitive: bool = False
+    sensitivity_severity: str = "low"
+    create: bool = False
+    delete: bool = False
+    write: bool = False
+    xpath: bool = False
+    broad_roles: bool = False
+    bypasses_entity_access: bool = False
 
 
 class RiskEngine:
@@ -13,33 +27,8 @@ class RiskEngine:
         "critical": 4,
     }
 
-    def calculate(
-        self,
-        *,
-        base_score: int = 0,
-        sensitive: bool = False,
-        sensitivity_severity: str = "low",
-        create: bool = False,
-        delete: bool = False,
-        write: bool = False,
-        xpath: bool = False,
-        broad_roles: bool = False,
-        bypasses_entity_access: bool = False,
-    ) -> Dict:
-
-        score = min(
-            base_score + self._risk_points(
-                sensitive=sensitive,
-                sensitivity_severity=sensitivity_severity,
-                create=create,
-                delete=delete,
-                write=write,
-                xpath=xpath,
-                broad_roles=broad_roles,
-                bypasses_entity_access=bypasses_entity_access,
-            ),
-            100,
-        )
+    def calculate(self, inputs: RiskInputs) -> Dict:
+        score = min(self._score(inputs), 100)
 
         return {
             "score":
@@ -51,52 +40,49 @@ class RiskEngine:
                 ),
         }
 
-    @staticmethod
-    def _risk_points(
-        *,
-        sensitive: bool,
-        sensitivity_severity: str,
-        create: bool,
-        delete: bool,
-        write: bool,
-        xpath: bool,
-        broad_roles: bool,
-        bypasses_entity_access: bool,
-    ) -> int:
-        score = (
-            15 * bool(write)
-            + 10 * bool(create)
-            + 20 * bool(delete)
-            + 20 * bool(sensitive)
-            + 15 * bool(broad_roles)
-            + 25 * bool(bypasses_entity_access)
+    def _score(self, inputs: RiskInputs) -> int:
+        return (
+            inputs.base_score
+            + self._access_score(inputs)
+            + self._sensitivity_score(inputs)
+            + (15 if inputs.broad_roles else 0)
+            + self._unrestricted_write_score(inputs)
+            + (25 if inputs.bypasses_entity_access else 0)
         )
 
-        if sensitivity_severity == "high":
+    @staticmethod
+    def _access_score(inputs: RiskInputs) -> int:
+        return (
+            (15 if inputs.write else 0)
+            + (10 if inputs.create else 0)
+            + (20 if inputs.delete else 0)
+        )
+
+    @staticmethod
+    def _sensitivity_score(inputs: RiskInputs) -> int:
+        score = 20 if inputs.sensitive else 0
+        if inputs.sensitivity_severity == "high":
             score += 10
-        elif sensitivity_severity == "critical":
+        elif inputs.sensitivity_severity == "critical":
             score += 20
-
-        if not xpath and (create or delete or write):
-            score += 15
-
         return score
+
+    @staticmethod
+    def _unrestricted_write_score(inputs: RiskInputs) -> int:
+        return 15 if not inputs.xpath and (
+            inputs.create or inputs.delete or inputs.write
+        ) else 0
 
     @staticmethod
     def severity_from_score(
         score: int,
     ) -> str:
-
         if score >= 85:
             return "critical"
-
         if score >= 65:
             return "high"
-
         if score >= 40:
             return "medium"
-
         if score >= 20:
             return "low"
-
         return "informational"
