@@ -66,6 +66,8 @@ _REQUIREMENT = re.compile(
 
 @dataclass
 class Dependency:
+    """A direct or transitive dependency and its source location."""
+
     name: str
     ecosystem: str
     version: str = ""
@@ -77,13 +79,16 @@ class Dependency:
     resolved_from_range: bool = False
 
     def key(self) -> tuple[str, str]:
+        """Return the normalized ecosystem and package identity."""
         return (self.ecosystem, normalize_package(self.ecosystem, self.name))
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize dependency metadata for scan reports."""
         return asdict(self)
 
 
 def normalize_package(ecosystem: str, name: str) -> str:
+    """Normalize package spelling according to ecosystem conventions."""
     if ecosystem == PYPI:
         return re.sub(r"[-_.]+", "-", name).lower()
 
@@ -94,6 +99,7 @@ def normalize_package(ecosystem: str, name: str) -> str:
 
 
 def iter_files(root: Path):
+    """Yield repository files while skipping configured generated directories."""
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
 
@@ -129,6 +135,7 @@ def _pin_from_spec(spec: str) -> str:
 
 
 def parse_requirements(text: str, manifest: str) -> list[Dependency]:
+    """Parse pip requirements and retain each declaration's source line."""
     dependencies = []
 
     scope = DEVELOPMENT if re.search(r"dev|test|lint", manifest, re.IGNORECASE) else RUNTIME
@@ -231,6 +238,7 @@ def _poetry_dependencies(
 
 
 def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
+    """Read PEP 621 and Poetry dependency declarations from TOML."""
     try:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
@@ -253,6 +261,7 @@ def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_poetry_lock(text: str, manifest: str) -> list[Dependency]:
+    """Parse locked package versions from a Poetry lockfile."""
     try:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
@@ -273,6 +282,7 @@ def parse_poetry_lock(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_pipfile_lock(text: str, manifest: str) -> list[Dependency]:
+    """Parse locked package versions from a Pipfile lock."""
     try:
         document = json.loads(text)
     except json.JSONDecodeError:
@@ -302,6 +312,7 @@ def parse_pipfile_lock(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_package_json(text: str, manifest: str) -> list[Dependency]:
+    """Parse direct runtime and development dependencies from package.json."""
     try:
         document = json.loads(text)
     except json.JSONDecodeError:
@@ -334,6 +345,7 @@ def parse_package_json(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_package_lock(text: str, manifest: str) -> list[Dependency]:
+    """Parse transitive package versions from npm lockfile formats."""
     try:
         document = json.loads(text)
     except json.JSONDecodeError:
@@ -364,6 +376,7 @@ def parse_package_lock(text: str, manifest: str) -> list[Dependency]:
         return dependencies
 
     def walk(tree: dict[str, Any]) -> None:
+        """Traverse nested npm v1 dependency records."""
         for name, entry in tree.items():
             dependencies.append(
                 Dependency(
@@ -387,6 +400,7 @@ def parse_package_lock(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_go_mod(text: str, manifest: str) -> list[Dependency]:
+    """Parse module requirements from a go.mod document."""
     dependencies = []
 
     in_block = False
@@ -426,6 +440,7 @@ def parse_go_mod(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_pom(text: str, manifest: str) -> list[Dependency]:
+    """Parse Maven dependency coordinates and resolve local properties."""
     try:
         root = ElementTree.fromstring(text)
     except ElementTree.ParseError:
@@ -474,6 +489,7 @@ def _parse_pom_dependency(
 
 
 def parse_composer_lock(text: str, manifest: str) -> list[Dependency]:
+    """Parse package records from a Composer lockfile."""
     try:
         document = json.loads(text)
     except json.JSONDecodeError:
@@ -495,6 +511,7 @@ def parse_composer_lock(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_gemfile_lock(text: str, manifest: str) -> list[Dependency]:
+    """Parse resolved gem versions from a Gemfile lock."""
     dependencies = []
 
     in_specs = False
@@ -597,6 +614,7 @@ def _merge_locked(
 
 
 def discover_dependencies(root: Path) -> list[Dependency]:
+    """Find supported manifests, parse them, and merge locked versions."""
     found: list[Dependency] = []
 
     for path in iter_files(root):

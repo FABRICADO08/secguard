@@ -180,8 +180,10 @@ def delete_application(
 
 
 def _application_summary(data: dict[str, Any]) -> dict[str, Any]:
-    security = data.get("security", {}) or {}
+    """Build the public portfolio summary for one stored application."""
+    security = data.get("security") or {}
     repository = data.get("repository") or {}
+
     return {
         "id": data.get("id"),
         "name": data.get("name"),
@@ -203,39 +205,32 @@ def _application_summary(data: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _read_application_summary(directory: Path) -> dict[str, Any] | None:
+    application_file = directory / "application.json"
+
+    if not application_file.exists():
+        return None
+
+    try:
+        return _application_summary(load_json(application_file))
+    except (json.JSONDecodeError, OSError, KeyError):
+        return None
+
+
 def list_applications() -> list[dict[str, Any]]:
+    """List stored application summaries in most-recently-updated order."""
     if db.use_database():
         return db.list_applications()
 
     ensure_storage()
-    applications = _stored_applications()
+    applications = [
+        summary
+        for directory in APPLICATIONS_DIR.iterdir()
+        if directory.is_dir()
+        if (summary := _read_application_summary(directory)) is not None
+    ]
     applications.sort(
         key=lambda item: item.get("updated_at", ""),
         reverse=True,
     )
-    return applications
-
-
-def _stored_applications() -> list[dict[str, Any]]:
-    applications = []
-    for directory in APPLICATIONS_DIR.iterdir():
-        if not directory.is_dir():
-            continue
-
-        application_file = directory / "application.json"
-        if not application_file.exists():
-            continue
-
-        try:
-            data = load_json(application_file)
-        except (
-            json.JSONDecodeError,
-            OSError,
-            KeyError,
-        ):
-
-            continue
-
-        applications.append(_application_summary(data))
-
     return applications

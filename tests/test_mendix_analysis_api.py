@@ -6,20 +6,11 @@ import pytest
 
 from backend import app as app_module
 from backend.storage import findings as findings_storage
-from backend.storage import scans
+from tests.conftest import post_model_upload
 
 MODEL_FILE = (
     Path(__file__).resolve().parent / "fixtures" / "mendix_model.json"
 )
-
-
-@pytest.fixture
-def client(tmp_path, monkeypatch):
-    monkeypatch.setattr(scans, "APPLICATIONS_DIR", tmp_path / "applications")
-
-    app_module.app.config.update(TESTING=True)
-
-    return app_module.app.test_client()
 
 
 @pytest.fixture
@@ -191,15 +182,11 @@ def rule_ids(payload):
 
 
 def test_upload_filename_is_stripped_of_markup(client, model_document):
-    response = client.post(
+    response = post_model_upload(
+        client,
         "/api/mendix/analyze",
-        data={
-            "model": (
-                io.BytesIO(json.dumps(model_document).encode("utf-8")),
-                "../<img src=x onerror=alert(1)>.json",
-            )
-        },
-        content_type="multipart/form-data",
+        model_document,
+        "../<img src=x onerror=alert(1)>.json",
     )
 
     name = response.get_json()["application"]["name"]

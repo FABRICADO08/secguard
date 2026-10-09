@@ -51,6 +51,8 @@ LANDING_PAGES = frozenset(
 
 @dataclass
 class GitHubUser:
+    """Authenticated GitHub profile and repositories visible to that user."""
+
     login: str
     name: str
     avatar_url: str
@@ -60,6 +62,7 @@ class GitHubUser:
 
 
 def enabled() -> bool:
+    """Whether GitHub OAuth credentials are configured."""
     return bool(settings.GITHUB_CLIENT_ID and settings.GITHUB_CLIENT_SECRET)
 
 
@@ -91,6 +94,7 @@ def _decode(payload: dict[str, Any]) -> GitHubUser:
 
 
 def github_request(method: str, url: str, **kwargs: Any) -> requests.Response:
+    """Issue an HTTP request with the shared GitHub request timeout."""
     return requests.request(method, url, timeout=TIMEOUT, **kwargs)
 
 
@@ -146,6 +150,7 @@ def fetch_repositories(token: str) -> dict[str, dict[str, Any]]:
 
 
 def current_user() -> GitHubUser | None:
+    """Load the signed-in user from the session store, if available."""
     session_id = session.get("sid")
 
     if not session_id:
@@ -171,6 +176,7 @@ def repository_name(application: dict[str, Any]) -> str:
 
 
 def can_view(application: dict[str, Any]) -> bool:
+    """Check whether the current user may access a stored application."""
     if application.get("platform") != "Repository" or not enabled():
         return True
 
@@ -180,6 +186,7 @@ def can_view(application: dict[str, Any]) -> bool:
 
 
 def visible(applications: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter application summaries to records visible to the current user."""
     return [application for application in applications if can_view(application)]
 
 
@@ -227,6 +234,7 @@ def _not_configured():
 
 @blueprint.get("/auth/github/login")
 def login():
+    """Start the OAuth authorization-code flow with PKCE."""
     if not enabled():
         return _not_configured()
 
@@ -308,6 +316,7 @@ def _store_github_session(
 
 @blueprint.get("/auth/github/callback")
 def callback():
+    """Validate OAuth state, exchange the code, and persist the session."""
     if not enabled():
         return _not_configured()
     state = request.args.get("state", "")
@@ -361,6 +370,7 @@ def _github_user(code: str, verifier: str) -> GitHubUser | None:
 
 @blueprint.post("/auth/logout")
 def logout():
+    """Remove the current server-side session and clear its cookie."""
     session_id = session.pop("sid", None)
 
     if session_id:
@@ -373,6 +383,7 @@ def logout():
 
 @blueprint.get("/api/auth/me")
 def me():
+    """Return authentication status and the current profile summary."""
     user = current_user()
 
     return jsonify(
@@ -390,6 +401,7 @@ def me():
 
 
 def refresh_repositories(user: GitHubUser) -> None:
+    """Refresh the user's repository permissions from GitHub."""
     user.repositories = fetch_repositories(user.token)
 
     session_id = session.get("sid")
@@ -399,6 +411,7 @@ def refresh_repositories(user: GitHubUser) -> None:
 
 
 def dispatch_workflow(user: GitHubUser, repository: dict[str, Any]) -> requests.Response:
+    """Request a workflow dispatch on the repository's default branch."""
     owner_repo = repository["name"]
 
     return _api(
