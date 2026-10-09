@@ -48,35 +48,32 @@ def _license_choice(license_text: str, spdx_id: bool) -> list[dict[str, Any]]:
     return [{"license": {"name": license_text}}]
 
 
-def cyclonedx(report: dict[str, Any]) -> dict[str, Any]:
-    repository = report.get("repository") or {}
-
+def _cyclonedx_components(dependencies: list[dict[str, Any]]) -> list[dict[str, Any]]:
     components = []
-
-    for dependency in report.get("dependencies") or []:
+    for dependency in dependencies:
         reference = dependency.get("purl") or f"{dependency['ecosystem']}:{dependency['name']}@{dependency.get('version', '')}"
-
         component: dict[str, Any] = {
             "type": "library",
             "bom-ref": reference,
             "name": dependency["name"],
             "scope": "optional" if dependency.get("scope") == "development" else "required",
         }
-
         if dependency.get("version"):
             component["version"] = dependency["version"]
-
         if dependency.get("purl"):
             component["purl"] = dependency["purl"]
 
         licenses = _license_choice(dependency.get("license_spdx") or "", True) or _license_choice(dependency.get("license") or "", False)
-
         if licenses:
             component["licenses"] = licenses
-
         components.append(component)
+    return components
 
-    vulnerabilities = [
+
+def _cyclonedx_vulnerabilities(
+    vulnerabilities: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    return [
         {
             "bom-ref": f"{item['id']}:{item['package']}@{item['version']}",
             "id": item["id"],
@@ -86,8 +83,14 @@ def cyclonedx(report: dict[str, Any]) -> dict[str, Any]:
             "recommendation": f"Upgrade to {item['minimum_fix']}" if item.get("minimum_fix") else "",
             "affects": [{"ref": item.get("purl") or ""}],
         }
-        for item in report.get("vulnerabilities") or []
+        for item in vulnerabilities
     ]
+
+
+def cyclonedx(report: dict[str, Any]) -> dict[str, Any]:
+    repository = report.get("repository") or {}
+    components = _cyclonedx_components(report.get("dependencies") or [])
+    vulnerabilities = _cyclonedx_vulnerabilities(report.get("vulnerabilities") or [])
 
     document: dict[str, Any] = {
         "bomFormat": "CycloneDX",
@@ -120,62 +123,58 @@ def _spdx_id(value: str) -> str:
     return "SPDXRef-" + re.sub(r"[^A-Za-z0-9.-]+", "-", value).strip("-")
 
 
-def spdx(report: dict[str, Any]) -> dict[str, Any]:
-    repository = report.get("repository") or {}
-    name = repository.get("name") or "repository"
+def _spdx_dependency(dependency: dict[str, Any], root_id: str) -> tuple[str, dict[str, Any], dict[str, str]]:
+    identifier = _spdx_id(f"{dependency['ecosystem']}-{dependency['name']}-{dependency.get('version') or 'unresolved'}")
+    package: dict[str, Any] = {
+        "SPDXID": identifier,
+        "name": dependency["name"],
+        "versionInfo": dependency.get("version") or "",
+        "downloadLocation": "NOASSERTION",
+        "filesAnalyzed": False,
+        "licenseConcluded": "NOASSERTION",
+        "licenseDeclared": dependency.get("license_spdx") or "NOASSERTION",
+        "copyrightText": "NOASSERTION",
+    }
+    if dependency.get("purl"):
+        package["externalRefs"] = [
+            {"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": dependency["purl"]}
+        ]
+    relationship = {
+        "spdxElementId": root_id,
+        "relationshipType": "DEV_DEPENDENCY_OF" if dependency.get("scope") == "development" else "DEPENDS_ON",
+        "relatedSpdxElement": identifier,
+    }
+    return identifier, package, relationship
 
-    root_id = "SPDXRef-Root"
 
+def _spdx_packages(
+    name: str,
+    dependencies: list[dict[str, Any]],
+    root_id: str,
+) -> tuple[list[dict[str, Any]], list[dict[str, str]]]:
     packages = [
         {
             "SPDXID": root_id,
             "name": name,
-            "versionInfo": repository.get("commit") or "",
-            "downloadLocation": repository.get("url") or "NOASSERTION",
-            "filesAnalyzed": False,
-            "licenseConcluded": "NOASSERTION",
-            "licenseDeclared": repository.get("license") or "NOASSERTION",
-            "copyrightText": "NOASSERTION",
-        }
-    ]
-
-    relationships = [{"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": root_id}]
-
-    seen: set[str] = set()
-
-    for dependency in report.get("dependencies") or []:
-        identifier = _spdx_id(f"{dependency['ecosystem']}-{dependency['name']}-{dependency.get('version') or 'unresolved'}")
-
-        if identifier in seen:
-            continue
-
-        seen.add(identifier)
-
-        package: dict[str, Any] = {
-            "SPDXID": identifier,
-            "name": dependency["name"],
-            "versionInfo": dependency.get("version") or "",
+            "versionInfo": "",
             "downloadLocation": "NOASSERTION",
             "filesAnalyzed": False,
             "licenseConcluded": "NOASSERTION",
-            "licenseDeclared": dependency.get("license_spdx") or "NOASSERTION",
+            "licenseDeclared": "NOASSERTION",
             "copyrightText": "NOASSERTION",
         }
-
-        if dependency.get("purl"):
-            package["externalRefs"] = [
-                {"referenceCategory": "PACKAGE-MANAGER", "referenceType": "purl", "referenceLocator": dependency["purl"]}
-            ]
-
+    ]
+    relationships = [
+        {"spdxElementId": "SPDXRef-DOCUMENT", "relationshipType": "DESCRIBES", "relatedSpdxElement": root_id}
+    ]
+    seen: set[str] = set()
+    for dependency in dependencies:
+        identifier, package, relationship = _spdx_dependency(dependency, root_id)
+        if identifier in seen:
+            continue
+        seen.add(identifier)
         packages.append(package)
-
-        relationships.append(
-            {
-                "spdxElementId": root_id,
-                "relationshipType": "DEV_DEPENDENCY_OF" if dependency.get("scope") == "development" else "DEPENDS_ON",
-                "relatedSpdxElement": identifier,
-            }
-        )
+        relationships.append(relationship)
 
     # DEV_DEPENDENCY_OF reads "A is a dev dependency of B", so swap ends.
     for relationship in relationships:
@@ -184,6 +183,19 @@ def spdx(report: dict[str, Any]) -> dict[str, Any]:
                 relationship["relatedSpdxElement"],
                 relationship["spdxElementId"],
             )
+    return packages, relationships
+
+
+def spdx(report: dict[str, Any]) -> dict[str, Any]:
+    repository = report.get("repository") or {}
+    name = repository.get("name") or "repository"
+    root_id = "SPDXRef-Root"
+    packages, relationships = _spdx_packages(name, report.get("dependencies") or [], root_id)
+    packages[0].update({
+        "versionInfo": repository.get("commit") or "",
+        "downloadLocation": repository.get("url") or "NOASSERTION",
+        "licenseDeclared": repository.get("license") or "NOASSERTION",
+    })
 
     return {
         "spdxVersion": "SPDX-2.3",

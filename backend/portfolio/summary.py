@@ -182,6 +182,86 @@ def _recent_months(
     return list(reversed(labels))
 
 
+def _process_lineage(
+    scans: list[dict[str, Any]],
+    findings_for: Callable[[str], list[dict[str, Any]]],
+    trend: dict[str, dict[str, int]],
+) -> None:
+    scans.sort(key=_scan_moment)
+    history: list[dict[str, Any]] | None = None
+
+    for scan in scans:
+        findings = findings_for(str(scan.get("id") or ""))
+        activity = _activity(findings, history)
+        month = _month_of(_scan_moment(scan))
+
+        if month in trend:
+            for key, value in activity.items():
+                trend[month][key] += value
+
+        scan["_findings"] = findings
+        scan["_activity"] = activity
+        scan["_previous"] = history
+        scan["_deltas"] = _deltas(
+            _counts(findings),
+            _counts(history) if history is not None else None,
+        )
+        history = findings
+
+
+def _system_summary(scans: list[dict[str, Any]]) -> dict[str, Any]:
+    latest = scans[-1]
+    latest_findings = latest["_findings"]
+    counts = _counts(latest_findings)
+
+    return {
+        "id": latest.get("id"),
+        "name": latest.get("name"),
+        "url": latest.get("url") or latest.get("final_url"),
+        "platform": latest.get("platform", "Unknown"),
+        "status": latest.get("status", "unknown"),
+        "scan_date": _scan_moment(latest),
+        "scan_count": len(scans),
+        "risk_score": latest.get("risk_score", 0),
+        "risk_grade": latest.get("risk_grade", ""),
+        "rating": rating_for(latest.get("risk_score", 0)),
+        "total_findings": len(latest_findings),
+        "severity_counts": counts,
+        "severity_deltas": latest["_deltas"],
+        "activity": latest["_activity"],
+        "history": [
+            {
+                "id": scan.get("id"),
+                "scan_date": _scan_moment(scan),
+                "risk_score": scan.get("risk_score", 0),
+                "total_findings": len(scan["_findings"]),
+                "severity_deltas": scan["_deltas"],
+                "activity": scan["_activity"],
+            }
+            for scan in scans
+        ],
+    }
+
+
+def _portfolio_totals(systems: list[dict[str, Any]]) -> dict[str, Any]:
+    severity_counts = empty_severity_counts()
+    for system in systems:
+        for severity, count in system["severity_counts"].items():
+            severity_counts[severity] += count
+
+    ratings = [system["rating"] for system in systems]
+    return {
+        "systems": len(systems),
+        "findings": sum(system["total_findings"] for system in systems),
+        "severity_counts": severity_counts,
+        "rating": round(sum(ratings) / len(ratings), 1) if ratings else BEST_RATING,
+        "activity": {
+            key: sum(system["activity"][key] for system in systems)
+            for key in ("new", "existing", "resolved")
+        },
+    }
+
+
 def portfolio_summary(
     applications: list[dict[str, Any]],
     findings_for: Callable[[str], list[dict[str, Any]]],
@@ -197,80 +277,18 @@ def portfolio_summary(
     """
 
     today = today or datetime.now(timezone.utc)
-
     lineages: dict[str, list[dict[str, Any]]] = {}
-
     for application in applications:
-        lineages.setdefault(
-            lineage_key(application),
-            [],
-        ).append(application)
+        lineages.setdefault(lineage_key(application), []).append(application)
 
-    systems = []
     trend: dict[str, dict[str, int]] = {
         label: {"new": 0, "existing": 0, "resolved": 0}
         for label in _recent_months(today, months)
     }
-
+    systems = []
     for scans in lineages.values():
-        scans.sort(key=_scan_moment)
-
-        history: list[dict[str, Any]] | None = None
-
-        for scan in scans:
-            findings = findings_for(str(scan.get("id") or ""))
-
-            activity = _activity(findings, history)
-
-            month = _month_of(_scan_moment(scan))
-
-            if month in trend:
-                for key, value in activity.items():
-                    trend[month][key] += value
-
-            scan["_findings"] = findings
-            scan["_activity"] = activity
-            scan["_previous"] = history
-            scan["_deltas"] = _deltas(
-                _counts(findings),
-                _counts(history) if history is not None else None,
-            )
-
-            history = findings
-
-        latest = scans[-1]
-
-        counts = _counts(latest["_findings"])
-
-        systems.append(
-            {
-                "id": latest.get("id"),
-                "name": latest.get("name"),
-                "url": latest.get("url") or latest.get("final_url"),
-                "platform": latest.get("platform", "Unknown"),
-                "status": latest.get("status", "unknown"),
-                "scan_date": _scan_moment(latest),
-                "scan_count": len(scans),
-                "risk_score": latest.get("risk_score", 0),
-                "risk_grade": latest.get("risk_grade", ""),
-                "rating": rating_for(latest.get("risk_score", 0)),
-                "total_findings": len(latest["_findings"]),
-                "severity_counts": counts,
-                "severity_deltas": latest["_deltas"],
-                "activity": latest["_activity"],
-                "history": [
-                    {
-                        "id": scan.get("id"),
-                        "scan_date": _scan_moment(scan),
-                        "risk_score": scan.get("risk_score", 0),
-                        "total_findings": len(scan["_findings"]),
-                        "severity_deltas": scan["_deltas"],
-                        "activity": scan["_activity"],
-                    }
-                    for scan in scans
-                ],
-            }
-        )
+        _process_lineage(scans, findings_for, trend)
+        systems.append(_system_summary(scans))
 
     systems.sort(
         key=lambda system: (
@@ -279,35 +297,10 @@ def portfolio_summary(
         )
     )
 
-    totals = empty_severity_counts()
-
-    for system in systems:
-        for severity, count in system["severity_counts"].items():
-            totals[severity] += count
-
-    ratings = [system["rating"] for system in systems]
-
     return {
         "generated_at": today.isoformat(),
         "systems": systems,
-        "totals": {
-            "systems": len(systems),
-            "findings": sum(
-                system["total_findings"] for system in systems
-            ),
-            "severity_counts": totals,
-            "rating": (
-                round(sum(ratings) / len(ratings), 1)
-                if ratings
-                else BEST_RATING
-            ),
-            "activity": {
-                key: sum(
-                    system["activity"][key] for system in systems
-                )
-                for key in ("new", "existing", "resolved")
-            },
-        },
+        "totals": _portfolio_totals(systems),
         "trend": [
             {"month": month, **values}
             for month, values in trend.items()

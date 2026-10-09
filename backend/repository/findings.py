@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from typing import Any
 
 from backend.repository.quality import Issue
@@ -69,6 +70,13 @@ QUALITY_SEVERITY = {
 }
 
 
+@dataclass
+class FindingOptions:
+    confidence: str = FIRM
+    title: str = ""
+    references: list[str] | None = None
+
+
 def make_finding(
     rule_id: str,
     severity: str,
@@ -76,25 +84,24 @@ def make_finding(
     recommendation: str,
     location: str,
     evidence: dict[str, Any],
-    confidence: str = FIRM,
-    title: str = "",
-    references: list[str] | None = None,
+    **overrides: Any,
 ) -> dict[str, Any]:
+    options = FindingOptions(**overrides)
     metadata = RULE_CATALOGUE[rule_id]
 
     return Finding(
         rule_id=rule_id,
-        title=title or metadata["title"],
+        title=options.title or metadata["title"],
         severity=severity,
         category=metadata["category"],
         description=description,
         recommendation=recommendation,
-        confidence=confidence,
+        confidence=options.confidence,
         platform=PLATFORM,
         location=location,
         cwe=metadata["cwe"],
         owasp=metadata["owasp"],
-        references=references or [],
+        references=options.references or [],
         evidence=evidence,
     ).to_dict()
 

@@ -80,6 +80,30 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
     )
 
     findings = [*(report.get("findings") or []), *((report.get("quality") or {}).get("findings") or [])]
+    rules, rule_index = _sarif_rules(findings)
+
+    return {
+        "$schema": SCHEMA,
+        "version": "2.1.0",
+        "runs": [
+            {
+                "tool": {
+                    "driver": {
+                        "name": TOOL_NAME,
+                        "version": TOOL_VERSION,
+                        "informationUri": "https://github.com/FABRICADO08/secguard",
+                        "rules": rules,
+                    }
+                },
+                "results": [_result(finding, rule_index, fallback) for finding in findings],
+            }
+        ],
+    }
+
+
+def _sarif_rules(
+    findings: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[str, int]]:
 
     rule_ids = sorted({finding["rule_id"] for finding in findings})
     rule_index = {rule_id: index for index, rule_id in enumerate(rule_ids)}
@@ -117,20 +141,4 @@ def to_sarif(report: dict[str, Any]) -> dict[str, Any]:
 
         rules.append(rule)
 
-    return {
-        "$schema": SCHEMA,
-        "version": "2.1.0",
-        "runs": [
-            {
-                "tool": {
-                    "driver": {
-                        "name": TOOL_NAME,
-                        "version": TOOL_VERSION,
-                        "informationUri": "https://github.com/FABRICADO08/secguard",
-                        "rules": rules,
-                    }
-                },
-                "results": [_result(finding, rule_index, fallback) for finding in findings],
-            }
-        ],
-    }
+    return rules, rule_index

@@ -170,16 +170,12 @@ def _pep508(requirement: str) -> tuple[str, str]:
     return (match.group(1), match.group(3).strip())
 
 
-def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
-    try:
-        document = tomllib.loads(text)
-    except tomllib.TOMLDecodeError:
-        return []
-
+def _project_dependencies(
+    text: str,
+    project: dict[str, Any],
+    manifest: str,
+) -> list[Dependency]:
     dependencies = []
-
-    project = document.get("project") or {}
-
     groups: list[tuple[str, list[Any]]] = [
         (RUNTIME, list(project.get("dependencies") or []))
     ]
@@ -204,9 +200,15 @@ def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
                         scope=scope,
                     )
                 )
+    return dependencies
 
-    poetry = (document.get("tool") or {}).get("poetry") or {}
 
+def _poetry_dependencies(
+    text: str,
+    poetry: dict[str, Any],
+    manifest: str,
+) -> list[Dependency]:
+    dependencies = []
     poetry_groups = [(RUNTIME, poetry.get("dependencies") or {}),
                      (DEVELOPMENT, poetry.get("dev-dependencies") or {})]
 
@@ -236,8 +238,21 @@ def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
                     scope=scope,
                 )
             )
-
     return dependencies
+
+
+def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
+    try:
+        document = tomllib.loads(text)
+    except tomllib.TOMLDecodeError:
+        return []
+
+    project = document.get("project") or {}
+    poetry = (document.get("tool") or {}).get("poetry") or {}
+    return [
+        *_project_dependencies(text, project, manifest),
+        *_poetry_dependencies(text, poetry, manifest),
+    ]
 
 
 def parse_poetry_lock(text: str, manifest: str) -> list[Dependency]:

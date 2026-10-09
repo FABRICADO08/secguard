@@ -413,65 +413,28 @@ def _certificate_only_scan(
             tls_result,
     }
 
-    analysis = analyze(
-        ScanContext(
-            application_id=
-                application.id,
-
-            requested_url=
-                application.requested_url,
-
-            final_url=
-                application.final_url,
-
-            platform=
-                "Generic",
-
-            response=
-                response,
-
-            technologies=[],
-
-            attack_surface=
-                application.attack_surface,
-
-            response_observed=
-                False,
-        )
+    analysis = _analyze_application(
+        application,
+        response,
+        "Generic",
+        [],
+        response_observed=False,
     )
 
     findings = analysis["findings"]
 
-    application.security = {
-        **summarize(findings),
-
-        "findings":
-            findings,
-
-        "recommendations":
-            build_recommendations(findings),
-
-        "rules_evaluated":
-            analysis["rules_evaluated"],
-
-        "rule_errors":
-            analysis["rule_errors"],
-    }
+    _set_security_summary(
+        application,
+        findings,
+        analysis["rules_evaluated"],
+        analysis["rule_errors"],
+    )
 
     application.status = (
         "certificate_rejected"
     )
 
-    application.update_timestamp()
-
-    save_application(
-        application.to_dict()
-    )
-
-    save_findings(
-        application.id,
-        findings,
-    )
+    _persist_analysis(application, findings)
 
     return jsonify(
         {
@@ -499,6 +462,48 @@ def _certificate_only_scan(
 # ============================================================
 # Start discovery
 # ============================================================
+
+def _analyze_application(
+    application: Application,
+    response: dict,
+    platform: str,
+    technologies: list[dict],
+    response_observed: bool = True,
+) -> dict:
+    return analyze(
+        ScanContext(
+            application_id=application.id,
+            requested_url=application.requested_url,
+            final_url=application.final_url,
+            platform=platform,
+            response=response,
+            technologies=technologies,
+            attack_surface=application.attack_surface,
+            response_observed=response_observed,
+        )
+    )
+
+
+def _set_security_summary(
+    application: Application,
+    findings: list[dict],
+    rules_evaluated: int,
+    rule_errors: list,
+) -> None:
+    application.security = {
+        **summarize(findings),
+        "findings": findings,
+        "recommendations": build_recommendations(findings),
+        "rules_evaluated": rules_evaluated,
+        "rule_errors": rule_errors,
+    }
+
+
+def _persist_analysis(application: Application, findings: list[dict]) -> None:
+    application.update_timestamp()
+    save_application(application.to_dict())
+    save_findings(application.id, findings)
+
 
 @app.post("/api/discover")
 @require_api_token
@@ -761,65 +766,29 @@ def discover():
         # Security analysis
         # ----------------------------------------------------
 
-        analysis = analyze(
-            ScanContext(
-                application_id=
-                    application.id,
-
-                requested_url=
-                    application.requested_url,
-
-                final_url=
-                    application.final_url,
-
-                platform=
-                    platform,
-
-                response=
-                    response,
-
-                technologies=
-                    technologies,
-
-                attack_surface=
-                    application.attack_surface,
-            )
+        analysis = _analyze_application(
+            application,
+            response,
+            platform,
+            technologies,
         )
 
         findings = analysis["findings"]
 
-        application.security = {
-            **summarize(findings),
-
-            "findings":
-                findings,
-
-            "recommendations":
-                build_recommendations(findings),
-
-            "rules_evaluated":
-                analysis["rules_evaluated"],
-
-            "rule_errors":
-                analysis["rule_errors"],
-        }
+        _set_security_summary(
+            application,
+            findings,
+            analysis["rules_evaluated"],
+            analysis["rule_errors"],
+        )
 
         application.status = "analyzed"
-
-        application.update_timestamp()
 
         # ----------------------------------------------------
         # Save
         # ----------------------------------------------------
 
-        save_application(
-            application.to_dict()
-        )
-
-        save_findings(
-            application.id,
-            findings,
-        )
+        _persist_analysis(application, findings)
 
         # ----------------------------------------------------
         # Response
@@ -1139,34 +1108,15 @@ def analyze_mendix_model():
 
     application.model = result["model"]
 
-    application.security = {
-        **summarize(findings),
-
-        "findings":
-            findings,
-
-        "recommendations":
-            build_recommendations(findings),
-
-        "rules_evaluated":
-            len(MENDIX_RULE_CATALOGUE),
-
-        "rule_errors":
-            [],
-    }
+    _set_security_summary(
+        application,
+        findings,
+        len(MENDIX_RULE_CATALOGUE),
+        [],
+    )
 
     application.status = "analyzed"
-
-    application.update_timestamp()
-
-    save_application(
-        application.to_dict()
-    )
-
-    save_findings(
-        application.id,
-        findings,
-    )
+    _persist_analysis(application, findings)
 
     return jsonify(
         {
@@ -1251,34 +1201,15 @@ def analyze_outsystems():
 
     application.model = result["model"]
 
-    application.security = {
-        **summarize(findings),
-
-        "findings":
-            findings,
-
-        "recommendations":
-            build_recommendations(findings),
-
-        "rules_evaluated":
-            len(OUTSYSTEMS_RULE_CATALOGUE),
-
-        "rule_errors":
-            [],
-    }
+    _set_security_summary(
+        application,
+        findings,
+        len(OUTSYSTEMS_RULE_CATALOGUE),
+        [],
+    )
 
     application.status = "analyzed"
-
-    application.update_timestamp()
-
-    save_application(
-        application.to_dict()
-    )
-
-    save_findings(
-        application.id,
-        findings,
-    )
+    _persist_analysis(application, findings)
 
     return jsonify(
         {

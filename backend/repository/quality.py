@@ -272,6 +272,68 @@ def _unreachable(body: list[ast.stmt]) -> list[ast.stmt]:
     return found
 
 
+def _analyse_class(node: ast.ClassDef, path: str, report: QualityReport, is_test: bool) -> None:
+    methods = [
+        child for child in node.body
+        if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    if len(methods) > CLASS_METHODS or _span(node) > CLASS_LINES:
+        report.issues.append(
+            Issue("REPO-MNT-004", path, node.lineno, node.name,
+                  f"Class `{node.name}` has {len(methods)} methods over {_span(node)} lines.",
+                  float(_span(node)), node.end_lineno or node.lineno)
+        )
+
+    if not is_test and not node.name.startswith("_"):
+        report.documentable += 1
+        report.documented += ast.get_docstring(node) is not None
+
+
+def _analyse_function(
+    node: ast.FunctionDef | ast.AsyncFunctionDef,
+    path: str,
+    report: QualityReport,
+    is_test: bool,
+) -> None:
+    cyclomatic = cyclomatic_complexity(node)
+    cognitive = cognitive_complexity(node)
+    arguments = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
+    parameters = [argument for argument in arguments if argument.arg not in ("self", "cls")]
+    report.functions.append(
+        FunctionMetrics(path, node.name, node.lineno, _span(node), cyclomatic, cognitive, len(parameters))
+    )
+    end = node.end_lineno or node.lineno
+
+    if cyclomatic > COMPLEXITY_WARNING or cognitive > COGNITIVE_WARNING:
+        report.issues.append(
+            Issue("REPO-MNT-001", path, node.lineno, node.name,
+                  f"`{node.name}` has cyclomatic complexity {cyclomatic} and cognitive complexity {cognitive}.",
+                  float(cyclomatic), end)
+        )
+    if _span(node) > FUNCTION_LINES:
+        report.issues.append(
+            Issue("REPO-MNT-002", path, node.lineno, node.name,
+                  f"`{node.name}` is {_span(node)} lines long.", float(_span(node)), end)
+        )
+    if len(parameters) > PARAMETERS:
+        report.issues.append(
+            Issue("REPO-MNT-003", path, node.lineno, node.name,
+                  f"`{node.name}` takes {len(parameters)} parameters.", float(len(parameters)), end)
+        )
+    for name, line in _unused_locals(node):
+        report.issues.append(
+            Issue("REPO-MNT-006", path, line, name, f"Local variable `{name}` in `{node.name}` is assigned but never used.")
+        )
+
+    if not node.name.startswith("_") and not is_test:
+        report.documentable += 1
+        report.documented += ast.get_docstring(node) is not None
+        report.annotatable += 1
+        report.annotated += node.returns is not None and all(
+            argument.annotation is not None for argument in parameters
+        )
+
+
 def _analyse_python(path: str, source: str, report: QualityReport) -> None:
     try:
         tree = ast.parse(source)
@@ -289,68 +351,9 @@ def _analyse_python(path: str, source: str, report: QualityReport) -> None:
 
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
-            methods = [child for child in node.body if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))]
-
-            if len(methods) > CLASS_METHODS or _span(node) > CLASS_LINES:
-                report.issues.append(
-                    Issue("REPO-MNT-004", path, node.lineno, node.name,
-                          f"Class `{node.name}` has {len(methods)} methods over {_span(node)} lines.",
-                          float(_span(node)), node.end_lineno or node.lineno)
-                )
-
-            if not is_test and not node.name.startswith("_"):
-                report.documentable += 1
-                report.documented += ast.get_docstring(node) is not None
-
-        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            continue
-
-        cyclomatic = cyclomatic_complexity(node)
-        cognitive = cognitive_complexity(node)
-
-        arguments = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
-        parameters = [argument for argument in arguments if argument.arg not in ("self", "cls")]
-
-        report.functions.append(
-            FunctionMetrics(path, node.name, node.lineno, _span(node), cyclomatic, cognitive, len(parameters))
-        )
-
-        end = node.end_lineno or node.lineno
-
-        if cyclomatic > COMPLEXITY_WARNING or cognitive > COGNITIVE_WARNING:
-            report.issues.append(
-                Issue("REPO-MNT-001", path, node.lineno, node.name,
-                      f"`{node.name}` has cyclomatic complexity {cyclomatic} and cognitive complexity {cognitive}.",
-                      float(cyclomatic), end)
-            )
-
-        if _span(node) > FUNCTION_LINES:
-            report.issues.append(
-                Issue("REPO-MNT-002", path, node.lineno, node.name,
-                      f"`{node.name}` is {_span(node)} lines long.", float(_span(node)), end)
-            )
-
-        if len(parameters) > PARAMETERS:
-            report.issues.append(
-                Issue("REPO-MNT-003", path, node.lineno, node.name,
-                      f"`{node.name}` takes {len(parameters)} parameters.", float(len(parameters)), end)
-            )
-
-        for name, line in _unused_locals(node):
-            report.issues.append(
-                Issue("REPO-MNT-006", path, line, name, f"Local variable `{name}` in `{node.name}` is assigned but never used.")
-            )
-
-        public = not node.name.startswith("_")
-
-        if public and not is_test:
-            report.documentable += 1
-            report.documented += ast.get_docstring(node) is not None
-
-            report.annotatable += 1
-            report.annotated += node.returns is not None and all(
-                argument.annotation is not None for argument in parameters
-            )
+            _analyse_class(node, path, report, is_test)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _analyse_function(node, path, report, is_test)
 
     for statement in _unreachable(tree.body):
         report.issues.append(
@@ -480,62 +483,49 @@ def _duplicates(sources: dict[str, list[tuple[int, str]]], report: QualityReport
         reported += 1
 
 
-def analyse_quality(root: Path) -> QualityReport:
-    report = QualityReport()
+def _analyse_source_file(
+    path: Path,
+    root: Path,
+    report: QualityReport,
+    normalised: dict[str, list[tuple[int, str]]],
+) -> None:
+    relative = path.relative_to(root).as_posix()
+    name = path.name.lower()
+    if name.startswith("readme"):
+        if path.parent == root:
+            report.has_readme = True
+        return
 
-    normalised: dict[str, list[tuple[int, str]]] = {}
+    if re.fullmatch(r"(openapi|swagger)[^/]*\.(ya?ml|json)", name) or name.endswith((".raml", ".graphql")):
+        report.api_specs.append(relative)
+        return
 
-    for path in iter_files(root):
-        relative = path.relative_to(root).as_posix()
-        name = path.name.lower()
+    language = SOURCE_SUFFIXES.get(path.suffix.lower())
+    if language is None or path.stat().st_size > MAX_SOURCE_BYTES:
+        return
+    if re.search(r"\.min\.(js|css)$|(^|/)(migrations|fixtures|generated)/", relative):
+        return
 
-        if name.startswith("readme"):
-            if path.parent == root:
-                report.has_readme = True
-            continue
+    text = path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    report.files += 1
+    code = _normalised_lines(text)
+    report.code_lines += len(code)
+    report.languages[language] = report.languages.get(language, 0) + len(code)
+    normalised[relative] = code
 
-        if re.fullmatch(r"(openapi|swagger)[^/]*\.(ya?ml|json)", name) or name.endswith((".raml", ".graphql")):
-            report.api_specs.append(relative)
-            continue
-
-        language = SOURCE_SUFFIXES.get(path.suffix.lower())
-
-        if language is None or path.stat().st_size > MAX_SOURCE_BYTES:
-            continue
-
-        if re.search(r"\.min\.(js|css)$|(^|/)(migrations|fixtures|generated)/", relative):
-            continue
-
-        text = path.read_text(encoding="utf-8", errors="replace")
-        lines = text.splitlines()
-
-        report.files += 1
-
-        code = _normalised_lines(text)
-        report.code_lines += len(code)
-        report.languages[language] = report.languages.get(language, 0) + len(code)
-        normalised[relative] = code
-
-        if language == "Python":
-            _analyse_python(relative, text, report)
-            if len(lines) > FILE_LINES:
-                _analyse_generic(relative, lines, report)
-        else:
+    if language == "Python":
+        _analyse_python(relative, text, report)
+        if len(lines) > FILE_LINES:
             _analyse_generic(relative, lines, report)
+    else:
+        _analyse_generic(relative, lines, report)
+        if language in ("JavaScript", "TypeScript") and re.search(r"\b(express|fastify|koa)\b", text):
+            report.has_web_api = True
 
-            if language in ("JavaScript", "TypeScript") and re.search(r"\b(express|fastify|koa)\b", text):
-                report.has_web_api = True
 
-    _duplicates(normalised, report)
-
-    if not report.has_readme and report.files:
-        report.issues.append(Issue("REPO-MNT-011", "README.md", 0, "", "The repository has no README at its root."))
-
-    if report.has_web_api and not report.api_specs:
-        report.issues.append(Issue("REPO-MNT-013", "", 0, "", "The code serves an HTTP API but no OpenAPI/Swagger specification was found."))
-
+def _coverage_issues(report: QualityReport) -> None:
     metrics = report.metrics()
-
     if metrics["docstring_coverage"] is not None and report.documentable >= 10 and metrics["docstring_coverage"] < 0.5:
         report.issues.append(
             Issue("REPO-MNT-009", "", 0, "", f"Only {metrics['docstring_coverage']:.0%} of public modules, classes and functions have a docstring.",
@@ -548,4 +538,17 @@ def analyse_quality(root: Path) -> QualityReport:
                   metrics["type_annotation_coverage"])
         )
 
+
+def analyse_quality(root: Path) -> QualityReport:
+    report = QualityReport()
+    normalised: dict[str, list[tuple[int, str]]] = {}
+    for path in iter_files(root):
+        _analyse_source_file(path, root, report, normalised)
+
+    _duplicates(normalised, report)
+    if not report.has_readme and report.files:
+        report.issues.append(Issue("REPO-MNT-011", "README.md", 0, "", "The repository has no README at its root."))
+    if report.has_web_api and not report.api_specs:
+        report.issues.append(Issue("REPO-MNT-013", "", 0, "", "The code serves an HTTP API but no OpenAPI/Swagger specification was found."))
+    _coverage_issues(report)
     return report

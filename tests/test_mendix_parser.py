@@ -20,8 +20,28 @@ from backend.platforms.mendix import (
 MODEL_FILE = ROOT / "model.json"
 
 
-def main():
+def _print_statistics(statistics):
+    print()
+    print("MODEL STATISTICS")
+    print("-" * 60)
+    for key, value in statistics.items():
+        print(f"{key:25} {value}")
 
+
+def _print_findings(findings):
+    print()
+    print("SECURITY ANALYSIS")
+    print("-" * 60)
+    print(f"Findings: {len(findings)}")
+    for finding in findings[:20]:
+        print()
+        print(f"[{finding['severity'].upper()}] {finding['rule_id']}")
+        print(finding["title"])
+        print(f"Entity: {finding['entity']}")
+        print(f"Recommendation: {finding['recommendation']}")
+
+
+def main():
     print()
     print("=" * 60)
     print("MENDIX MODEL ANALYSIS")
@@ -52,54 +72,12 @@ def main():
     )
 
     model = parser.parse()
-
-    print()
-    print("MODEL STATISTICS")
-    print("-" * 60)
-
-    statistics = model.statistics()
-
-    for key, value in statistics.items():
-
-        print(
-            f"{key:25} {value}"
-        )
-
-    print()
-    print("SECURITY ANALYSIS")
-    print("-" * 60)
-
+    _print_statistics(model.statistics())
     analyzer = MendixSecurityAnalyzer(
         model
     )
-
     findings = analyzer.analyze()
-
-    print(
-        f"Findings: {len(findings)}"
-    )
-
-    for finding in findings[:20]:
-
-        print()
-        print(
-            f"[{finding['severity'].upper()}] "
-            f"{finding['rule_id']}"
-        )
-
-        print(
-            finding["title"]
-        )
-
-        print(
-            f"Entity: {finding['entity']}"
-        )
-
-        print(
-            f"Recommendation: "
-            f"{finding['recommendation']}"
-        )
-
+    _print_findings(findings)
     print()
     print("=" * 60)
 

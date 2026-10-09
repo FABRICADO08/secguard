@@ -182,6 +182,61 @@ class RepositoryScanner:
 
     # ------------------------------------------------------------------
 
+    def _scan_dependencies(
+        self,
+        dependencies: list[Dependency],
+        project_category: str,
+        vulnerabilities: dict[int, list[Any]],
+        remediations: dict[int, Any],
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+        findings: list[dict[str, Any]] = []
+        records: list[dict[str, Any]] = []
+        advisories: list[dict[str, Any]] = []
+        package_findings: set[tuple[str, str, str]] = set()
+
+        for index, dependency in enumerate(dependencies):
+            info = self.info(dependency)
+            reach = self.reachability.status(dependency)
+            verdict = licensing.evaluate(info.license if info else "")
+            freshness = _freshness(dependency, info)
+            activity = self.activity(info.repository) if info else None
+            package_url = purl(dependency.ecosystem, dependency.name, dependency.version)
+            found = vulnerabilities.get(index, [])
+            fix = remediations.get(index)
+            record = {
+                **dependency.to_dict(),
+                "purl": package_url,
+                "license": info.license if info else "",
+                "license_spdx": verdict.options[0] if len(verdict.options) == 1 and verdict.category != licensing.UNKNOWN else "",
+                "license_category": verdict.category if info else "",
+                "reachability": reach,
+                "registry": info.to_dict() if info else None,
+                "upstream": activity.__dict__ if activity else None,
+                "freshness": freshness,
+                "vulnerabilities": [item.id for item in found],
+                "remediation": fix.to_dict() if fix else None,
+            }
+            records.append(record)
+            findings.extend(self._vulnerability_findings(dependency, found, fix, reach, package_url, advisories))
+
+            once = (dependency.ecosystem, normalize_package(dependency.ecosystem, dependency.name))
+            for finding in self._package_findings(dependency, info, verdict, project_category, freshness, activity):
+                identity = (*once, finding["rule_id"])
+                if identity not in package_findings:
+                    package_findings.add(identity)
+                    findings.append(finding)
+
+        return findings, records, advisories
+
+    @staticmethod
+    def _license_counts(records: list[dict[str, Any]]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for record in records:
+            if record["license_category"]:
+                category = record["license_category"]
+                counts[category] = counts.get(category, 0) + 1
+        return counts
+
     def run(self, repository: dict[str, Any] | None = None) -> dict[str, Any]:
         repository = dict(repository or {})
         repository.setdefault("name", self.root.resolve().name)
@@ -200,47 +255,9 @@ class RepositoryScanner:
             fetch=self.fetch if self.post is not None else None,
         )
 
-        findings: list[dict[str, Any]] = []
-        records: list[dict[str, Any]] = []
-        advisories: list[dict[str, Any]] = []
-        package_findings: set[tuple[str, str, str]] = set()
-
-        for index, dependency in enumerate(dependencies):
-            info = self.info(dependency)
-            reach = self.reachability.status(dependency)
-            verdict = licensing.evaluate(info.license if info else "")
-            freshness = _freshness(dependency, info)
-            activity = self.activity(info.repository) if info else None
-            package_url = purl(dependency.ecosystem, dependency.name, dependency.version)
-            found = vulnerabilities.get(index, [])
-            fix = remediations.get(index)
-
-            record = {
-                **dependency.to_dict(),
-                "purl": package_url,
-                "license": info.license if info else "",
-                "license_spdx": verdict.options[0] if len(verdict.options) == 1 and verdict.category != licensing.UNKNOWN else "",
-                "license_category": verdict.category if info else "",
-                "reachability": reach,
-                "registry": info.to_dict() if info else None,
-                "upstream": activity.__dict__ if activity else None,
-                "freshness": freshness,
-                "vulnerabilities": [item.id for item in found],
-                "remediation": fix.to_dict() if fix else None,
-            }
-
-            records.append(record)
-
-            findings.extend(self._vulnerability_findings(dependency, found, fix, reach, package_url, advisories))
-
-            once = (dependency.ecosystem, normalize_package(dependency.ecosystem, dependency.name))
-
-            for finding in self._package_findings(dependency, info, verdict, project_category, freshness, activity):
-                identity = (*once, finding["rule_id"])
-
-                if identity not in package_findings:
-                    package_findings.add(identity)
-                    findings.append(finding)
+        findings, records, advisories = self._scan_dependencies(
+            dependencies, project_category, vulnerabilities, remediations
+        )
 
         quality = analyse_quality(self.root)
         metrics = quality.metrics()
@@ -251,11 +268,7 @@ class RepositoryScanner:
 
         freshness_summary = self._freshness_summary(records)
 
-        license_counts: dict[str, int] = {}
-
-        for record in records:
-            if record["license_category"]:
-                license_counts[record["license_category"]] = license_counts.get(record["license_category"], 0) + 1
+        license_counts = self._license_counts(records)
 
         return {
             "schema": SCHEMA,
@@ -300,28 +313,7 @@ class RepositoryScanner:
             elif reach == IMPORTED:
                 confidence = CONFIRMED
 
-            if fix and fix.target:
-                upgrade = f"Upgrade {dependency.name} from {dependency.version} to {fix.target}"
-
-                if fix.breaking and fix.non_breaking_target:
-                    upgrade += (
-                        f" ({fix.target} is a major upgrade; {fix.non_breaking_target} stays on your "
-                        "current major line but does not clear every advisory)"
-                    )
-                elif fix.breaking:
-                    upgrade += f" ({fix.target} is a major upgrade: review its changelog for breaking changes)"
-                else:
-                    upgrade += ", a compatible upgrade that clears every known advisory"
-
-                recommendation = upgrade + "."
-            elif vulnerability.minimum_fix:
-                recommendation = f"Upgrade {dependency.name} to at least {vulnerability.minimum_fix}."
-            else:
-                recommendation = (
-                    f"No fixed release of {dependency.name} is published; replace the package or "
-                    "mitigate the vulnerable feature."
-                )
-
+            recommendation = self._vulnerability_recommendation(dependency, vulnerability, fix)
             reach_note = {
                 IMPORTED: " First-party code imports this package.",
                 NOT_IMPORTED: " No first-party code imports this package, so the vulnerable code is unlikely to be reachable.",
@@ -363,33 +355,78 @@ class RepositoryScanner:
 
         return results
 
+    @staticmethod
+    def _vulnerability_recommendation(dependency, vulnerability, fix) -> str:
+        if fix and fix.target:
+            upgrade = f"Upgrade {dependency.name} from {dependency.version} to {fix.target}"
+            if fix.breaking and fix.non_breaking_target:
+                upgrade += (
+                    f" ({fix.target} is a major upgrade; {fix.non_breaking_target} stays on your "
+                    "current major line but does not clear every advisory)"
+                )
+            elif fix.breaking:
+                upgrade += f" ({fix.target} is a major upgrade: review its changelog for breaking changes)"
+            else:
+                upgrade += ", a compatible upgrade that clears every known advisory"
+            return upgrade + "."
+        if vulnerability.minimum_fix:
+            return f"Upgrade {dependency.name} to at least {vulnerability.minimum_fix}."
+        return (
+            f"No fixed release of {dependency.name} is published; replace the package or "
+            "mitigate the vulnerable feature."
+        )
+
     def _package_findings(self, dependency, info, verdict, project_category, freshness, activity):
         name = dependency.name
         location = _location(dependency)
         evidence = {"package": name, "ecosystem": dependency.ecosystem, "version": dependency.version, "scope": dependency.scope}
         runtime = dependency.scope != DEVELOPMENT
-
-        squat = typosquat_target(dependency.ecosystem, name)
-
         age_days = None
         if info and info.first_release:
             first = parse_time(info.first_release)
             age_days = (self.today - first).days if first else None
-
         downloads = info.weekly_downloads if info else None
+        yield from self._typosquat_findings(dependency, location, evidence, age_days, downloads)
 
+        if info is None:
+            if dependency.direct and not dependency.version and dependency.spec and runtime:
+                yield self._unpinned(dependency, location, evidence)
+            return
+
+        yield from self._package_status_findings(
+            dependency, info, activity, location, evidence, runtime
+        )
+
+        behind = (freshness.get("behind") or {}).get("major", 0)
+        if behind >= 2:
+            yield make_finding(
+                "REPO-DEP-005",
+                "low",
+                f"{name} {dependency.version} is {behind} major versions behind the latest {freshness['latest']}.",
+                f"Plan an upgrade of {name} toward {freshness['latest']}; old major lines stop receiving fixes.",
+                location,
+                {**evidence, "latest": freshness["latest"], "major_versions_behind": behind, "libyears": freshness.get("libyears")},
+                confidence=CONFIRMED,
+            )
+
+        if dependency.direct and (dependency.resolved_from_range or not dependency.version) and dependency.spec and runtime:
+            yield self._unpinned(dependency, location, evidence)
+        if runtime:
+            yield from self._license_findings(dependency, info, verdict, project_category, location, evidence)
+
+    def _typosquat_findings(self, dependency, location, evidence, age_days, downloads):
+        squat = typosquat_target(dependency.ecosystem, dependency.name)
         if squat:
             suspicious_registry = (age_days is not None and age_days < NEW_PACKAGE_DAYS) or (
                 downloads is not None and downloads < LOW_ADOPTION_DOWNLOADS
             )
-
             yield make_finding(
                 "REPO-SUP-001",
                 "critical" if suspicious_registry else "high",
-                f"`{name}` differs from the popular package `{squat.target}` by {squat.technique}."
+                f"`{dependency.name}` differs from the popular package `{squat.target}` by {squat.technique}."
                 + (f" It was first published {age_days} days ago." if age_days is not None else "")
                 + (f" It has {downloads} downloads in the last week." if downloads is not None else ""),
-                f"Confirm `{name}` is the package you intended. If you meant `{squat.target}`, replace it, "
+                f"Confirm `{dependency.name}` is the package you intended. If you meant `{squat.target}`, replace it, "
                 "rotate any credentials available to builds that installed it, and review the install scripts it ran.",
                 location,
                 {**evidence, "lookalike_of": squat.target, "technique": squat.technique, "age_days": age_days, "weekly_downloads": downloads},
@@ -399,18 +436,17 @@ class RepositoryScanner:
             yield make_finding(
                 "REPO-SUP-002",
                 "low",
-                f"`{name}` was first published {age_days} days ago and has {downloads} weekly downloads.",
+                f"`{dependency.name}` was first published {age_days} days ago and has {downloads} weekly downloads.",
                 "Review the package source and maintainer before depending on it; prefer established alternatives.",
                 location,
                 {**evidence, "age_days": age_days, "weekly_downloads": downloads},
                 confidence=TENTATIVE,
             )
 
-        if info is None:
-            if dependency.direct and not dependency.version and dependency.spec and runtime:
-                yield self._unpinned(dependency, location, evidence)
-            return
-
+    def _package_status_findings(
+        self, dependency, info, activity, location, evidence, runtime
+    ):
+        name = dependency.name
         if info.deprecated:
             yield make_finding(
                 "REPO-DEP-002",
@@ -434,7 +470,6 @@ class RepositoryScanner:
             )
 
         idle_years = _years_between(info.latest_release, self.today)
-
         if not info.deprecated and idle_years is not None and idle_years >= UNMAINTAINED_YEARS:
             commits = activity.commits_last_year if activity else None
             if commits is None or commits < 5:
@@ -450,7 +485,6 @@ class RepositoryScanner:
                     {**evidence, "latest_release": info.latest_release, "idle_years": round(idle_years, 1),
                      "commits_last_year": commits, "contributors": activity.contributors if activity else None},
                 )
-
         if info.maintainers == 1 and runtime:
             yield make_finding(
                 "REPO-DEP-007",
@@ -461,25 +495,6 @@ class RepositoryScanner:
                 {**evidence, "maintainers": 1},
                 confidence=CONFIRMED,
             )
-
-        behind = (freshness.get("behind") or {}).get("major", 0)
-
-        if behind >= 2:
-            yield make_finding(
-                "REPO-DEP-005",
-                "low",
-                f"{name} {dependency.version} is {behind} major versions behind the latest {freshness['latest']}.",
-                f"Plan an upgrade of {name} toward {freshness['latest']}; old major lines stop receiving fixes.",
-                location,
-                {**evidence, "latest": freshness["latest"], "major_versions_behind": behind, "libyears": freshness.get("libyears")},
-                confidence=CONFIRMED,
-            )
-
-        if dependency.direct and (dependency.resolved_from_range or not dependency.version) and dependency.spec and runtime:
-            yield self._unpinned(dependency, location, evidence)
-
-        if runtime:
-            yield from self._license_findings(dependency, info, verdict, project_category, location, evidence)
 
     def _unpinned(self, dependency, location, evidence):
         return make_finding(

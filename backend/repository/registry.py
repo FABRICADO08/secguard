@@ -114,16 +114,8 @@ def _stable_latest(ecosystem: str, versions: list[str], fallback: str) -> str:
     return best
 
 
-def _pypi(name: str, fetch: Fetcher) -> PackageInfo | None:
-    document = fetch(f"https://pypi.org/pypi/{quote(name)}/json")
-
-    if not isinstance(document, dict):
-        return None
-
-    info = document.get("info") or {}
-
+def _pypi_release_dates(document: dict[str, Any]) -> dict[str, str]:
     dates: dict[str, str] = {}
-
     for version, files in (document.get("releases") or {}).items():
         uploads = sorted(
             str(item.get("upload_time_iso_8601") or "")
@@ -133,38 +125,54 @@ def _pypi(name: str, fetch: Fetcher) -> PackageInfo | None:
 
         if uploads and uploads[0]:
             dates[version] = uploads[0]
+    return dates
 
-    classifiers = info.get("classifiers") or []
 
+def _pypi_license(info: dict[str, Any], classifiers: list[str]) -> str:
     license_text = str(info.get("license_expression") or "")
-
     if not license_text:
         declared = str(info.get("license") or "").strip()
         license_text = declared if 0 < len(declared) <= 80 else ""
-
     if not license_text:
-        license_text = " OR ".join(
+        return " OR ".join(
             item.rsplit("::", 1)[-1].strip()
             for item in classifiers
             if item.startswith("License ::") and "OSI Approved ::" in item
         )
+    return license_text
 
+
+def _pypi_repository(info: dict[str, Any]) -> str:
+    urls = info.get("project_urls") or {}
+    return next(
+        (
+            _github_repository(str(url))
+            for url in [*urls.values(), info.get("home_page") or ""]
+            if _github_repository(str(url))
+        ),
+        "",
+    )
+
+
+def _pypi(name: str, fetch: Fetcher) -> PackageInfo | None:
+    document = fetch(f"https://pypi.org/pypi/{quote(name)}/json")
+    if not isinstance(document, dict):
+        return None
+
+    info = document.get("info") or {}
+    dates = _pypi_release_dates(document)
+    classifiers = info.get("classifiers") or []
     downloads = fetch(f"https://pypistats.org/api/packages/{quote(name.lower())}/recent")
-
     weekly = None
-
     if isinstance(downloads, dict):
         weekly = (downloads.get("data") or {}).get("last_week")
 
-    urls = info.get("project_urls") or {}
-
     ordered = sorted(dates.values())
-
     latest = _stable_latest(PYPI, list(dates), str(info.get("version") or ""))
 
     return PackageInfo(
         latest=latest,
-        license=license_text,
+        license=_pypi_license(info, classifiers),
         deprecated=(
             "Marked inactive on PyPI"
             if "Development Status :: 7 - Inactive" in classifiers
@@ -175,14 +183,7 @@ def _pypi(name: str, fetch: Fetcher) -> PackageInfo | None:
         first_release=ordered[0] if ordered else "",
         latest_release=ordered[-1] if ordered else "",
         release_dates=dates,
-        repository=next(
-            (
-                _github_repository(str(url))
-                for url in [*urls.values(), info.get("home_page") or ""]
-                if _github_repository(str(url))
-            ),
-            "",
-        ),
+        repository=_pypi_repository(info),
     )
 
 

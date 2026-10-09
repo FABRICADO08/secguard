@@ -288,32 +288,13 @@ def remediation(
     )
 
 
-def find_vulnerabilities(
-    dependencies: list[Dependency],
-    post: Poster | None = http_poster,
-    fetch: Fetcher | None = None,
-) -> tuple[dict[int, list[Vulnerability]], dict[int, Remediation]]:
-    """
-    Advisories per dependency (keyed by list index) and the remediation
-    for each vulnerable one. ``post=None`` disables lookups entirely.
-    """
-
-    if post is None:
-        return {}, {}
-
-    fetch = fetch or (lambda url: _get(url))
-
-    checkable = [
-        (index, dependency)
-        for index, dependency in enumerate(dependencies)
-        if dependency.version
-    ]
-
+def _query_vulnerability_ids(
+    checkable: list[tuple[int, Dependency]],
+    post: Poster,
+) -> dict[int, list[str]]:
     identifiers: dict[int, list[str]] = {}
-
     for start in range(0, len(checkable), BATCH_SIZE):
         chunk = checkable[start:start + BATCH_SIZE]
-
         response = post(
             OSV_BATCH,
             {
@@ -334,46 +315,67 @@ def find_vulnerabilities(
 
             if ids:
                 identifiers[index] = ids
+    return identifiers
 
+
+def _parse_vulnerability_ids(
+    dependencies: list[Dependency],
+    identifiers: dict[int, list[str]],
+    fetch: Fetcher,
+) -> tuple[dict[int, list[Vulnerability]], dict[int, Remediation]]:
     records: dict[str, dict[str, Any]] = {}
-
     found: dict[int, list[Vulnerability]] = {}
     remediations: dict[int, Remediation] = {}
-
     for index, ids in identifiers.items():
         dependency = dependencies[index]
-
         parsed = []
         ranges = {}
         seen: set[str] = set()
-
         # GitHub advisories carry a reviewed severity; prefer them over
         # their PYSEC/CVE aliases, and report each issue once.
         for identifier in sorted(ids, key=lambda value: (not value.startswith("GHSA-"), value)):
             if identifier in seen:
                 continue
-
             if identifier not in records:
                 records[identifier] = fetch(OSV_VULN + identifier) or {}
-
             vulnerability = _parse(records[identifier], dependency)
-
             if vulnerability is not None:
                 names = {vulnerability.id, *vulnerability.aliases}
-
                 if names & seen:
                     seen.update(names)
                     continue
-
                 seen.update(names)
                 parsed.append(vulnerability)
                 ranges[vulnerability.id] = _ranges_for(records[identifier], dependency)
-
         if parsed:
             found[index] = parsed
             remediations[index] = remediation(dependency, parsed, ranges)
-
     return found, remediations
+
+
+def find_vulnerabilities(
+    dependencies: list[Dependency],
+    post: Poster | None = http_poster,
+    fetch: Fetcher | None = None,
+) -> tuple[dict[int, list[Vulnerability]], dict[int, Remediation]]:
+    """
+    Advisories per dependency (keyed by list index) and the remediation
+    for each vulnerable one. ``post=None`` disables lookups entirely.
+    """
+    if post is None:
+        return {}, {}
+
+    checkable = [
+        (index, dependency)
+        for index, dependency in enumerate(dependencies)
+        if dependency.version
+    ]
+    identifiers = _query_vulnerability_ids(checkable, post)
+    return _parse_vulnerability_ids(
+        dependencies,
+        identifiers,
+        fetch or (lambda url: _get(url)),
+    )
 
 
 def _get(url: str) -> Any:
