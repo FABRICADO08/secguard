@@ -83,27 +83,62 @@ class QualityReport:
     has_web_api: bool = False
 
     def metrics(self) -> dict[str, Any]:
-        complexities = [function.cyclomatic for function in self.functions]
-        lines_in_complex = sum(function.lines for function in self.functions if function.cyclomatic > COMPLEXITY_WARNING)
-        function_lines = sum(function.lines for function in self.functions) or 1
-
         return {
             "files": self.files,
             "code_lines": self.code_lines,
             "languages": self.languages,
-            "functions": len(self.functions),
-            "average_complexity": round(sum(complexities) / len(complexities), 2) if complexities else 0,
-            "max_complexity": max(complexities, default=0),
-            "complex_functions": sum(1 for value in complexities if value > COMPLEXITY_WARNING),
-            "complex_code_ratio": round(lines_in_complex / function_lines, 4) if self.functions else 0,
+            **self._complexity_metrics(),
             "duplicated_lines": self.duplicated_lines,
-            "duplication_ratio": round(self.duplicated_lines / self.code_lines, 4) if self.code_lines else 0,
-            "docstring_coverage": round(self.documented / self.documentable, 4) if self.documentable else None,
-            "type_annotation_coverage": round(self.annotated / self.annotatable, 4) if self.annotatable else None,
+            **self._coverage_metrics(),
             "has_readme": self.has_readme,
             "api_specs": self.api_specs,
             "has_web_api": self.has_web_api,
             "technical_debt_minutes": technical_debt_minutes(self.issues),
+        }
+
+    def _complexity_metrics(self) -> dict[str, Any]:
+        complexities = [function.cyclomatic for function in self.functions]
+        lines_in_complex = sum(
+            function.lines
+            for function in self.functions
+            if function.cyclomatic > COMPLEXITY_WARNING
+        )
+        function_lines = sum(function.lines for function in self.functions) or 1
+        return {
+            "functions": len(self.functions),
+            "average_complexity": (
+                round(sum(complexities) / len(complexities), 2)
+                if complexities
+                else 0
+            ),
+            "max_complexity": max(complexities, default=0),
+            "complex_functions": sum(
+                1 for value in complexities if value > COMPLEXITY_WARNING
+            ),
+            "complex_code_ratio": (
+                round(lines_in_complex / function_lines, 4)
+                if self.functions
+                else 0
+            ),
+        }
+
+    def _coverage_metrics(self) -> dict[str, Any]:
+        return {
+            "duplication_ratio": (
+                round(self.duplicated_lines / self.code_lines, 4)
+                if self.code_lines
+                else 0
+            ),
+            "docstring_coverage": (
+                round(self.documented / self.documentable, 4)
+                if self.documentable
+                else None
+            ),
+            "type_annotation_coverage": (
+                round(self.annotated / self.annotatable, 4)
+                if self.annotatable
+                else None
+            ),
         }
 
     def hotspots(self, limit: int = 10) -> list[dict[str, Any]]:
@@ -155,37 +190,58 @@ def cognitive_complexity(node: ast.AST) -> int:
     flow costs one, plus one per level of nesting it sits at.
     """
 
-    total = 0
+    total = [0]
+    _visit_cognitive(node, 0, total)
+    return total[0]
 
-    def visit(current: ast.AST, nesting: int) -> None:
-        nonlocal total
 
-        for child in ast.iter_child_nodes(current):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef)):
-                visit(child, nesting + 1) if isinstance(child, ast.Lambda) else None
-                continue
+def _visit_cognitive(current: ast.AST, nesting: int, total: list[int]) -> None:
+    for child in ast.iter_child_nodes(current):
+        points, child_nesting, recurse = _cognitive_child(
+            current,
+            child,
+            nesting,
+        )
+        total[0] += points
+        if recurse:
+            _visit_cognitive(child, child_nesting, total)
 
-            if isinstance(child, (ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler, ast.IfExp)):
-                is_elif = (
-                    isinstance(current, ast.If)
-                    and isinstance(child, ast.If)
-                    and current.orelse == [child]
-                )
-                total += 1 if is_elif else 1 + nesting
-                visit(child, nesting if is_elif else nesting + 1)
-                continue
 
-            if isinstance(child, ast.BoolOp):
-                total += 1
+def _cognitive_child(
+    current: ast.AST,
+    child: ast.AST,
+    nesting: int,
+) -> tuple[int, int, bool]:
+    nested_scope = isinstance(
+        child,
+        (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda, ast.ClassDef),
+    )
+    if nested_scope:
+        if isinstance(child, ast.Lambda):
+            return 0, nesting + 1, True
+        return 0, nesting, False
 
-            if isinstance(child, (ast.Break, ast.Continue)) and nesting > 1:
-                total += 1
+    if isinstance(
+        child,
+        (ast.If, ast.For, ast.AsyncFor, ast.While, ast.ExceptHandler, ast.IfExp),
+    ):
+        is_elif = _is_elif(current, child)
+        return (1 if is_elif else 1 + nesting), (
+            nesting if is_elif else nesting + 1
+        ), True
 
-            visit(child, nesting)
+    points = int(isinstance(child, ast.BoolOp))
+    if isinstance(child, (ast.Break, ast.Continue)) and nesting > 1:
+        points += 1
+    return points, nesting, True
 
-    visit(node, 0)
 
-    return total
+def _is_elif(current: ast.AST, child: ast.AST) -> bool:
+    return (
+        isinstance(current, ast.If)
+        and isinstance(child, ast.If)
+        and current.orelse == [child]
+    )
 
 
 def _walk_own(node: ast.AST):
@@ -208,44 +264,42 @@ def _span(node: ast.AST) -> int:
     return end - getattr(node, "lineno", 0) + 1
 
 
-def _unused_locals(function: ast.AST) -> list[tuple[str, int]]:
+def _function_bindings(function: ast.AST) -> tuple[dict[str, int], set[str]]:
     stored: dict[str, int] = {}
     loaded: set[str] = set()
     declared_outer: set[str] = set()
-
-    # Only this function's own bindings count, but a nested function or
-    # class reading a name (a closure) uses it.
     for child in _walk_own(function):
         if isinstance(child, (ast.Global, ast.Nonlocal)):
             declared_outer.update(child.names)
         elif isinstance(child, ast.Name) and isinstance(child.ctx, ast.Store):
             stored.setdefault(child.id, child.lineno)
-
     for child in ast.walk(function):
         if isinstance(child, ast.Name) and not isinstance(child.ctx, ast.Store):
             loaded.add(child.id)
+    return stored, loaded | declared_outer
 
-    # Names unpacked in a loop or tuple target are routinely partly unused.
+
+def _unpacked_names(function: ast.AST) -> set[str]:
     unpacked: set[str] = set()
-
     for child in ast.walk(function):
         targets = []
-
         if isinstance(child, (ast.For, ast.AsyncFor, ast.comprehension)):
             targets.append(child.target)
         elif isinstance(child, ast.Assign):
             targets.extend(target for target in child.targets if isinstance(target, (ast.Tuple, ast.List)))
         elif isinstance(child, ast.withitem) and child.optional_vars is not None:
             targets.append(child.optional_vars)
-
         for target in targets:
             unpacked.update(name.id for name in ast.walk(target) if isinstance(name, ast.Name))
+    return unpacked
 
+def _unused_locals(function: ast.AST) -> list[tuple[str, int]]:
+    stored, used = _function_bindings(function)
+    unpacked = _unpacked_names(function)
     return [
         (name, line)
         for name, line in stored.items()
-        if name not in loaded
-        and name not in declared_outer
+        if name not in used
         and name not in unpacked
         and not name.startswith("_")
     ]
@@ -272,6 +326,7 @@ def _unreachable(body: list[ast.stmt]) -> list[ast.stmt]:
     return found
 
 
+<<<<<<< HEAD
 def _analyse_class(node: ast.ClassDef, path: str, report: QualityReport, is_test: bool) -> None:
     methods = [
         child for child in node.body
@@ -284,36 +339,70 @@ def _analyse_class(node: ast.ClassDef, path: str, report: QualityReport, is_test
                   float(_span(node)), node.end_lineno or node.lineno)
         )
 
+=======
+def _record_python_class(
+    path: str, node: ast.ClassDef, is_test: bool, report: QualityReport
+) -> None:
+    methods = [child for child in node.body if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    span = _span(node)
+    if len(methods) > CLASS_METHODS or span > CLASS_LINES:
+        report.issues.append(
+            Issue("REPO-MNT-004", path, node.lineno, node.name,
+                  f"Class `{node.name}` has {len(methods)} methods over {span} lines.",
+                  float(span), node.end_lineno or node.lineno)
+        )
+>>>>>>> origin/main
     if not is_test and not node.name.startswith("_"):
         report.documentable += 1
         report.documented += ast.get_docstring(node) is not None
 
 
+<<<<<<< HEAD
 def _analyse_function(
     node: ast.FunctionDef | ast.AsyncFunctionDef,
     path: str,
     report: QualityReport,
     is_test: bool,
+=======
+def _record_python_function(
+    path: str, node: ast.FunctionDef | ast.AsyncFunctionDef,
+    is_test: bool, report: QualityReport
+>>>>>>> origin/main
 ) -> None:
     cyclomatic = cyclomatic_complexity(node)
     cognitive = cognitive_complexity(node)
     arguments = [*node.args.posonlyargs, *node.args.args, *node.args.kwonlyargs]
     parameters = [argument for argument in arguments if argument.arg not in ("self", "cls")]
+<<<<<<< HEAD
     report.functions.append(
         FunctionMetrics(path, node.name, node.lineno, _span(node), cyclomatic, cognitive, len(parameters))
     )
     end = node.end_lineno or node.lineno
 
+=======
+    span = _span(node)
+    report.functions.append(
+        FunctionMetrics(path, node.name, node.lineno, span, cyclomatic, cognitive, len(parameters))
+    )
+    end = node.end_lineno or node.lineno
+>>>>>>> origin/main
     if cyclomatic > COMPLEXITY_WARNING or cognitive > COGNITIVE_WARNING:
         report.issues.append(
             Issue("REPO-MNT-001", path, node.lineno, node.name,
                   f"`{node.name}` has cyclomatic complexity {cyclomatic} and cognitive complexity {cognitive}.",
                   float(cyclomatic), end)
         )
+<<<<<<< HEAD
     if _span(node) > FUNCTION_LINES:
         report.issues.append(
             Issue("REPO-MNT-002", path, node.lineno, node.name,
                   f"`{node.name}` is {_span(node)} lines long.", float(_span(node)), end)
+=======
+    if span > FUNCTION_LINES:
+        report.issues.append(
+            Issue("REPO-MNT-002", path, node.lineno, node.name,
+                  f"`{node.name}` is {span} lines long.", float(span), end)
+>>>>>>> origin/main
         )
     if len(parameters) > PARAMETERS:
         report.issues.append(
@@ -324,8 +413,12 @@ def _analyse_function(
         report.issues.append(
             Issue("REPO-MNT-006", path, line, name, f"Local variable `{name}` in `{node.name}` is assigned but never used.")
         )
+<<<<<<< HEAD
 
     if not node.name.startswith("_") and not is_test:
+=======
+    if not is_test and not node.name.startswith("_"):
+>>>>>>> origin/main
         report.documentable += 1
         report.documented += ast.get_docstring(node) is not None
         report.annotatable += 1
@@ -339,21 +432,25 @@ def _analyse_python(path: str, source: str, report: QualityReport) -> None:
         tree = ast.parse(source)
     except (SyntaxError, ValueError):
         return
-
     is_test = bool(re.search(r"(^|/)(tests?|test_[^/]*|[^/]*_test)\.?", path))
-
-    if re.search(r"\b(flask|fastapi|django|starlette)\b", source) and re.search(r"@\w+\.(route|get|post|put|delete|api_view)", source):
+    if re.search(r"\b(flask|fastapi|django|starlette)\b", source) and re.search(
+        r"@\w+\.(route|get|post|put|delete|api_view)", source
+    ):
         report.has_web_api = True
-
     if not is_test:
         report.documentable += 1
         report.documented += ast.get_docstring(tree) is not None
-
     for node in ast.walk(tree):
         if isinstance(node, ast.ClassDef):
+<<<<<<< HEAD
             _analyse_class(node, path, report, is_test)
         elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             _analyse_function(node, path, report, is_test)
+=======
+            _record_python_class(path, node, is_test, report)
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            _record_python_function(path, node, is_test, report)
+>>>>>>> origin/main
 
     for statement in _unreachable(tree.body):
         report.issues.append(
@@ -365,8 +462,16 @@ def _analyse_python(path: str, source: str, report: QualityReport) -> None:
 
 
 def _unused_imports(path: str, tree: ast.Module, report: QualityReport) -> None:
-    imported: dict[str, int] = {}
+    imported = _imported_names(tree)
+    used = _used_names(tree)
 
+    for name, line in imported.items():
+        if name not in used:
+            report.issues.append(Issue("REPO-MNT-005", path, line, name, f"`{name}` is imported but never used."))
+
+
+def _imported_names(tree: ast.Module) -> dict[str, int]:
+    imported: dict[str, int] = {}
     for node in tree.body:
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -375,9 +480,11 @@ def _unused_imports(path: str, tree: ast.Module, report: QualityReport) -> None:
             for alias in node.names:
                 if alias.name != "*":
                     imported[alias.asname or alias.name] = node.lineno
+    return imported
 
+
+def _used_names(tree: ast.Module) -> set[str]:
     used: set[str] = set()
-
     for node in ast.walk(tree):
         if isinstance(node, ast.Name):
             used.add(node.id)
@@ -390,10 +497,8 @@ def _unused_imports(path: str, tree: ast.Module, report: QualityReport) -> None:
         elif isinstance(node, ast.Constant) and isinstance(node.value, str):
             # Names referenced from string annotations and __all__.
             used.update(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", node.value))
+    return used
 
-    for name, line in imported.items():
-        if name not in used:
-            report.issues.append(Issue("REPO-MNT-005", path, line, name, f"`{name}` is imported but never used."))
 
 
 # ---------------------------------------------------- language-neutral
@@ -426,55 +531,60 @@ def _normalised_lines(text: str) -> list[tuple[int, str]]:
 
 
 def _duplicates(sources: dict[str, list[tuple[int, str]]], report: QualityReport) -> None:
-    windows: dict[str, list[tuple[str, int]]] = {}
+    windows = _duplicate_windows(sources)
+    duplicated, first_copy = _duplicate_occurrences(windows)
+    report.duplicated_lines = sum(len(indexes) for indexes in duplicated.values())
+    _report_duplicate_blocks(sources, first_copy, report)
 
+
+def _duplicate_windows(
+    sources: dict[str, list[tuple[int, str]]],
+) -> dict[str, list[tuple[str, int]]]:
+    windows: dict[str, list[tuple[str, int]]] = {}
     for path, lines in sources.items():
         for index in range(len(lines) - DUPLICATE_WINDOW + 1):
             chunk = "\n".join(text for _, text in lines[index:index + DUPLICATE_WINDOW])
-
             if len(chunk) < DUPLICATE_WINDOW * 8:
                 continue
-
             digest = hashlib.sha1(chunk.encode("utf-8")).hexdigest()
             windows.setdefault(digest, []).append((path, index))
+    return windows
 
+
+def _duplicate_occurrences(
+    windows: dict[str, list[tuple[str, int]]],
+) -> tuple[dict[str, set[int]], dict[tuple[str, int], tuple[str, int]]]:
     duplicated: dict[str, set[int]] = {}
     first_copy: dict[tuple[str, int], tuple[str, int]] = {}
-
     for occurrences in windows.values():
         if len(occurrences) < 2:
             continue
-
         original = occurrences[0]
-
         for path, index in occurrences:
             duplicated.setdefault(path, set()).update(range(index, index + DUPLICATE_WINDOW))
-
             if (path, index) != original:
                 first_copy.setdefault((path, index), original)
+    return duplicated, first_copy
 
-    report.duplicated_lines = sum(len(indexes) for indexes in duplicated.values())
 
-    # Collapse overlapping windows into one block per copy.
+def _report_duplicate_blocks(
+    sources: dict[str, list[tuple[int, str]]],
+    first_copy: dict[tuple[str, int], tuple[str, int]],
+    report: QualityReport,
+) -> None:
     reported = 0
     covered: dict[str, int] = {}
-
     for (path, index), (original_path, original_index) in sorted(first_copy.items()):
         if index < covered.get(path, -1) or reported >= MAX_DUPLICATE_BLOCKS:
             continue
-
         end = index + DUPLICATE_WINDOW
-
         while (path, end - DUPLICATE_WINDOW + 1) in first_copy:
             end += 1
-
         covered[path] = end
-
         lines = sources[path]
         start_line = lines[index][0]
         end_line = lines[min(end, len(lines)) - 1][0]
         original_line = sources[original_path][original_index][0]
-
         report.issues.append(
             Issue("REPO-MNT-008", path, start_line, "",
                   f"Lines {start_line}-{end_line} duplicate {original_path}:{original_line}.",
@@ -483,6 +593,7 @@ def _duplicates(sources: dict[str, list[tuple[int, str]]], report: QualityReport
         reported += 1
 
 
+<<<<<<< HEAD
 def _analyse_source_file(
     path: Path,
     root: Path,
@@ -495,6 +606,52 @@ def _analyse_source_file(
         if path.parent == root:
             report.has_readme = True
         return
+=======
+def _inspect_quality_file(
+    path: Path,
+    relative: str,
+    language: str,
+    report: QualityReport,
+    normalised: dict[str, list[tuple[int, str]]],
+) -> None:
+    text = path.read_text(encoding="utf-8", errors="replace")
+    lines = text.splitlines()
+    report.files += 1
+    code = _normalised_lines(text)
+    report.code_lines += len(code)
+    report.languages[language] = report.languages.get(language, 0) + len(code)
+    normalised[relative] = code
+    if language == "Python":
+        _analyse_python(relative, text, report)
+        if len(lines) > FILE_LINES:
+            _analyse_generic(relative, lines, report)
+        return
+    _analyse_generic(relative, lines, report)
+    if language in ("JavaScript", "TypeScript") and re.search(r"\b(express|fastify|koa)\b", text):
+        report.has_web_api = True
+
+
+def _coverage_findings(report: QualityReport) -> None:
+    if not report.has_readme and report.files:
+        report.issues.append(Issue("REPO-MNT-011", "README.md", 0, "", "The repository has no README at its root."))
+    if report.has_web_api and not report.api_specs:
+        report.issues.append(Issue("REPO-MNT-013", "", 0, "", "The code serves an HTTP API but no OpenAPI/Swagger specification was found."))
+    metrics = report.metrics()
+    if metrics["docstring_coverage"] is not None and report.documentable >= 10 and metrics["docstring_coverage"] < 0.5:
+        report.issues.append(
+            Issue("REPO-MNT-009", "", 0, "", f"Only {metrics['docstring_coverage']:.0%} of public modules, classes and functions have a docstring.",
+                  metrics["docstring_coverage"])
+        )
+    if metrics["type_annotation_coverage"] is not None and report.annotatable >= 10 and metrics["type_annotation_coverage"] < 0.5:
+        report.issues.append(
+            Issue("REPO-MNT-010", "", 0, "", f"Only {metrics['type_annotation_coverage']:.0%} of public functions are fully type-annotated.",
+                  metrics["type_annotation_coverage"])
+        )
+
+
+def analyse_quality(root: Path) -> QualityReport:
+    report = QualityReport()
+>>>>>>> origin/main
 
     if re.fullmatch(r"(openapi|swagger)[^/]*\.(ya?ml|json)", name) or name.endswith((".raml", ".graphql")):
         report.api_specs.append(relative)
@@ -514,6 +671,7 @@ def _analyse_source_file(
     report.languages[language] = report.languages.get(language, 0) + len(code)
     normalised[relative] = code
 
+<<<<<<< HEAD
     if language == "Python":
         _analyse_python(relative, text, report)
         if len(lines) > FILE_LINES:
@@ -551,4 +709,22 @@ def analyse_quality(root: Path) -> QualityReport:
     if report.has_web_api and not report.api_specs:
         report.issues.append(Issue("REPO-MNT-013", "", 0, "", "The code serves an HTTP API but no OpenAPI/Swagger specification was found."))
     _coverage_issues(report)
+=======
+        if re.fullmatch(r"(openapi|swagger)[^/]*\.(ya?ml|json)", name) or name.endswith((".raml", ".graphql")):
+            report.api_specs.append(relative)
+            continue
+
+        language = SOURCE_SUFFIXES.get(path.suffix.lower())
+
+        if language is None or path.stat().st_size > MAX_SOURCE_BYTES:
+            continue
+
+        if re.search(r"\.min\.(js|css)$|(^|/)(migrations|fixtures|generated)/", relative):
+            continue
+
+        _inspect_quality_file(path, relative, language, report, normalised)
+
+    _duplicates(normalised, report)
+    _coverage_findings(report)
+>>>>>>> origin/main
     return report

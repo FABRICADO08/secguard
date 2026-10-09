@@ -1,3 +1,5 @@
+"""Typed records used to normalize OutSystems application exports."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass, field
@@ -5,6 +7,8 @@ from dataclasses import dataclass, field
 
 @dataclass
 class Attribute:
+    """An attribute declared on an OutSystems entity."""
+
     name: str
     module: str = ""
     entity: str = ""
@@ -13,6 +17,7 @@ class Attribute:
 
     @property
     def qualified_name(self) -> str:
+        """Return the module, entity, and attribute name joined together."""
         return ".".join(
             part
             for part in (self.module, self.entity, self.name)
@@ -22,6 +27,8 @@ class Attribute:
 
 @dataclass
 class Entity:
+    """An entity and its exposure and attribute metadata."""
+
     name: str
     module: str = ""
     is_public: bool = False
@@ -30,6 +37,7 @@ class Entity:
 
     @property
     def qualified_name(self) -> str:
+        """Return the module-qualified entity name."""
         return ".".join(
             part
             for part in (self.module, self.name)
@@ -39,6 +47,8 @@ class Entity:
 
 @dataclass
 class Screen:
+    """A screen with its anonymous-access and role settings."""
+
     name: str
     module: str = ""
     is_anonymous: bool = False
@@ -46,6 +56,7 @@ class Screen:
 
     @property
     def qualified_name(self) -> str:
+        """Return the module-qualified screen name."""
         return ".".join(
             part
             for part in (self.module, self.name)
@@ -55,6 +66,8 @@ class Screen:
 
 @dataclass
 class RestMethod:
+    """An exposed REST method and its access-control metadata."""
+
     name: str
     api: str = ""
     module: str = ""
@@ -64,6 +77,7 @@ class RestMethod:
 
     @property
     def qualified_name(self) -> str:
+        """Return the module, API, and method names joined together."""
         return ".".join(
             part
             for part in (self.module, self.api, self.name)
@@ -73,12 +87,15 @@ class RestMethod:
 
 @dataclass
 class ConsumedApi:
+    """An external API consumed by an OutSystems module."""
+
     name: str
     module: str = ""
     base_url: str = ""
 
     @property
     def qualified_name(self) -> str:
+        """Return the module-qualified API name."""
         return ".".join(
             part
             for part in (self.module, self.name)
@@ -88,6 +105,8 @@ class ConsumedApi:
 
 @dataclass
 class SiteProperty:
+    """A configurable site property, including its default value."""
+
     name: str
     module: str = ""
     data_type: str = ""
@@ -95,6 +114,7 @@ class SiteProperty:
 
     @property
     def qualified_name(self) -> str:
+        """Return the module-qualified site-property name."""
         return ".".join(
             part
             for part in (self.module, self.name)
@@ -104,6 +124,8 @@ class SiteProperty:
 
 @dataclass
 class Query:
+    """A database query and any parameters expanded inline."""
+
     name: str
     module: str = ""
     kind: str = ""
@@ -112,6 +134,7 @@ class Query:
 
     @property
     def qualified_name(self) -> str:
+        """Return the module-qualified query name."""
         return ".".join(
             part
             for part in (self.module, self.name)
@@ -121,6 +144,8 @@ class Query:
 
 @dataclass
 class Module:
+    """All security-relevant model elements owned by one module."""
+
     name: str
     kind: str = ""
     entities: list[Entity] = field(default_factory=list)
@@ -148,6 +173,7 @@ class OutSystemsModel:
 
     @property
     def is_empty(self) -> bool:
+        """Whether the normalized export contains any model elements."""
         return not any(
             (
                 self.modules,

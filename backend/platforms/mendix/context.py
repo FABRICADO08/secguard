@@ -106,34 +106,27 @@ class MendixSecurityContext:
 
             for role in rule.roles:
 
-                if role not in access:
-
-                    access[role] = []
-
-                member_access = (
-                    rule.default_member_access_rights
-                    or ""
+                access.setdefault(role, []).extend(
+                    self._role_permissions(rule)
                 )
 
-                if member_access:
-
-                    access[role].append(
-                        member_access
-                    )
-
-                if rule.allow_create:
-
-                    access[role].append(
-                        "Create"
-                    )
-
-                if rule.allow_delete:
-
-                    access[role].append(
-                        "Delete"
-                    )
-
         return access
+
+    @staticmethod
+    def _role_permissions(rule) -> List[str]:
+        permissions = []
+        member_access = rule.default_member_access_rights or ""
+
+        if member_access:
+            permissions.append(member_access)
+
+        if rule.allow_create:
+            permissions.append("Create")
+
+        if rule.allow_delete:
+            permissions.append("Delete")
+
+        return permissions
 
     # ========================================================
     # SENSITIVE ATTRIBUTE SEARCH

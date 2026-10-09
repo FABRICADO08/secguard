@@ -100,22 +100,8 @@ def _freshness(dependency: Dependency, info: PackageInfo | None) -> dict[str, An
 
     current = release_parts(dependency.ecosystem, dependency.version)
     latest = release_parts(dependency.ecosystem, info.latest)
-
-    behind = {"major": max(latest[0] - current[0], 0), "minor": 0, "patch": 0}
-
-    if behind["major"] == 0:
-        behind["minor"] = max(latest[1] - current[1], 0)
-
-        if behind["minor"] == 0:
-            behind["patch"] = max(latest[2] - current[2], 0)
-
-    libyears = None
-
-    released = parse_time(info.released(dependency.version))
-    newest = parse_time(info.released(info.latest) or info.latest_release)
-
-    if released and newest and compare(dependency.ecosystem, info.latest, dependency.version) > 0:
-        libyears = round(max((newest - released).days / 365.25, 0.0), 2)
+    behind = _version_gap(current, latest)
+    libyears = _libyears(dependency, info)
 
     return {
         "latest": info.latest,
@@ -123,6 +109,65 @@ def _freshness(dependency: Dependency, info: PackageInfo | None) -> dict[str, An
         "libyears": libyears if libyears is not None else 0.0,
         "up_to_date": compare(dependency.ecosystem, dependency.version, info.latest) >= 0,
     }
+
+
+def _version_gap(current: tuple[int, int, int], latest: tuple[int, int, int]) -> dict[str, int]:
+    major = max(latest[0] - current[0], 0)
+    minor = max(latest[1] - current[1], 0) if major == 0 else 0
+    patch = max(latest[2] - current[2], 0) if major == 0 and minor == 0 else 0
+    return {"major": major, "minor": minor, "patch": patch}
+
+
+def _libyears(dependency: Dependency, info: PackageInfo) -> float | None:
+    released = parse_time(info.released(dependency.version))
+    newest = parse_time(info.released(info.latest) or info.latest_release)
+
+    if not released or not newest:
+        return None
+    if compare(dependency.ecosystem, info.latest, dependency.version) <= 0:
+        return None
+
+    return round(max((newest - released).days / 365.25, 0.0), 2)
+
+
+def _vulnerability_confidence(dependency: Dependency, reach: str) -> str:
+    if reach == NOT_IMPORTED or dependency.scope == DEVELOPMENT:
+        return TENTATIVE
+    if reach == IMPORTED:
+        return CONFIRMED
+    return FIRM
+
+
+def _reach_note(reach: str) -> str:
+    return {
+        IMPORTED: " First-party code imports this package.",
+        NOT_IMPORTED: " No first-party code imports this package, so the vulnerable code is unlikely to be reachable.",
+    }.get(reach, "")
+
+
+def _vulnerability_recommendation(dependency, vulnerability, fix) -> str:
+    if fix and fix.target:
+        upgrade = f"Upgrade {dependency.name} from {dependency.version} to {fix.target}"
+
+        if fix.breaking and fix.non_breaking_target:
+            upgrade += (
+                f" ({fix.target} is a major upgrade; {fix.non_breaking_target} stays on your "
+                "current major line but does not clear every advisory)"
+            )
+        elif fix.breaking:
+            upgrade += f" ({fix.target} is a major upgrade: review its changelog for breaking changes)"
+        else:
+            upgrade += ", a compatible upgrade that clears every known advisory"
+
+        return upgrade + "."
+
+    if vulnerability.minimum_fix:
+        return f"Upgrade {dependency.name} to at least {vulnerability.minimum_fix}."
+
+    return (
+        f"No fixed release of {dependency.name} is published; replace the package or "
+        "mitigate the vulnerable feature."
+    )
 
 
 class RepositoryScanner:
@@ -182,17 +227,27 @@ class RepositoryScanner:
 
     # ------------------------------------------------------------------
 
+<<<<<<< HEAD
     def _scan_dependencies(
         self,
         dependencies: list[Dependency],
         project_category: str,
         vulnerabilities: dict[int, list[Any]],
         remediations: dict[int, Any],
+=======
+    def _collect_dependency_data(
+        self,
+        dependencies: list[Dependency],
+        vulnerabilities: dict[int, list[Vulnerability]],
+        remediations: dict[int, Any],
+        project_category: str,
+>>>>>>> origin/main
     ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
         findings: list[dict[str, Any]] = []
         records: list[dict[str, Any]] = []
         advisories: list[dict[str, Any]] = []
         package_findings: set[tuple[str, str, str]] = set()
+<<<<<<< HEAD
 
         for index, dependency in enumerate(dependencies):
             info = self.info(dependency)
@@ -221,10 +276,29 @@ class RepositoryScanner:
 
             once = (dependency.ecosystem, normalize_package(dependency.ecosystem, dependency.name))
             for finding in self._package_findings(dependency, info, verdict, project_category, freshness, activity):
+=======
+        for index, dependency in enumerate(dependencies):
+            record, dependency_findings = self._collect_one_dependency(
+                index,
+                dependency,
+                vulnerabilities,
+                remediations,
+                project_category,
+                advisories,
+            )
+            records.append(record)
+            findings.extend(dependency_findings[0])
+            once = (
+                dependency.ecosystem,
+                normalize_package(dependency.ecosystem, dependency.name),
+            )
+            for finding in dependency_findings[1]:
+>>>>>>> origin/main
                 identity = (*once, finding["rule_id"])
                 if identity not in package_findings:
                     package_findings.add(identity)
                     findings.append(finding)
+<<<<<<< HEAD
 
         return findings, records, advisories
 
@@ -236,6 +310,49 @@ class RepositoryScanner:
                 category = record["license_category"]
                 counts[category] = counts.get(category, 0) + 1
         return counts
+=======
+        return records, findings, advisories
+
+    def _collect_one_dependency(
+        self,
+        index: int,
+        dependency: Dependency,
+        vulnerabilities: dict[int, list[Vulnerability]],
+        remediations: dict[int, Any],
+        project_category: str,
+        advisories: list[dict[str, Any]],
+    ) -> tuple[dict[str, Any], tuple[list[dict[str, Any]], list[dict[str, Any]]]]:
+        info = self.info(dependency)
+        reach = self.reachability.status(dependency)
+        verdict = licensing.evaluate(info.license if info else "")
+        freshness = _freshness(dependency, info)
+        activity = self.activity(info.repository) if info else None
+        package_url = purl(dependency.ecosystem, dependency.name, dependency.version)
+        found = vulnerabilities.get(index, [])
+        fix = remediations.get(index)
+        record = {
+            **dependency.to_dict(),
+            "purl": package_url,
+            "license": info.license if info else "",
+            "license_spdx": verdict.options[0] if len(verdict.options) == 1 and verdict.category != licensing.UNKNOWN else "",
+            "license_category": verdict.category if info else "",
+            "reachability": reach,
+            "registry": info.to_dict() if info else None,
+            "upstream": activity.__dict__ if activity else None,
+            "freshness": freshness,
+            "vulnerabilities": [item.id for item in found],
+            "remediation": fix.to_dict() if fix else None,
+        }
+        vulnerability_findings = self._vulnerability_findings(
+            dependency, found, fix, reach, package_url, advisories
+        )
+        package_findings = list(
+            self._package_findings(
+                dependency, info, verdict, project_category, freshness, activity
+            )
+        )
+        return record, (vulnerability_findings, package_findings)
+>>>>>>> origin/main
 
     def run(self, repository: dict[str, Any] | None = None) -> dict[str, Any]:
         repository = dict(repository or {})
@@ -255,8 +372,13 @@ class RepositoryScanner:
             fetch=self.fetch if self.post is not None else None,
         )
 
+<<<<<<< HEAD
         findings, records, advisories = self._scan_dependencies(
             dependencies, project_category, vulnerabilities, remediations
+=======
+        records, findings, advisories = self._collect_dependency_data(
+            dependencies, vulnerabilities, remediations, project_category
+>>>>>>> origin/main
         )
 
         quality = analyse_quality(self.root)
@@ -297,6 +419,15 @@ class RepositoryScanner:
             "health": health_summary(findings, freshness_summary, metrics),
         }
 
+    @staticmethod
+    def _license_counts(records: list[dict[str, Any]]) -> dict[str, int]:
+        counts: dict[str, int] = {}
+        for record in records:
+            category = record["license_category"]
+            if category:
+                counts[category] = counts.get(category, 0) + 1
+        return counts
+
     # ------------------------------------------------------------------
 
     def _vulnerability_findings(self, dependency, found, fix, reach, package_url, advisories):
@@ -306,6 +437,7 @@ class RepositoryScanner:
             advisory = {**vulnerability.to_dict(), "purl": package_url, "manifest": dependency.manifest, "line": dependency.line}
             advisories.append(advisory)
 
+<<<<<<< HEAD
             confidence = FIRM
 
             if reach == NOT_IMPORTED or dependency.scope == DEVELOPMENT:
@@ -319,14 +451,16 @@ class RepositoryScanner:
                 NOT_IMPORTED: " No first-party code imports this package, so the vulnerable code is unlikely to be reachable.",
             }.get(reach, "")
 
+=======
+>>>>>>> origin/main
             results.append(
                 make_finding(
                     "REPO-DEP-001",
                     vulnerability.severity,
                     f"{dependency.name} {dependency.version} is affected by {vulnerability.id}"
                     f"{' (' + ', '.join(vulnerability.aliases[:2]) + ')' if vulnerability.aliases else ''}: "
-                    f"{vulnerability.summary}{reach_note}",
-                    recommendation,
+                    f"{vulnerability.summary}{_reach_note(reach)}",
+                    _vulnerability_recommendation(dependency, vulnerability, fix),
                     _location(dependency),
                     {
                         "package": dependency.name,
@@ -347,7 +481,7 @@ class RepositoryScanner:
                         "manifest": dependency.manifest,
                         "line": dependency.line,
                     },
-                    confidence=confidence,
+                    confidence=_vulnerability_confidence(dependency, reach),
                     title=f"{dependency.name} {dependency.version}: {vulnerability.id}",
                     references=[vulnerability.url, *vulnerability.references[:3]],
                 )
@@ -356,6 +490,7 @@ class RepositoryScanner:
         return results
 
     @staticmethod
+<<<<<<< HEAD
     def _vulnerability_recommendation(dependency, vulnerability, fix) -> str:
         if fix and fix.target:
             upgrade = f"Upgrade {dependency.name} from {dependency.version} to {fix.target}"
@@ -416,6 +551,43 @@ class RepositoryScanner:
 
     def _typosquat_findings(self, dependency, location, evidence, age_days, downloads):
         squat = typosquat_target(dependency.ecosystem, dependency.name)
+=======
+    def _freshness_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
+        counts = {
+            "known": 0,
+            "up_to_date": 0,
+            "outdated": 0,
+            "major_behind": 0,
+            "minor_behind": 0,
+        }
+        libyears = 0.0
+        current = 0
+
+        for record in records:
+            item = record["freshness"]
+            if not item:
+                continue
+
+            behind = item["behind"]
+            counts["known"] += 1
+            counts["up_to_date" if item["up_to_date"] else "outdated"] += 1
+            counts["major_behind"] += behind["major"] > 0
+            counts["minor_behind"] += behind["major"] == 0 and behind["minor"] > 0
+            current += behind["major"] == 0 and behind["minor"] == 0
+            libyears += item.get("libyears") or 0
+
+        return {
+            **counts,
+            "libyears": round(libyears, 2),
+            "freshness_index": round(100 * current / counts["known"]) if counts["known"] else None,
+        }
+
+    def _lookalike_findings(
+        self, dependency, location, evidence, age_days, downloads
+    ):
+        name = dependency.name
+        squat = typosquat_target(dependency.ecosystem, name)
+>>>>>>> origin/main
         if squat:
             suspicious_registry = (age_days is not None and age_days < NEW_PACKAGE_DAYS) or (
                 downloads is not None and downloads < LOW_ADOPTION_DOWNLOADS
@@ -443,10 +615,18 @@ class RepositoryScanner:
                 confidence=TENTATIVE,
             )
 
+<<<<<<< HEAD
     def _package_status_findings(
         self, dependency, info, activity, location, evidence, runtime
     ):
         name = dependency.name
+=======
+    def _registry_status_findings(
+        self, dependency, info, freshness, activity, location, evidence
+    ):
+        name = dependency.name
+        runtime = dependency.scope != DEVELOPMENT
+>>>>>>> origin/main
         if info.deprecated:
             yield make_finding(
                 "REPO-DEP-002",
@@ -469,6 +649,28 @@ class RepositoryScanner:
                 confidence=CONFIRMED,
             )
 
+<<<<<<< HEAD
+=======
+        self._emit_maintenance_findings(
+            dependency, info, activity, location, evidence, runtime
+        )
+        behind = (freshness.get("behind") or {}).get("major", 0)
+        if behind >= 2:
+            yield make_finding(
+                "REPO-DEP-005",
+                "low",
+                f"{name} {dependency.version} is {behind} major versions behind the latest {freshness['latest']}.",
+                f"Plan an upgrade of {name} toward {freshness['latest']}; old major lines stop receiving fixes.",
+                location,
+                {**evidence, "latest": freshness["latest"], "major_versions_behind": behind, "libyears": freshness.get("libyears")},
+                confidence=CONFIRMED,
+            )
+
+    def _emit_maintenance_findings(
+        self, dependency, info, activity, location, evidence, runtime
+    ):
+        name = dependency.name
+>>>>>>> origin/main
         idle_years = _years_between(info.latest_release, self.today)
         if not info.deprecated and idle_years is not None and idle_years >= UNMAINTAINED_YEARS:
             commits = activity.commits_last_year if activity else None
@@ -496,6 +698,36 @@ class RepositoryScanner:
                 confidence=CONFIRMED,
             )
 
+<<<<<<< HEAD
+=======
+    def _package_findings(self, dependency, info, verdict, project_category, freshness, activity):
+        name = dependency.name
+        location = _location(dependency)
+        evidence = {"package": name, "ecosystem": dependency.ecosystem, "version": dependency.version, "scope": dependency.scope}
+        runtime = dependency.scope != DEVELOPMENT
+        age_days = None
+        if info and info.first_release:
+            first = parse_time(info.first_release)
+            age_days = (self.today - first).days if first else None
+        downloads = info.weekly_downloads if info else None
+        yield from self._lookalike_findings(
+            dependency, location, evidence, age_days, downloads
+        )
+        if info is None:
+            if dependency.direct and not dependency.version and dependency.spec and runtime:
+                yield self._unpinned(dependency, location, evidence)
+            return
+        yield from self._registry_status_findings(
+            dependency, info, freshness, activity, location, evidence
+        )
+
+        if dependency.direct and (dependency.resolved_from_range or not dependency.version) and dependency.spec and runtime:
+            yield self._unpinned(dependency, location, evidence)
+
+        if runtime:
+            yield from self._license_findings(dependency, info, verdict, project_category, location, evidence)
+
+>>>>>>> origin/main
     def _unpinned(self, dependency, location, evidence):
         return make_finding(
             "REPO-DEP-006",
@@ -542,23 +774,6 @@ class RepositoryScanner:
             location,
             detail,
         )
-
-    @staticmethod
-    def _freshness_summary(records: list[dict[str, Any]]) -> dict[str, Any]:
-        known = [record["freshness"] for record in records if record["freshness"]]
-
-        current = sum(1 for item in known if item["behind"]["major"] == 0 and item["behind"]["minor"] == 0)
-
-        return {
-            "known": len(known),
-            "up_to_date": sum(1 for item in known if item["up_to_date"]),
-            "outdated": sum(1 for item in known if not item["up_to_date"]),
-            "major_behind": sum(1 for item in known if item["behind"]["major"] > 0),
-            "minor_behind": sum(1 for item in known if item["behind"]["major"] == 0 and item["behind"]["minor"] > 0),
-            "libyears": round(sum(item.get("libyears") or 0 for item in known), 2),
-            "freshness_index": round(100 * current / len(known)) if known else None,
-        }
-
 
 def scan_repository(root: Path, repository: dict[str, Any] | None = None, **options: Any) -> dict[str, Any]:
     return RepositoryScanner(root, **options).run(repository)

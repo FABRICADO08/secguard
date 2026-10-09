@@ -277,6 +277,7 @@ def portfolio_summary(
     """
 
     today = today or datetime.now(timezone.utc)
+<<<<<<< HEAD
     lineages: dict[str, list[dict[str, Any]]] = {}
     for application in applications:
         lineages.setdefault(lineage_key(application), []).append(application)
@@ -290,12 +291,25 @@ def portfolio_summary(
         _process_lineage(scans, findings_for, trend)
         systems.append(_system_summary(scans))
 
+=======
+    lineages = _group_lineages(applications)
+    trend = _empty_trend(_recent_months(today, months))
+    systems = [
+        _process_lineage(scans, findings_for, trend)
+        for scans in lineages.values()
+    ]
+>>>>>>> origin/main
     systems.sort(
         key=lambda system: (
             -int(system.get("risk_score") or 0),
             str(system.get("name") or ""),
         )
     )
+<<<<<<< HEAD
+=======
+    totals = _portfolio_severity_counts(systems)
+    ratings = [system["rating"] for system in systems]
+>>>>>>> origin/main
 
     return {
         "generated_at": today.isoformat(),
@@ -306,3 +320,85 @@ def portfolio_summary(
             for month, values in trend.items()
         ],
     }
+
+
+def _group_lineages(
+    applications: list[dict[str, Any]],
+) -> dict[str, list[dict[str, Any]]]:
+    lineages: dict[str, list[dict[str, Any]]] = {}
+    for application in applications:
+        lineages.setdefault(lineage_key(application), []).append(application)
+    return lineages
+
+
+def _empty_trend(months: list[str]) -> dict[str, dict[str, int]]:
+    return {
+        label: {"new": 0, "existing": 0, "resolved": 0}
+        for label in months
+    }
+
+
+def _process_lineage(
+    scans: list[dict[str, Any]],
+    findings_for: Callable[[str], list[dict[str, Any]]],
+    trend: dict[str, dict[str, int]],
+) -> dict[str, Any]:
+    scans.sort(key=_scan_moment)
+    history: list[dict[str, Any]] | None = None
+    for scan in scans:
+        findings = findings_for(str(scan.get("id") or ""))
+        activity = _activity(findings, history)
+        month = _month_of(_scan_moment(scan))
+        if month in trend:
+            for key, value in activity.items():
+                trend[month][key] += value
+        scan["_findings"] = findings
+        scan["_activity"] = activity
+        scan["_previous"] = history
+        scan["_deltas"] = _deltas(
+            _counts(findings),
+            _counts(history) if history is not None else None,
+        )
+        history = findings
+    return _system_from_lineage(scans)
+
+
+def _system_from_lineage(scans: list[dict[str, Any]]) -> dict[str, Any]:
+    latest = scans[-1]
+    return {
+        "id": latest.get("id"),
+        "name": latest.get("name"),
+        "url": latest.get("url") or latest.get("final_url"),
+        "platform": latest.get("platform", "Unknown"),
+        "status": latest.get("status", "unknown"),
+        "scan_date": _scan_moment(latest),
+        "scan_count": len(scans),
+        "risk_score": latest.get("risk_score", 0),
+        "risk_grade": latest.get("risk_grade", ""),
+        "rating": rating_for(latest.get("risk_score", 0)),
+        "total_findings": len(latest["_findings"]),
+        "severity_counts": _counts(latest["_findings"]),
+        "severity_deltas": latest["_deltas"],
+        "activity": latest["_activity"],
+        "history": [
+            {
+                "id": scan.get("id"),
+                "scan_date": _scan_moment(scan),
+                "risk_score": scan.get("risk_score", 0),
+                "total_findings": len(scan["_findings"]),
+                "severity_deltas": scan["_deltas"],
+                "activity": scan["_activity"],
+            }
+            for scan in scans
+        ],
+    }
+
+
+def _portfolio_severity_counts(
+    systems: list[dict[str, Any]],
+) -> dict[str, int]:
+    totals = empty_severity_counts()
+    for system in systems:
+        for severity, count in system["severity_counts"].items():
+            totals[severity] += count
+    return totals

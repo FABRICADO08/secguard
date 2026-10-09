@@ -252,12 +252,7 @@ function render(application, statistics, system) {
 
 async function load() {
     if (!applicationId) {
-        view.innerHTML = `
-            <div class="notice notice--warning">
-                No application selected.
-                <a href="/dashboard.html">Pick one from the portfolio</a>.
-            </div>
-        `;
+        renderNoApplicationSelected(view);
 
         return;
     }
@@ -280,11 +275,7 @@ async function load() {
             )
         );
     } catch (error) {
-        view.innerHTML = `
-            <div class="notice notice--error">
-                ${escapeHtml(error.message || "Could not load the system.")}
-            </div>
-        `;
+        renderLoadError(view, error, "Could not load the system.");
     }
 }
 

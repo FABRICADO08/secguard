@@ -95,6 +95,28 @@ def _comparable(name: str) -> str:
     return name.lower().replace("_", "-").replace(".", "-")
 
 
+def _homoglyph_match(plain: str, original: str) -> bool:
+    return any(
+        plain.replace(a, b) == original or original.replace(a, b) == plain
+        for a, b in HOMOGLYPHS
+    )
+
+
+def _matching_popular_target(ecosystem: str, plain: str, original: str) -> TyposquatSignal | None:
+    if plain == _comparable(original):
+        if ecosystem != PYPI:
+            return TyposquatSignal(original, "separator confusion")
+        return None
+
+    if _homoglyph_match(plain, original):
+        return TyposquatSignal(original, "look-alike characters")
+
+    if len(original) >= 5 and damerau_levenshtein(plain, original, 1) == 1:
+        return TyposquatSignal(original, "one-character edit")
+
+    return None
+
+
 def typosquat_target(ecosystem: str, name: str) -> TyposquatSignal | None:
     popular = POPULAR.get(ecosystem)
 
@@ -113,17 +135,8 @@ def typosquat_target(ecosystem: str, name: str) -> TyposquatSignal | None:
     plain = _comparable(candidate)
 
     for original in popular:
-        if plain == _comparable(original):
-            # Same name with different separators, e.g. "python_dateutil".
-            if ecosystem != PYPI:
-                return TyposquatSignal(original, "separator confusion")
-            continue
-
-        for a, b in HOMOGLYPHS:
-            if plain.replace(a, b) == original or original.replace(a, b) == plain:
-                return TyposquatSignal(original, "look-alike characters")
-
-        if len(original) >= 5 and damerau_levenshtein(plain, original, 1) == 1:
-            return TyposquatSignal(original, "one-character edit")
+        signal = _matching_popular_target(ecosystem, plain, original)
+        if signal:
+            return signal
 
     return None

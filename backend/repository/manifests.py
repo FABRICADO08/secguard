@@ -66,6 +66,8 @@ _REQUIREMENT = re.compile(
 
 @dataclass
 class Dependency:
+    """A direct or transitive dependency and its source location."""
+
     name: str
     ecosystem: str
     version: str = ""
@@ -77,13 +79,16 @@ class Dependency:
     resolved_from_range: bool = False
 
     def key(self) -> tuple[str, str]:
+        """Return the normalized ecosystem and package identity."""
         return (self.ecosystem, normalize_package(self.ecosystem, self.name))
 
     def to_dict(self) -> dict[str, Any]:
+        """Serialize dependency metadata for scan reports."""
         return asdict(self)
 
 
 def normalize_package(ecosystem: str, name: str) -> str:
+    """Normalize package spelling according to ecosystem conventions."""
     if ecosystem == PYPI:
         return re.sub(r"[-_.]+", "-", name).lower()
 
@@ -94,6 +99,7 @@ def normalize_package(ecosystem: str, name: str) -> str:
 
 
 def iter_files(root: Path):
+    """Yield repository files while skipping configured generated directories."""
     for path in sorted(root.rglob("*")):
         relative = path.relative_to(root)
 
@@ -129,6 +135,7 @@ def _pin_from_spec(spec: str) -> str:
 
 
 def parse_requirements(text: str, manifest: str) -> list[Dependency]:
+    """Parse pip requirements and retain each declaration's source line."""
     dependencies = []
 
     scope = DEVELOPMENT if re.search(r"dev|test|lint", manifest, re.IGNORECASE) else RUNTIME
@@ -170,6 +177,7 @@ def _pep508(requirement: str) -> tuple[str, str]:
     return (match.group(1), match.group(3).strip())
 
 
+<<<<<<< HEAD
 def _project_dependencies(
     text: str,
     project: dict[str, Any],
@@ -184,10 +192,15 @@ def _project_dependencies(
         scope = DEVELOPMENT if re.search(r"dev|test|lint|doc", name, re.IGNORECASE) else RUNTIME
         groups.append((scope, list(items or [])))
 
+=======
+def _pep508_dependencies(
+    text: str, manifest: str, groups: list[tuple[str, list[Any]]]
+) -> list[Dependency]:
+    dependencies = []
+>>>>>>> origin/main
     for scope, items in groups:
         for item in items:
             name, spec = _pep508(str(item))
-
             if name:
                 dependencies.append(
                     Dependency(
@@ -203,6 +216,7 @@ def _project_dependencies(
     return dependencies
 
 
+<<<<<<< HEAD
 def _poetry_dependencies(
     text: str,
     poetry: dict[str, Any],
@@ -218,15 +232,32 @@ def _poetry_dependencies(
                 RUNTIME if name == "main" else DEVELOPMENT,
                 (group or {}).get("dependencies") or {},
             )
+=======
+def _poetry_groups(poetry: dict[str, Any]) -> list[tuple[str, dict[str, Any]]]:
+    groups = [
+        (RUNTIME, poetry.get("dependencies") or {}),
+        (DEVELOPMENT, poetry.get("dev-dependencies") or {}),
+    ]
+    groups.extend(
+        (
+            RUNTIME if name == "main" else DEVELOPMENT,
+            (group or {}).get("dependencies") or {},
+>>>>>>> origin/main
         )
+        for name, group in (poetry.get("group") or {}).items()
+    )
+    return groups
 
-    for scope, table in poetry_groups:
+
+def _poetry_dependencies(
+    text: str, manifest: str, poetry: dict[str, Any]
+) -> list[Dependency]:
+    dependencies = []
+    for scope, table in _poetry_groups(poetry):
         for name, value in table.items():
             if name.lower() == "python":
                 continue
-
             spec = value.get("version", "") if isinstance(value, dict) else str(value)
-
             dependencies.append(
                 Dependency(
                     name=name,
@@ -242,20 +273,42 @@ def _poetry_dependencies(
 
 
 def parse_pyproject(text: str, manifest: str) -> list[Dependency]:
+<<<<<<< HEAD
+=======
+    """Read PEP 621 and Poetry dependency declarations from TOML."""
+>>>>>>> origin/main
     try:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
         return []
 
     project = document.get("project") or {}
+<<<<<<< HEAD
     poetry = (document.get("tool") or {}).get("poetry") or {}
     return [
         *_project_dependencies(text, project, manifest),
         *_poetry_dependencies(text, poetry, manifest),
     ]
 
+=======
+
+    groups: list[tuple[str, list[Any]]] = [
+        (RUNTIME, list(project.get("dependencies") or []))
+    ]
+
+    for name, items in (project.get("optional-dependencies") or {}).items():
+        scope = DEVELOPMENT if re.search(r"dev|test|lint|doc", name, re.IGNORECASE) else RUNTIME
+        groups.append((scope, list(items or [])))
+
+    poetry = (document.get("tool") or {}).get("poetry") or {}
+    return _pep508_dependencies(text, manifest, groups) + _poetry_dependencies(
+        text, manifest, poetry
+    )
+
+>>>>>>> origin/main
 
 def parse_poetry_lock(text: str, manifest: str) -> list[Dependency]:
+    """Parse locked package versions from a Poetry lockfile."""
     try:
         document = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
@@ -276,6 +329,7 @@ def parse_poetry_lock(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_pipfile_lock(text: str, manifest: str) -> list[Dependency]:
+    """Parse locked package versions from a Pipfile lock."""
     try:
         document = json.loads(text)
     except json.JSONDecodeError:
@@ -305,6 +359,7 @@ def parse_pipfile_lock(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_package_json(text: str, manifest: str) -> list[Dependency]:
+    """Parse direct runtime and development dependencies from package.json."""
     try:
         document = json.loads(text)
     except json.JSONDecodeError:
@@ -337,12 +392,25 @@ def parse_package_json(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_package_lock(text: str, manifest: str) -> list[Dependency]:
+    """Parse transitive package versions from npm lockfile formats."""
     try:
         document = json.loads(text)
     except json.JSONDecodeError:
         return []
 
     dependencies = []
+
+    def add_dependency(name: str, entry: dict[str, Any]) -> None:
+        dependencies.append(
+            Dependency(
+                name=name,
+                ecosystem=NPM,
+                version=str(entry.get("version") or ""),
+                manifest=manifest,
+                direct=False,
+                scope=DEVELOPMENT if entry.get("dev") else RUNTIME,
+            )
+        )
 
     packages = document.get("packages")
 
@@ -352,32 +420,14 @@ def parse_package_lock(text: str, manifest: str) -> list[Dependency]:
                 continue
 
             name = entry.get("name") or location.rsplit("node_modules/", 1)[1]
-
-            dependencies.append(
-                Dependency(
-                    name=name,
-                    ecosystem=NPM,
-                    version=str(entry.get("version") or ""),
-                    manifest=manifest,
-                    direct=False,
-                    scope=DEVELOPMENT if entry.get("dev") else RUNTIME,
-                )
-            )
+            add_dependency(name, entry)
 
         return dependencies
 
     def walk(tree: dict[str, Any]) -> None:
+        """Traverse nested npm v1 dependency records."""
         for name, entry in tree.items():
-            dependencies.append(
-                Dependency(
-                    name=name,
-                    ecosystem=NPM,
-                    version=str(entry.get("version") or ""),
-                    manifest=manifest,
-                    direct=False,
-                    scope=DEVELOPMENT if entry.get("dev") else RUNTIME,
-                )
-            )
+            add_dependency(name, entry)
 
             walk(entry.get("dependencies") or {})
 
@@ -390,6 +440,7 @@ def parse_package_lock(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_go_mod(text: str, manifest: str) -> list[Dependency]:
+    """Parse module requirements from a go.mod document."""
     dependencies = []
 
     in_block = False
@@ -429,48 +480,56 @@ def parse_go_mod(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_pom(text: str, manifest: str) -> list[Dependency]:
+    """Parse Maven dependency coordinates and resolve local properties."""
     try:
         root = ElementTree.fromstring(text)
     except ElementTree.ParseError:
         return []
 
     namespace = root.tag.split("}")[0] + "}" if root.tag.startswith("{") else ""
-
     properties = {
         element.tag.replace(namespace, ""): (element.text or "").strip()
         for element in root.findall(f"{namespace}properties/*")
     }
+    return [
+        dependency
+        for element in root.iter(f"{namespace}dependency")
+        if (dependency := _parse_pom_dependency(element, namespace, properties, text, manifest))
+    ]
 
-    dependencies = []
 
-    for element in root.iter(f"{namespace}dependency"):
-        group = (element.findtext(f"{namespace}groupId") or "").strip()
-        artifact = (element.findtext(f"{namespace}artifactId") or "").strip()
-        version = (element.findtext(f"{namespace}version") or "").strip()
-        scope = (element.findtext(f"{namespace}scope") or "").strip()
+def _parse_pom_dependency(
+    element,
+    namespace: str,
+    properties: dict[str, str],
+    text: str,
+    manifest: str,
+) -> Dependency | None:
+    group = (element.findtext(f"{namespace}groupId") or "").strip()
+    artifact = (element.findtext(f"{namespace}artifactId") or "").strip()
+    version = (element.findtext(f"{namespace}version") or "").strip()
+    scope = (element.findtext(f"{namespace}scope") or "").strip()
 
-        reference = re.fullmatch(r"\$\{([^}]+)\}", version)
+    reference = re.fullmatch(r"\$\{([^}]+)\}", version)
 
-        if reference:
-            version = properties.get(reference.group(1), "")
+    if reference:
+        version = properties.get(reference.group(1), "")
 
-        if group and artifact:
-            dependencies.append(
-                Dependency(
-                    name=f"{group}:{artifact}",
-                    ecosystem=MAVEN,
-                    version=version,
-                    spec=version,
-                    manifest=manifest,
-                    line=_line_of(text, f"<artifactId>{artifact}</artifactId>"),
-                    scope=DEVELOPMENT if scope == "test" else RUNTIME,
-                )
-            )
-
-    return dependencies
+    if not group or not artifact:
+        return None
+    return Dependency(
+        name=f"{group}:{artifact}",
+        ecosystem=MAVEN,
+        version=version,
+        spec=version,
+        manifest=manifest,
+        line=_line_of(text, f"<artifactId>{artifact}</artifactId>"),
+        scope=DEVELOPMENT if scope == "test" else RUNTIME,
+    )
 
 
 def parse_composer_lock(text: str, manifest: str) -> list[Dependency]:
+    """Parse package records from a Composer lockfile."""
     try:
         document = json.loads(text)
     except json.JSONDecodeError:
@@ -492,6 +551,7 @@ def parse_composer_lock(text: str, manifest: str) -> list[Dependency]:
 
 
 def parse_gemfile_lock(text: str, manifest: str) -> list[Dependency]:
+    """Parse resolved gem versions from a Gemfile lock."""
     dependencies = []
 
     in_specs = False
@@ -554,30 +614,8 @@ def _merge(found: list[Dependency]) -> list[Dependency]:
             resolved.setdefault(dependency.key(), set()).add(dependency.version)
 
     merged: dict[tuple[str, str, str], Dependency] = {}
-
-    for dependency in declared:
-        versions = resolved.get(dependency.key(), set())
-
-        if not dependency.version and len(versions) == 1:
-            dependency.version = next(iter(versions))
-
-        identity = (*dependency.key(), dependency.version)
-
-        current = merged.get(identity)
-
-        if current is None or (current.scope == DEVELOPMENT and dependency.scope == RUNTIME):
-            merged[identity] = dependency
-
-    for dependency in locked:
-        if not dependency.version:
-            continue
-
-        identity = (*dependency.key(), dependency.version)
-
-        if identity in merged:
-            continue
-
-        merged[identity] = dependency
+    _merge_declared(declared, resolved, merged)
+    _merge_locked(locked, merged)
 
     return sorted(
         merged.values(),
@@ -585,7 +623,38 @@ def _merge(found: list[Dependency]) -> list[Dependency]:
     )
 
 
+def _merge_declared(
+    declared: list[Dependency],
+    resolved: dict[tuple[str, str], set[str]],
+    merged: dict[tuple[str, str, str], Dependency],
+) -> None:
+    for dependency in declared:
+        versions = resolved.get(dependency.key(), set())
+        if not dependency.version and len(versions) == 1:
+            dependency.version = next(iter(versions))
+
+        identity = (*dependency.key(), dependency.version)
+        current = merged.get(identity)
+        if current is None or (
+            current.scope == DEVELOPMENT and dependency.scope == RUNTIME
+        ):
+            merged[identity] = dependency
+
+
+def _merge_locked(
+    locked: list[Dependency],
+    merged: dict[tuple[str, str, str], Dependency],
+) -> None:
+    for dependency in locked:
+        if not dependency.version:
+            continue
+        identity = (*dependency.key(), dependency.version)
+        if identity not in merged:
+            merged[identity] = dependency
+
+
 def discover_dependencies(root: Path) -> list[Dependency]:
+    """Find supported manifests, parse them, and merge locked versions."""
     found: list[Dependency] = []
 
     for path in iter_files(root):

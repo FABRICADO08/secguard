@@ -29,6 +29,22 @@ SITEMAP_PAGES = """<?xml version="1.0"?>
 """
 
 
+def probe_one_reflection(monkeypatch, session_class):
+    """Run one reflected-input probe with the supplied fake HTTP session."""
+    monkeypatch.setattr(reflection, "build_session", session_class)
+    return reflection.probe_reflection(
+        [
+            {
+                "action": "https://app.test/search",
+                "method": "GET",
+                "inputs": [{"name": "q", "type": "text"}],
+            }
+        ],
+        [],
+        "https://app.test",
+    )
+
+
 class FakeResponse:
     def __init__(self, status_code=200, text="", url=""):
         self.status_code = status_code
@@ -242,19 +258,7 @@ def test_reflected_parameter_is_recorded(monkeypatch):
                 url,
             )
 
-    monkeypatch.setattr(reflection, "build_session", EchoSession)
-
-    result = reflection.probe_reflection(
-        [
-            {
-                "action": "https://app.test/search",
-                "method": "GET",
-                "inputs": [{"name": "q", "type": "text"}],
-            }
-        ],
-        [],
-        "https://app.test",
-    )
+    result = probe_one_reflection(monkeypatch, EchoSession)
 
     assert result["probe_count"] == 1
     assert result["reflected"][0]["context"] == "raw"
@@ -266,19 +270,7 @@ def test_failed_probe_is_skipped(monkeypatch):
         def get(self, url, **kwargs):
             raise requests.ConnectionError("refused")
 
-    monkeypatch.setattr(reflection, "build_session", BrokenSession)
-
-    result = reflection.probe_reflection(
-        [
-            {
-                "action": "https://app.test/search",
-                "method": "GET",
-                "inputs": [{"name": "q", "type": "text"}],
-            }
-        ],
-        [],
-        "https://app.test",
-    )
+    result = probe_one_reflection(monkeypatch, BrokenSession)
 
     assert result == {"probes": [], "reflected": [], "probe_count": 0}
 

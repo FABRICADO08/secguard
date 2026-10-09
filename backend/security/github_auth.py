@@ -51,6 +51,8 @@ LANDING_PAGES = frozenset(
 
 @dataclass
 class GitHubUser:
+    """Authenticated GitHub profile and repositories visible to that user."""
+
     login: str
     name: str
     avatar_url: str
@@ -60,6 +62,7 @@ class GitHubUser:
 
 
 def enabled() -> bool:
+    """Whether GitHub OAuth credentials are configured."""
     return bool(settings.GITHUB_CLIENT_ID and settings.GITHUB_CLIENT_SECRET)
 
 
@@ -91,6 +94,7 @@ def _decode(payload: dict[str, Any]) -> GitHubUser:
 
 
 def github_request(method: str, url: str, **kwargs: Any) -> requests.Response:
+    """Issue an HTTP request with the shared GitHub request timeout."""
     return requests.request(method, url, timeout=TIMEOUT, **kwargs)
 
 
@@ -146,6 +150,7 @@ def fetch_repositories(token: str) -> dict[str, dict[str, Any]]:
 
 
 def current_user() -> GitHubUser | None:
+    """Load the signed-in user from the session store, if available."""
     session_id = session.get("sid")
 
     if not session_id:
@@ -171,6 +176,7 @@ def repository_name(application: dict[str, Any]) -> str:
 
 
 def can_view(application: dict[str, Any]) -> bool:
+    """Check whether the current user may access a stored application."""
     if application.get("platform") != "Repository" or not enabled():
         return True
 
@@ -180,6 +186,7 @@ def can_view(application: dict[str, Any]) -> bool:
 
 
 def visible(applications: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Filter application summaries to records visible to the current user."""
     return [application for application in applications if can_view(application)]
 
 
@@ -197,20 +204,22 @@ def _callback_url() -> str:
 def safe_next(value: str) -> str:
     """The SecGuard page to return to after sign-in, never another site."""
 
-    parts = urlsplit(str(value or ""))
-
-    if parts.scheme or parts.netloc or not str(value or "").startswith("/"):
-        return DEFAULT_LANDING
-
-    name = parts.path.lstrip("/") or "index.html"
-    page = next((page for page in LANDING_PAGES if page == name), None)
-
+    page = _landing_page(value)
     if page is None:
         return DEFAULT_LANDING
 
-    query = urlencode(parse_qsl(parts.query))
-
+    query = urlencode(parse_qsl(urlsplit(str(value or "")).query))
     return f"/{page}?{query}" if query else f"/{page}"
+
+
+def _landing_page(value: str) -> str | None:
+    raw = str(value or "")
+    parts = urlsplit(raw)
+    if parts.scheme or parts.netloc or not raw.startswith("/"):
+        return None
+
+    name = parts.path.lstrip("/") or "index.html"
+    return next((page for page in LANDING_PAGES if page == name), None)
 
 
 def _sign_in_failed(status: int):
@@ -225,6 +234,7 @@ def _not_configured():
 
 @blueprint.get("/auth/github/login")
 def login():
+    """Start the OAuth authorization-code flow with PKCE."""
     if not enabled():
         return _not_configured()
 
@@ -260,54 +270,31 @@ def login():
     return redirect(f"{settings.GITHUB_URL}/login/oauth/authorize?{query}")
 
 
-@blueprint.get("/auth/github/callback")
-def callback():
-    if not enabled():
-        return _not_configured()
+def _exchange_code(code: str, verifier: str) -> str:
+    exchange = github_request(
+        "POST",
+        f"{settings.GITHUB_URL}/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": settings.GITHUB_CLIENT_ID,
+            "client_secret": settings.GITHUB_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": _callback_url(),
+            "code_verifier": verifier,
+        },
+    )
+    return str((exchange.json() or {}).get("access_token") or "")
 
-    state = request.args.get("state", "")
-    code = request.args.get("code", "")
 
-    # Popping makes every state single-use, so a leaked code cannot be
-    # replayed, and an expired (or never started) handshake fails closed.
-    pending = session_store.pop("pending", state) if state else None
+def _github_profile_and_repositories(token: str) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    profile_response = _api("GET", "/user", token)
+    profile_response.raise_for_status()
+    return profile_response.json(), fetch_repositories(token)
 
-    if pending is None or not code:
-        return _sign_in_failed(400)
-
-    verifier = str(pending.get("verifier") or "")
-    landing = safe_next(str(pending.get("next") or ""))
-
-    try:
-        exchange = github_request(
-            "POST",
-            f"{settings.GITHUB_URL}/login/oauth/access_token",
-            headers={"Accept": "application/json"},
-            data={
-                "client_id": settings.GITHUB_CLIENT_ID,
-                "client_secret": settings.GITHUB_CLIENT_SECRET,
-                "code": code,
-                "redirect_uri": _callback_url(),
-                "code_verifier": verifier,
-            },
-        )
-
-        token = str((exchange.json() or {}).get("access_token") or "")
-
-        if not token:
-            return _sign_in_failed(400)
-
-        profile_response = _api("GET", "/user", token)
-        profile_response.raise_for_status()
-        profile = profile_response.json()
-
-        repositories = fetch_repositories(token)
-
-    except (requests.RequestException, ValueError):
-        return _sign_in_failed(502)
-
+def _store_github_session(
+    profile: dict[str, Any], token: str, repositories: list[dict[str, Any]]
+) -> str:
     session_id = secrets.token_urlsafe(32)
-
     session_store.put(
         "user",
         session_id,
@@ -322,15 +309,68 @@ def callback():
             )
         ),
     )
-
     session.clear()
     session["sid"] = session_id
+    return session_id
 
+
+@blueprint.get("/auth/github/callback")
+def callback():
+    """Validate OAuth state, exchange the code, and persist the session."""
+    if not enabled():
+        return _not_configured()
+    state = request.args.get("state", "")
+    code = request.args.get("code", "")
+    # Popping makes every state single-use; expired handshakes fail closed.
+    pending = session_store.pop("pending", state) if state else None
+    if pending is None or not code:
+        return _sign_in_failed(400)
+    verifier = str(pending.get("verifier") or "")
+    landing = safe_next(str(pending.get("next") or ""))
+    try:
+        token = _exchange_code(code, verifier)
+        if not token:
+            return _sign_in_failed(400)
+        profile, repositories = _github_profile_and_repositories(token)
+    except (requests.RequestException, ValueError):
+        return _sign_in_failed(502)
+    _store_github_session(profile, token, repositories)
     return redirect(landing)
+
+
+def _github_user(code: str, verifier: str) -> GitHubUser | None:
+    exchange = github_request(
+        "POST",
+        f"{settings.GITHUB_URL}/login/oauth/access_token",
+        headers={"Accept": "application/json"},
+        data={
+            "client_id": settings.GITHUB_CLIENT_ID,
+            "client_secret": settings.GITHUB_CLIENT_SECRET,
+            "code": code,
+            "redirect_uri": _callback_url(),
+            "code_verifier": verifier,
+        },
+    )
+    token = str((exchange.json() or {}).get("access_token") or "")
+    if not token:
+        return None
+
+    profile_response = _api("GET", "/user", token)
+    profile_response.raise_for_status()
+    profile = profile_response.json()
+    return GitHubUser(
+        login=str(profile.get("login") or ""),
+        name=str(profile.get("name") or ""),
+        avatar_url=str(profile.get("avatar_url") or ""),
+        token=token,
+        repositories=fetch_repositories(token),
+        expires=time.time() + settings.SESSION_HOURS * 3600,
+    )
 
 
 @blueprint.post("/auth/logout")
 def logout():
+    """Remove the current server-side session and clear its cookie."""
     session_id = session.pop("sid", None)
 
     if session_id:
@@ -343,6 +383,7 @@ def logout():
 
 @blueprint.get("/api/auth/me")
 def me():
+    """Return authentication status and the current profile summary."""
     user = current_user()
 
     return jsonify(
@@ -360,6 +401,7 @@ def me():
 
 
 def refresh_repositories(user: GitHubUser) -> None:
+    """Refresh the user's repository permissions from GitHub."""
     user.repositories = fetch_repositories(user.token)
 
     session_id = session.get("sid")
@@ -369,6 +411,7 @@ def refresh_repositories(user: GitHubUser) -> None:
 
 
 def dispatch_workflow(user: GitHubUser, repository: dict[str, Any]) -> requests.Response:
+    """Request a workflow dispatch on the repository's default branch."""
     owner_repo = repository["name"]
 
     return _api(

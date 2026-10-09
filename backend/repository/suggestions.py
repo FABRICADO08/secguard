@@ -76,6 +76,7 @@ def _upgrade_target(evidence: dict[str, Any]) -> str:
     return str(evidence.get("non_breaking_upgrade") or evidence.get("upgrade_to") or "")
 
 
+<<<<<<< HEAD
 def _upgrade_comments(
     report: dict[str, Any],
     changed: dict[str, set[int]],
@@ -107,14 +108,73 @@ def _upgrade_comments(
     return comments
 
 
+=======
+def _upgrade_groups(report: dict[str, Any]) -> dict[tuple[str, int], list[dict[str, Any]]]:
+    groups: dict[tuple[str, int], list[dict[str, Any]]] = {}
+    for finding in report.get("findings") or []:
+        if finding.get("rule_id") != "REPO-DEP-001":
+            continue
+        path, line = split_location(finding.get("location", ""))
+        if path and line:
+            groups.setdefault((path, line), []).append(finding)
+    return groups
+
+
+def _upgrade_comment(
+    path: str,
+    line: int,
+    group: list[dict[str, Any]],
+    changed: dict[str, set[int]],
+    root: Path,
+) -> ReviewComment | None:
+    if line not in changed.get(path, set()):
+        return None
+    evidence = group[0].get("evidence") or {}
+    target = _upgrade_target(evidence)
+    advisories = ", ".join(
+        sorted({str((item.get("evidence") or {}).get("advisory")) for item in group})
+    )
+    worst = max(
+        group, key=lambda item: SEVERITY_RANK.get(item.get("severity"), 0)
+    )["severity"]
+    body = (
+        f"**SecGuard: {evidence.get('package')} {evidence.get('version')} has "
+        f"{len(group)} known {worst}-or-lower vulnerabilit"
+        f"{'y' if len(group) == 1 else 'ies'}** ({advisories})."
+    )
+    source = root / path
+    lines = source.read_text(encoding="utf-8", errors="replace").splitlines() if source.is_file() else []
+    if target and 0 < line <= len(lines):
+        replacement = suggested_line(lines[line - 1], str(evidence.get("version")), target)
+        if replacement is not None:
+            note = (
+                " This crosses a major version; review the changelog."
+                if evidence.get("breaking_upgrade") and target == evidence.get("upgrade_to")
+                else ""
+            )
+            body += f"\n\nUpgrade to `{target}`:{note}\n\n```suggestion\n{replacement}\n```"
+    return ReviewComment(path, line, body)
+
+
+>>>>>>> origin/main
 def _finding_comments(
     report: dict[str, Any],
     changed: dict[str, set[int]],
     threshold: int,
 ) -> list[ReviewComment]:
+<<<<<<< HEAD
     comments = []
     quality = (report.get("quality") or {}).get("findings") or []
     for finding in [*quality, *[item for item in report.get("findings") or [] if item.get("rule_id") != "REPO-DEP-001"]]:
+=======
+    quality = (report.get("quality") or {}).get("findings") or []
+    findings = [
+        *quality,
+        *[item for item in report.get("findings") or [] if item.get("rule_id") != "REPO-DEP-001"],
+    ]
+    comments = []
+    for finding in findings:
+>>>>>>> origin/main
         if SEVERITY_RANK.get(finding.get("severity"), 0) < threshold:
             continue
         path, line = split_location(finding.get("location", ""))
@@ -130,13 +190,16 @@ def _finding_comments(
     return comments
 
 
+<<<<<<< HEAD
 def _review_body(report: dict[str, Any], comments: list[ReviewComment]) -> str:
+=======
+def _review_summary(report: dict[str, Any]) -> str:
+>>>>>>> origin/main
     health = report.get("health") or {}
     overall = health.get("overall") or {}
     summary = report.get("summary") or {}
     counts = summary.get("severity_counts") or {}
-
-    body = (
+    return (
         f"### SecGuard health: {overall.get('grade', '?')} ({overall.get('score', '?')}/100)\n\n"
         f"| Security | Open source | Maintainability |\n|---|---|---|\n"
         f"| {(health.get('security') or {}).get('grade', '?')} | {(health.get('open_source') or {}).get('grade', '?')} "
@@ -144,6 +207,23 @@ def _review_body(report: dict[str, Any], comments: list[ReviewComment]) -> str:
         f"Findings: {counts.get('critical', 0)} critical, {counts.get('high', 0)} high, "
         f"{counts.get('medium', 0)} medium, {counts.get('low', 0)} low."
     )
+
+
+def build_review(
+    report: dict[str, Any],
+    changed: dict[str, set[int]],
+    root: Path,
+    minimum_severity: str = "low",
+) -> tuple[list[ReviewComment], str]:
+    threshold = SEVERITY_RANK.get(minimum_severity, 1)
+    upgrades = _upgrade_groups(report)
+    comments = [
+        comment
+        for (path, line), group in sorted(upgrades.items())
+        if (comment := _upgrade_comment(path, line, group, changed, root)) is not None
+    ]
+    comments.extend(_finding_comments(report, changed, threshold))
+    body = _review_summary(report)
 
     if len(comments) > MAX_COMMENTS:
         body += f"\n\nShowing {MAX_COMMENTS} of {len(comments)} inline comments; see the code scanning alerts for the rest."

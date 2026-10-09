@@ -12,6 +12,10 @@ from backend.rules.base import (
     TRANSPORT,
     Finding,
 )
+from backend.platforms.finding_utils import (
+    build_finding,
+    normalize_findings,
+)
 
 PLATFORM = "OutSystems"
 
@@ -98,19 +102,13 @@ def to_finding(raw: dict[str, Any]) -> Finding:
 
     metadata = RULE_CATALOGUE.get(rule_id, DEFAULT_METADATA)
 
-    return Finding(
-        rule_id=rule_id,
-        title=str(raw.get("title") or metadata["title"]),
-        severity=str(raw.get("severity") or "medium"),
-        category=metadata["category"],
-        description=str(raw.get("risk") or ""),
-        recommendation=str(raw.get("recommendation") or ""),
-        confidence=metadata["confidence"],
-        platform=PLATFORM,
-        location=str(raw.get("location") or ""),
-        cwe=metadata["cwe"],
-        owasp=metadata["owasp"],
-        evidence=_evidence(raw),
+    return build_finding(
+        raw,
+        rule_id,
+        metadata,
+        PLATFORM,
+        str(raw.get("location") or ""),
+        _evidence(raw),
     )
 
 
@@ -119,17 +117,9 @@ def to_findings(
 ) -> list[dict[str, Any]]:
     """Normalize analyzer output, worst findings first."""
 
-    findings = [
-        to_finding(raw).to_dict()
-        for raw in raw_findings
-        if isinstance(raw, dict)
-    ]
-
-    return sorted(
-        findings,
-        key=lambda finding: -int(
-            (finding.get("risk") or {}).get("score") or 0
-        ),
+    return normalize_findings(
+        raw_findings,
+        to_finding,
     )
 
 

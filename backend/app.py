@@ -1,187 +1,64 @@
+"""Flask application factory wiring for SecGuard routes and middleware."""
+
 from __future__ import annotations
 
-import json
 import os
 import secrets
+import sys
 from pathlib import Path
-from urllib.parse import urlencode
 
-from flask import (
-    Flask,
-    jsonify,
-    redirect,
-    request,
-    send_from_directory,
-)
+from flask import Flask, jsonify, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from backend.discovery.api_discovery import (
-    discover_common_api_paths,
-)
-from backend.discovery.crawler import (
-    crawl,
-)
-from backend.discovery.endpoints import (
-    discover_endpoints,
-)
-from backend.discovery.fingerprint import (
-    CertificateRejectedError,
-    TargetUnreachableError,
-    fetch_application,
-    validate_url,
-)
-from backend.discovery.libraries import (
-    detect_libraries,
-)
-from backend.discovery.reflection import (
-    probe_reflection,
-)
-from backend.discovery.robots import (
-    discover_robots_and_sitemaps,
-)
-from backend.discovery.scripts import (
-    analyze_scripts,
-)
-from backend.discovery.technology import (
-    detect_technologies,
-)
-from backend.discovery.tls import (
-    analyze_tls,
-)
-from backend.model.application import (
-    Application,
-)
-from backend.model.normalized import (
-    model_statistics,
-)
-from backend.platforms.mendix.findings import (
-    RULE_CATALOGUE as MENDIX_RULE_CATALOGUE,
-)
-from backend.platforms.errors import (
-    EmptyModelError,
-)
-from backend.platforms.mendix.service import (
-    EMPTY_MODEL as MENDIX_EMPTY_MODEL,
-)
-from backend.platforms.mendix.service import (
-    analyze_model,
-)
-from backend.platforms.outsystems.findings import (
-    RULE_CATALOGUE as OUTSYSTEMS_RULE_CATALOGUE,
-)
-from backend.platforms.outsystems.service import (
-    EMPTY_MODEL as OUTSYSTEMS_EMPTY_MODEL,
-)
-from backend.platforms.outsystems.service import (
-    analyze_model as analyze_outsystems_model,
-)
-from backend.portfolio.summary import (
-    portfolio_summary,
-)
-from backend.recommendations import (
-    build_recommendations,
-)
-from backend.repository.findings import (
-    RULE_CATALOGUE as REPOSITORY_RULE_CATALOGUE,
-)
-from backend.repository.ingest import (
-    application_from_report,
-)
-from backend.repository.sbom import (
-    cyclonedx,
-    spdx,
-)
-from backend.risk.scoring import (
-    summarize,
-)
-from backend.rules.base import (
-    ScanContext,
-)
-from backend.rules.engine import (
-    analyze,
-    default_rules,
-)
-from backend.scanners.configuration import (
-    scan_exposed_paths,
-)
 from backend.config import settings
+from backend.discovery.fingerprint import TargetUnreachableError, fetch_application
+from backend.discovery.api_discovery import discover_common_api_paths
+from backend.discovery.crawler import crawl
+from backend.discovery.endpoints import discover_endpoints
+from backend.discovery.technology import detect_technologies
+from backend.scanners.configuration import scan_exposed_paths
+from backend.platforms.mendix.service import analyze_model
 from backend.security import github_auth
-from backend.security.auth import request_is_authorized, require_api_token
-from backend.security.rate_limit import rate_limited
-from backend.security.targets import (
-    BlockedTargetError,
-    assert_target_allowed,
+from backend.storage.scans import application_exists, load_application
+from backend.route_applications import register_routes as register_application_routes
+from backend.route_discovery import register_routes as register_discovery_routes
+from backend.route_discovery import (
+    BLOCKED_TARGET_MESSAGE,
+    CERTIFICATE_REJECTED_MESSAGE,
+    _blocked_target_response,
+    _certificate_only_scan,
 )
-from backend.storage import application_names
-from backend.storage.findings import (
-    load_findings,
-    save_findings,
-)
-from backend.storage.scans import (
-    application_exists,
-    delete_application,
-    list_applications,
-    load_application,
-    save_application,
-)
+from backend.route_frontend import register_routes as register_frontend_routes
+from backend.route_models import register_routes as register_model_routes
+from backend.route_repositories import register_routes as register_repository_routes
 
-ROOT = (
-    Path(__file__)
-    .resolve()
-    .parent.parent
-)
-
+ROOT = Path(__file__).resolve().parent.parent
+FRONTEND = ROOT / "frontend"
 MAX_MODEL_BYTES = 25 * 1024 * 1024
 
-FRONTEND = ROOT / "frontend"
-
-
-app = Flask(
-    __name__
-)
-
-app.secret_key = settings.SECRET_KEY or secrets.token_hex(32)
 
 class _FirstForwardedValue:
-    """
-    WSGI middleware that takes the first (left-most) value of each
-    X-Forwarded-* header, added by the outermost proxy. Use it when the
-    number of proxies is unknown (Azure Front Door in front of App Service,
-    for example): ProxyFix always counts from the right, so with more hops
-    than the configured depth it would hand the scheme and host chosen by
-    an inner hop — or by the client — to OAuth redirect derivation. The
-    left-most scheme/host can only be influenced by a client when no proxy
-    strips them, which is exactly the deployments this flag is for.
-
-    Only wsgi.url_scheme, HTTP_HOST and SERVER_PORT are rewritten; the
-    client address is not trusted because rate limiting keys on it.
-    """
+    """Use the left-most forwarded protocol, host and port values."""
 
     def __init__(self, app):
         self.app = app
 
     def __call__(self, environ, start_response):
         proto = environ.get("HTTP_X_FORWARDED_PROTO", "").split(",")[0].strip()
-
         if proto:
             environ["wsgi.url_scheme"] = proto
-
         host = environ.get("HTTP_X_FORWARDED_HOST", "").split(",")[0].strip()
-
         if host:
             environ["HTTP_HOST"] = environ["SERVER_NAME"] = host
-
         port = environ.get("HTTP_X_FORWARDED_PORT", "").split(",")[0].strip()
-
         if port:
             environ["SERVER_PORT"] = port
-
         return self.app(environ, start_response)
 
 
-# Trust the X-Forwarded-* headers of the proxies in front of SecGuard, so
-# URLs derived from a request (for example the GitHub OAuth callback) use
-# the scheme and host visitors actually reach.
+app = Flask(__name__)
+app.secret_key = settings.SECRET_KEY or secrets.token_hex(32)
+
 if settings.TRUST_FIRST_FORWARDED_VALUE:
     app.wsgi_app = _FirstForwardedValue(app.wsgi_app)
 elif settings.PROXY_DEPTH > 0:
@@ -198,30 +75,28 @@ app.config.update(
     SESSION_COOKIE_SAMESITE="Lax",
     SESSION_COOKIE_SECURE=settings.SESSION_COOKIE_SECURE,
 )
-
 app.register_blueprint(github_auth.blueprint)
 
 
 @app.before_request
 def hide_inaccessible_applications():
     """Treat a repository the signed-in user cannot read as nonexistent."""
-
     application_id = (request.view_args or {}).get("application_id")
-
     if not application_id or not application_exists(application_id):
         return None
-
     if github_auth.can_view(load_application(application_id)):
         return None
-
-    return jsonify(
-        {
-            "success": False,
-            "error": "Application not found.",
-        }
-    ), 404
+    return jsonify({"success": False, "error": "Application not found."}), 404
 
 
+register_frontend_routes(app, FRONTEND)
+compatibility = sys.modules[__name__]
+register_discovery_routes(app, compatibility)
+register_model_routes(app, compatibility)
+register_application_routes(app)
+register_repository_routes(app, compatibility)
+
+<<<<<<< HEAD
 # ============================================================
 # Frontend
 # ============================================================
@@ -2038,9 +1913,10 @@ def rename_repository_application(
 # ============================================================
 # Development server
 # ============================================================
+=======
+>>>>>>> origin/main
 
 if __name__ == "__main__":
-
     app.run(
         host="127.0.0.1",
         port=8000,

@@ -283,6 +283,26 @@ def _is_local_failure(exc: ssl.SSLError) -> bool:
     )
 
 
+def _probe_protocol(
+    host: str, port: int, timeout: int, label: str, version: int
+) -> tuple[str, bool, bool]:
+    context = _pinned_context(version)
+    if context is None:
+        return label, False, True
+    try:
+        connection = _connect(host, port, context, timeout)
+    except BlockedTargetError:
+        raise
+    except ssl.SSLError as exc:
+        return label, False, _is_local_failure(exc)
+    except TimeoutError:
+        return label, False, True
+    except OSError:
+        return label, False, False
+    with connection:
+        return label, True, False
+
+
 def probe_protocols(
     host: str,
     port: int,
@@ -302,37 +322,13 @@ def probe_protocols(
     untested: list[str] = []
 
     for label, version in TESTABLE_PROTOCOLS:
-        context = _pinned_context(version)
-
-        if context is None:
-            untested.append(label)
-
-            continue
-
-        try:
-            connection = _connect(host, port, context, timeout)
-
-        except BlockedTargetError:
-            raise
-
-        except ssl.SSLError as exc:
-            if _is_local_failure(exc):
-                untested.append(label)
-
-            continue
-
-        except TimeoutError:
-            # A timeout is not a refusal; reporting it as unsupported
-            # would hide a server that still speaks the version.
-            untested.append(label)
-
-            continue
-
-        except OSError:
-            continue
-
-        with connection:
-            supported.append(label)
+        protocol, is_supported, is_untested = _probe_protocol(
+            host, port, timeout, label, version
+        )
+        if is_supported:
+            supported.append(protocol)
+        elif is_untested:
+            untested.append(protocol)
 
     return {"supported": supported, "untested": untested}
 
