@@ -1,3 +1,5 @@
+"""Rules for session cookies, credential transport, and login protections."""
+
 from __future__ import annotations
 
 from typing import Any
@@ -64,6 +66,8 @@ def _has_csrf_field(form: dict[str, Any]) -> bool:
 
 
 class InsecureSessionCookie(Rule):
+    """Check cookies for the Secure attribute."""
+
     id = "GEN-SES-001"
     title = "Session cookie is missing the Secure flag"
     severity = "medium"
@@ -77,6 +81,7 @@ class InsecureSessionCookie(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report cookies that can be sent over an unencrypted connection."""
         findings = []
 
         for cookie in context.cookies:
@@ -106,6 +111,8 @@ class InsecureSessionCookie(Rule):
 
 
 class SessionCookieWithoutHttpOnly(Rule):
+    """Check session cookies for the HttpOnly attribute."""
+
     id = "GEN-SES-002"
     title = "Session cookie is missing the HttpOnly flag"
     severity = "medium"
@@ -119,6 +126,7 @@ class SessionCookieWithoutHttpOnly(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report session cookies that page scripts can read."""
         findings = []
 
         for cookie in context.cookies:
@@ -148,6 +156,8 @@ class SessionCookieWithoutHttpOnly(Rule):
 
 
 class CookieWithoutSameSite(Rule):
+    """Check whether session cookies restrict cross-site transmission."""
+
     id = "GEN-SES-003"
     title = "Cookie is missing the SameSite attribute"
     severity = "low"
@@ -161,6 +171,7 @@ class CookieWithoutSameSite(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report cookies with a missing or unsafe SameSite policy."""
         findings = []
 
         for cookie in context.cookies:
@@ -193,6 +204,8 @@ class CookieWithoutSameSite(Rule):
 
 
 class CredentialsOverInsecureChannel(Rule):
+    """Detect credential forms submitted over plain HTTP."""
+
     id = "GEN-AUTH-001"
     title = "Credentials are submitted over an insecure channel"
     severity = "high"
@@ -206,6 +219,7 @@ class CredentialsOverInsecureChannel(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report password or credential fields on an insecure page."""
         findings = []
 
         for form in context.forms:
@@ -244,6 +258,8 @@ class CredentialsOverInsecureChannel(Rule):
 
 
 class MissingCsrfToken(Rule):
+    """Check state-changing forms for a CSRF token."""
+
     id = "GEN-AUTH-002"
     title = "State-changing form has no CSRF token"
     severity = "medium"
@@ -258,6 +274,7 @@ class MissingCsrfToken(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report forms that appear to lack an anti-CSRF field."""
         findings = []
 
         for form in context.forms:
@@ -292,6 +309,8 @@ class MissingCsrfToken(Rule):
 
 
 class PasswordFieldWithAutocomplete(Rule):
+    """Check password inputs for risky autocomplete configuration."""
+
     id = "GEN-AUTH-003"
     title = "Password field allows browser autocomplete"
     severity = "informational"
@@ -305,6 +324,7 @@ class PasswordFieldWithAutocomplete(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report password fields whose autocomplete mode is unsafe."""
         findings = []
 
         for form in context.forms:
@@ -342,6 +362,8 @@ class PasswordFieldWithAutocomplete(Rule):
 
 
 class PersistentSessionCookie(Rule):
+    """Detect session cookies configured to persist beyond the session."""
+
     id = "GEN-SES-004"
     title = "Session cookie is persisted to disk"
     severity = "low"
@@ -356,6 +378,7 @@ class PersistentSessionCookie(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report session cookies with a persistent expiry or max-age."""
         findings = []
 
         for cookie in context.cookies:
@@ -385,6 +408,8 @@ class PersistentSessionCookie(Rule):
 
 
 class CookieScopedToParentDomain(Rule):
+    """Check for session cookies shared with every subdomain."""
+
     id = "GEN-SES-005"
     title = "Cookie is shared with every subdomain"
     severity = "low"
@@ -398,6 +423,7 @@ class CookieScopedToParentDomain(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report cookies scoped to a parent domain."""
         host = urlparse(context.final_url).hostname or ""
 
         findings = []
@@ -435,6 +461,8 @@ class CookieScopedToParentDomain(Rule):
 
 
 class BasicAuthenticationChallenge(Rule):
+    """Detect HTTP Basic authentication challenges."""
+
     id = "GEN-AUTH-004"
     title = "HTTP Basic authentication is used"
     severity = "medium"
@@ -448,6 +476,7 @@ class BasicAuthenticationChallenge(Rule):
     )
 
     def evaluate(self, context: ScanContext) -> list[Finding]:
+        """Report responses that request Basic authentication."""
         challenge = context.header("WWW-Authenticate")
 
         if not challenge.strip().lower().startswith("basic"):
@@ -479,6 +508,7 @@ class BasicAuthenticationChallenge(Rule):
 
 
 def rules() -> list[Rule]:
+    """Return the generic authentication and session rules."""
     return [
         InsecureSessionCookie(),
         SessionCookieWithoutHttpOnly(),

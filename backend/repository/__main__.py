@@ -85,6 +85,29 @@ def command_scan(arguments: argparse.Namespace) -> int:
     else:
         options["fetch"] = offline_fetcher
 
+    report = scan_repository(root, _repository_metadata(arguments, root), **options)
+    _write_scan_outputs(arguments, report)
+
+    health = report["health"]["overall"]
+    counts = report["summary"]["severity_counts"]
+
+    _print_scan_summary(report, health, counts)
+
+    if arguments.upload:
+        result = upload(report, arguments.upload, os.environ.get("SECGUARD_API_TOKEN", ""))
+        print(f"Uploaded as application {result.get('application_id')}.")
+
+    if _should_fail(report, arguments.fail_on):
+        print(f"Failing: findings at or above '{arguments.fail_on}'.", file=sys.stderr)
+        return 1
+
+    return 0
+
+
+def _repository_metadata(
+    arguments: argparse.Namespace,
+    root: Path,
+) -> dict[str, str]:
     repository = {
         "name": arguments.name or os.environ.get("GITHUB_REPOSITORY") or root.name,
         "commit": arguments.commit or os.environ.get("GITHUB_SHA", ""),
@@ -92,37 +115,43 @@ def command_scan(arguments: argparse.Namespace) -> int:
         "provider": "github" if os.environ.get("GITHUB_ACTIONS") or arguments.name else "local",
         "trigger": os.environ.get("GITHUB_EVENT_NAME", "manual"),
     }
-
-    application_name = arguments.application_name or os.environ.get("SECGUARD_APPLICATION_NAME", "")
-
+    application_name = (
+        arguments.application_name
+        or os.environ.get("SECGUARD_APPLICATION_NAME", "")
+    )
     if application_name.strip():
         problem = application_names.name_problem(application_name)
-
         if problem:
             raise SystemExit(f"--application-name: {problem}")
-
         repository["application_name"] = application_names.normalise(application_name)
 
-    if os.environ.get("GITHUB_SERVER_URL") and os.environ.get("GITHUB_REPOSITORY"):
-        repository["url"] = f"{os.environ['GITHUB_SERVER_URL']}/{os.environ['GITHUB_REPOSITORY']}"
+    server_url = os.environ.get("GITHUB_SERVER_URL")
+    repository_name = os.environ.get("GITHUB_REPOSITORY")
+    if server_url and repository_name:
+        repository["url"] = f"{server_url}/{repository_name}"
+    return repository
 
-    report = scan_repository(root, repository, **options)
 
-    if arguments.output:
-        _write(arguments.output, report)
+def _write_scan_outputs(
+    arguments: argparse.Namespace,
+    report: dict[str, Any],
+) -> None:
+    outputs = (
+        (arguments.output, report),
+        (arguments.sarif, to_sarif(report) if arguments.sarif else None),
+        (arguments.cyclonedx, cyclonedx(report) if arguments.cyclonedx else None),
+        (arguments.spdx, spdx(report) if arguments.spdx else None),
+    )
+    for path, document in outputs:
+        if path:
+            _write(path, document)
 
-    if arguments.sarif:
-        _write(arguments.sarif, to_sarif(report))
 
-    if arguments.cyclonedx:
-        _write(arguments.cyclonedx, cyclonedx(report))
-
-    if arguments.spdx:
-        _write(arguments.spdx, spdx(report))
-
-    health = report["health"]["overall"]
-    counts = report["summary"]["severity_counts"]
-
+def _print_scan_summary(
+    report: dict[str, Any],
+    health: dict[str, Any],
+    counts: dict[str, int],
+) -> None:
     print(
         f"SecGuard: health {health['grade']} ({health['score']}/100), "
         f"{report['statistics']['dependencies']} dependencies, "
@@ -130,33 +159,21 @@ def command_scan(arguments: argparse.Namespace) -> int:
         f"{len(report['quality']['findings'])} maintainability findings."
     )
 
-    if arguments.upload:
-        result = upload(report, arguments.upload, os.environ.get("SECGUARD_API_TOKEN", ""))
-        print(f"Uploaded as application {result.get('application_id')}.")
 
-    if arguments.fail_on != "none":
-        threshold = SEVERITY_RANK[arguments.fail_on]
-
-        if any(SEVERITY_RANK.get(finding["severity"], 0) >= threshold for finding in report["findings"]):
-            print(f"Failing: findings at or above '{arguments.fail_on}'.", file=sys.stderr)
-            return 1
-
-    return 0
+def _should_fail(report: dict[str, Any], fail_on: str) -> bool:
+    if fail_on == "none":
+        return False
+    threshold = SEVERITY_RANK[fail_on]
+    return any(
+        SEVERITY_RANK.get(finding["severity"], 0) >= threshold
+        for finding in report["findings"]
+    )
 
 
 def command_review(arguments: argparse.Namespace) -> int:
     token = os.environ.get(arguments.token_env, "")
     repository = arguments.repository or os.environ.get("GITHUB_REPOSITORY", "")
-    number = arguments.pull
-    commit = arguments.commit
-
-    event_path = os.environ.get("GITHUB_EVENT_PATH")
-
-    if event_path and Path(event_path).is_file() and (not number or not commit):
-        event = json.loads(Path(event_path).read_text(encoding="utf-8"))
-        pull = event.get("pull_request") or {}
-        number = number or pull.get("number")
-        commit = commit or (pull.get("head") or {}).get("sha", "")
+    number, commit = _review_coordinates(arguments)
 
     if not (token and repository and number and commit):
         print("Not a pull request run (or no token); skipping review.")
@@ -178,6 +195,21 @@ def command_review(arguments: argparse.Namespace) -> int:
     print(f"Posted a review with {len(comments)} inline comments.")
 
     return 0
+
+
+def _review_coordinates(
+    arguments: argparse.Namespace,
+) -> tuple[Any, str]:
+    number = arguments.pull
+    commit = arguments.commit
+    event_path = os.environ.get("GITHUB_EVENT_PATH")
+
+    if event_path and Path(event_path).is_file() and (not number or not commit):
+        event = json.loads(Path(event_path).read_text(encoding="utf-8"))
+        pull = event.get("pull_request") or {}
+        number = number or pull.get("number")
+        commit = commit or (pull.get("head") or {}).get("sha", "")
+    return number, commit
 
 
 def main(argv: list[str] | None = None) -> int:

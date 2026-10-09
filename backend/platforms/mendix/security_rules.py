@@ -75,6 +75,59 @@ class MendixSecurityRules:
     # ENTITY ACCESS
     # ============================================================
 
+    def _technical_entity_risk(
+        self,
+        sensitivity: Dict[str, Any],
+        create: bool,
+        delete: bool,
+        write: bool,
+        xpath: bool,
+        broad_roles: bool,
+    ) -> Dict[str, Any] | None:
+        level = sensitivity["highest_severity"]
+        if not sensitivity["sensitive"] or not (delete or create):
+            return None
+        if level not in {"high", "critical"} or (not broad_roles and not delete):
+            return None
+        risk = self.risk.calculate(
+            base_score=35,
+            sensitive=True,
+            sensitivity_severity=level,
+            create=create,
+            delete=delete,
+            write=write,
+            xpath=xpath,
+            broad_roles=broad_roles,
+        )
+        return risk if risk["score"] >= 70 else None
+
+    def _application_entity_risk(
+        self,
+        sensitivity: Dict[str, Any],
+        create: bool,
+        delete: bool,
+        write: bool,
+        xpath: bool,
+        broad_roles: bool,
+    ) -> Dict[str, Any] | None:
+        sensitive = bool(sensitivity["sensitive"])
+        dangerous_write = write and (create or delete)
+        sensitive_modification = sensitive and (write or create or delete)
+        broad_dangerous_access = broad_roles and dangerous_write and not xpath
+        if not (sensitive_modification or broad_dangerous_access):
+            return None
+        risk = self.risk.calculate(
+            base_score=25,
+            sensitive=sensitive,
+            sensitivity_severity=sensitivity["highest_severity"],
+            create=create,
+            delete=delete,
+            write=write,
+            xpath=xpath,
+            broad_roles=broad_roles,
+        )
+        return risk if risk["score"] >= 55 else None
+
     def entity_access_rules(
         self,
     ) -> List[Dict[str, Any]]:
@@ -121,147 +174,16 @@ class MendixSecurityRules:
                     role_count >= 5
                 )
 
-                sensitive = bool(
-                    sensitivity["sensitive"]
+                risk_check = (
+                    self._technical_entity_risk
+                    if module_type == "technical"
+                    else self._application_entity_risk
                 )
-
-                sensitivity_level = (
-                    sensitivity[
-                        "highest_severity"
-                    ]
+                risk = risk_check(
+                    sensitivity, create, delete, write, xpath, broad_roles
                 )
-
-                # ------------------------------------------------
-                # Technical modules
-                #
-                # Framework entities are still parsed and analysed,
-                # but their names alone must never create a
-                # vulnerability.
-                # ------------------------------------------------
-
-                if module_type == "technical":
-
-                    # Technical entity + generic CRUD access
-                    # is not enough evidence.
-                    #
-                    # Only report when the entity contains
-                    # genuinely sensitive attributes AND has
-                    # dangerous modification rights.
-
-                    if not sensitive:
-
-                        continue
-
-                    if not (
-                        delete
-                        or create
-                    ):
-
-                        continue
-
-                    if sensitivity_level not in {
-                        "high",
-                        "critical",
-                    }:
-
-                        continue
-
-                    if not broad_roles and not delete:
-
-                        continue
-
-                    risk = self.risk.calculate(
-                        base_score=35,
-
-                        sensitive=True,
-
-                        sensitivity_severity=
-                            sensitivity_level,
-
-                        create=create,
-
-                        delete=delete,
-
-                        write=write,
-
-                        xpath=xpath,
-
-                        broad_roles=broad_roles,
-                    )
-
-                    if risk["score"] < 70:
-
-                        continue
-
-                # ------------------------------------------------
-                # Application modules
-                # ------------------------------------------------
-
-                else:
-
-                    # Generic ReadWrite is NOT a vulnerability.
-
-                    # We need at least one stronger condition.
-                    dangerous_write = (
-                        write
-                        and
-                        (
-                            create
-                            or
-                            delete
-                        )
-                    )
-
-                    sensitive_modification = (
-                        sensitive
-                        and
-                        (
-                            write
-                            or
-                            create
-                            or
-                            delete
-                        )
-                    )
-
-                    broad_dangerous_access = (
-                        broad_roles
-                        and
-                        dangerous_write
-                        and
-                        not xpath
-                    )
-
-                    if not (
-                        sensitive_modification
-                        or
-                        broad_dangerous_access
-                    ):
-
-                        continue
-
-                    risk = self.risk.calculate(
-                        base_score=25,
-
-                        sensitive=sensitive,
-
-                        sensitivity_severity=
-                            sensitivity_level,
-
-                        create=create,
-
-                        delete=delete,
-
-                        write=write,
-
-                        xpath=xpath,
-
-                        broad_roles=broad_roles,
-                    )
-
-                    if risk["score"] < 55:
-
-                        continue
+                if risk is None:
+                    continue
 
                 findings.append(
                     self._entity_finding(
@@ -432,62 +354,10 @@ class MendixSecurityRules:
             sensitivity["sensitive"]
         )
 
-        if (
-            sensitive
-            and
-            rule.allow_delete
-        ):
-
-            title = (
-                "Sensitive entity allows deletion"
-            )
-
-        elif (
-            sensitive
-            and
-            rule.has_write_access
-            and
-            rule.allow_create
-            and
-            not rule.has_xpath_constraint
-        ):
-
-            title = (
-                "Sensitive entity has broad "
-                "write access without row-level restriction"
-            )
-
-        elif (
-            rule.allow_delete
-            and
-            rule.has_write_access
-            and
-            not rule.has_xpath_constraint
-        ):
-
-            title = (
-                "Entity has broad delete/write access "
-                "without row-level restriction"
-            )
-
-        elif (
-            rule.allow_create
-            and
-            rule.has_write_access
-            and
-            not rule.has_xpath_constraint
-        ):
-
-            title = (
-                "Entity has broad write access "
-                "without row-level restriction"
-            )
-
-        else:
-
-            title = (
-                "Potential excessive entity access"
-            )
+        title = self._entity_finding_title(
+            rule,
+            sensitive,
+        )
 
         return {
             "rule_id":
@@ -579,6 +449,69 @@ class MendixSecurityRules:
                 ),
         }
 
+    @staticmethod
+    def _entity_finding_title(rule, sensitive) -> str:
+        if MendixSecurityRules._sensitive_delete(rule, sensitive):
+            return "Sensitive entity allows deletion"
+        if MendixSecurityRules._sensitive_broad_write(rule, sensitive):
+            return (
+                "Sensitive entity has broad "
+                "write access without row-level restriction"
+            )
+        if MendixSecurityRules._broad_delete_write(rule):
+            return (
+                "Entity has broad delete/write access "
+                "without row-level restriction"
+            )
+        if MendixSecurityRules._broad_write(rule):
+            return (
+                "Entity has broad write access "
+                "without row-level restriction"
+            )
+        return (
+            "Potential excessive entity access"
+        )
+
+    @staticmethod
+    def _sensitive_delete(rule, sensitive) -> bool:
+        return sensitive and rule.allow_delete
+
+    @staticmethod
+    def _sensitive_broad_write(rule, sensitive) -> bool:
+        return (
+            sensitive
+            and rule.has_write_access
+            and rule.allow_create
+            and not rule.has_xpath_constraint
+        )
+
+    @staticmethod
+    def _broad_delete_write(rule) -> bool:
+        return (
+            rule.allow_delete
+            and rule.has_write_access
+            and not rule.has_xpath_constraint
+        )
+
+    @staticmethod
+    def _broad_write(rule) -> bool:
+        return (
+            rule.allow_create
+            and rule.has_write_access
+            and not rule.has_xpath_constraint
+        )
+
+    @staticmethod
+    def _unneeded_row_constraint(rule) -> bool:
+        return (
+            not rule.has_xpath_constraint
+            and (
+                rule.allow_create
+                or rule.allow_delete
+                or rule.has_write_access
+            )
+        )
+
     # ============================================================
     # CONFIDENCE
     # ============================================================
@@ -633,6 +566,23 @@ class MendixSecurityRules:
         sensitivity,
     ) -> str:
 
+        recommendations = MendixSecurityRules._access_recommendations(rule)
+        recommendations.extend(
+            MendixSecurityRules._sensitivity_recommendations(
+                sensitivity
+            )
+        )
+
+        if not recommendations:
+            return (
+                "Review the entity security configuration "
+                "and apply least-privilege access."
+            )
+
+        return " ".join(recommendations)
+
+    @staticmethod
+    def _access_recommendations(rule) -> List[str]:
         recommendations = []
 
         if rule.allow_delete:
@@ -657,23 +607,19 @@ class MendixSecurityRules:
                 "permissions."
             )
 
-        if (
-            not rule.has_xpath_constraint
-            and
-            (
-                rule.allow_create
-                or
-                rule.allow_delete
-                or
-                rule.has_write_access
-            )
-        ):
+        if MendixSecurityRules._unneeded_row_constraint(rule):
 
             recommendations.append(
                 "Consider an XPath constraint when "
                 "users should only access records "
                 "within their permitted business scope."
             )
+
+        return recommendations
+
+    @staticmethod
+    def _sensitivity_recommendations(sensitivity) -> List[str]:
+        recommendations = []
 
         if sensitivity["sensitive"]:
 
@@ -692,16 +638,7 @@ class MendixSecurityRules:
                     "required access."
                 )
 
-        if not recommendations:
-
-            return (
-                "Review the entity security configuration "
-                "and apply least-privilege access."
-            )
-
-        return " ".join(
-            recommendations
-        )
+        return recommendations
 
     # ============================================================
     # DEDUPLICATION

@@ -66,3 +66,25 @@ def model_statistics(
         for key, value
         in normalized.items()
     }
+
+
+def platform_model_statistics(
+    platform: str,
+    model: dict[str, Any],
+) -> dict[str, int]:
+    """Return normalized entity counts for Mendix or OutSystems models."""
+    if str(platform or "").lower() == "outsystems":
+        return {
+            key: len(model.get(key) or [])
+            for key in (
+                "modules",
+                "entities",
+                "screens",
+                "rest_methods",
+                "consumed_apis",
+                "site_properties",
+                "queries",
+                "roles",
+            )
+        }
+    return model_statistics(model)

@@ -27,41 +27,17 @@ class RiskEngine:
         bypasses_entity_access: bool = False,
     ) -> Dict:
 
-        score = base_score
-
-        if write:
-            score += 15
-
-        if create:
-            score += 10
-
-        if delete:
-            score += 20
-
-        if sensitive:
-            score += 20
-
-        if sensitivity_severity == "high":
-            score += 10
-
-        elif sensitivity_severity == "critical":
-            score += 20
-
-        if broad_roles:
-            score += 15
-
-        if not xpath and (
-            create
-            or delete
-            or write
-        ):
-            score += 15
-
-        if bypasses_entity_access:
-            score += 25
-
         score = min(
-            score,
+            base_score + self._risk_points(
+                sensitive=sensitive,
+                sensitivity_severity=sensitivity_severity,
+                create=create,
+                delete=delete,
+                write=write,
+                xpath=xpath,
+                broad_roles=broad_roles,
+                bypasses_entity_access=bypasses_entity_access,
+            ),
             100,
         )
 
@@ -74,6 +50,37 @@ class RiskEngine:
                     score
                 ),
         }
+
+    @staticmethod
+    def _risk_points(
+        *,
+        sensitive: bool,
+        sensitivity_severity: str,
+        create: bool,
+        delete: bool,
+        write: bool,
+        xpath: bool,
+        broad_roles: bool,
+        bypasses_entity_access: bool,
+    ) -> int:
+        score = (
+            15 * bool(write)
+            + 10 * bool(create)
+            + 20 * bool(delete)
+            + 20 * bool(sensitive)
+            + 15 * bool(broad_roles)
+            + 25 * bool(bypasses_entity_access)
+        )
+
+        if sensitivity_severity == "high":
+            score += 10
+        elif sensitivity_severity == "critical":
+            score += 20
+
+        if not xpath and (create or delete or write):
+            score += 15
+
+        return score
 
     @staticmethod
     def severity_from_score(

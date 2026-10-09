@@ -381,6 +381,114 @@ class MendixSecurityAnalyzer:
     # MXSEC-101
     # ------------------------------------------------------------------
 
+    def _broad_member_write(self, rule: Any) -> bool:
+        for member in self._member_accesses(rule):
+            rights = self._normalise(
+                self._get(
+                    member,
+                    "access_rights",
+                    self._get(member, "accessRights", ""),
+                )
+            )
+            if rights in {"readwrite", "write"}:
+                return True
+        return self._normalise(self._access_rights(rule)) in {"readwrite", "write"}
+
+    @staticmethod
+    def _entity_access_severity(
+        sensitive: bool,
+        allow_delete: bool,
+        broad_member_access: bool,
+        xpath: str,
+        allow_create: bool,
+    ) -> tuple[str, str] | None:
+        if sensitive and allow_delete:
+            return "critical", "Sensitive entity allows deletion"
+        if sensitive and broad_member_access:
+            return "critical", "Sensitive entity has broad write access without row-level restriction"
+        if allow_delete and not xpath:
+            return "high", "Entity has broad delete/write access without row-level restriction"
+        if broad_member_access and not xpath:
+            return "high", "Entity has broad write access without row-level restriction"
+        if sensitive and allow_create:
+            return "medium", "Sensitive entity allows record creation"
+        return None
+
+    def _entity_access_recommendation(
+        self,
+        categories: set[str],
+        allow_create: bool,
+        allow_delete: bool,
+        broad_member_access: bool,
+        xpath: str,
+    ) -> str:
+        parts = []
+        if allow_delete:
+            parts.append("Restrict delete access to roles that explicitly require deletion.")
+        if allow_create:
+            parts.append("Review which roles genuinely require create access.")
+        if broad_member_access:
+            parts.append("Replace broad ReadWrite access with the minimum required member permissions.")
+        if not xpath:
+            parts.append("Consider an XPath constraint when users should only access records within their permitted business scope.")
+        if categories:
+            category_text = ", ".join(sorted(categories))
+            parts.append(
+                "Review sensitive data categories "
+                f"({category_text}) and ensure each role has only the minimum required access."
+            )
+        return " ".join(parts)
+
+    def _entity_access_finding(
+        self,
+        context: dict[str, Any],
+    ) -> dict[str, Any]:
+        entity_name = context["entity_name"]
+        rule = context["rule"]
+        roles = context["roles"]
+        categories = context["categories"]
+        allow_create = context["allow_create"]
+        allow_delete = context["allow_delete"]
+        xpath = context["xpath"]
+        member_accesses = context["member_accesses"]
+        broad_member_access = context["broad_member_access"]
+        return {
+            "rule_id": "MXSEC-101",
+            "severity": context["severity"],
+            "title": context["title"],
+            "entity": entity_name,
+            "module": self._module_from_entity(entity_name),
+            "roles": roles,
+            "access": {
+                "create": allow_create,
+                "delete": allow_delete,
+                "default_member_access": self._access_rights(rule),
+                "member_accesses": [
+                    self._member_access_to_dict(member) for member in member_accesses
+                ],
+            },
+            "xpath": xpath,
+            "sensitive": bool(categories),
+            "sensitive_categories": sorted(categories),
+            "evidence": {
+                "create_allowed": allow_create,
+                "delete_allowed": allow_delete,
+                "broad_member_access": broad_member_access,
+                "xpath_constraint_present": bool(xpath),
+                "roles": roles,
+            },
+            "risk": self._risk_for_entity_access(
+                sensitive=bool(categories),
+                allow_create=allow_create,
+                allow_delete=allow_delete,
+                broad_member_access=broad_member_access,
+                xpath=xpath,
+            ),
+            "recommendation": self._entity_access_recommendation(
+                categories, allow_create, allow_delete, broad_member_access, xpath
+            ),
+        }
+
     def _check_entity_access(self):
 
         for entity in self._entities():
@@ -405,31 +513,7 @@ class MendixSecurityAnalyzer:
 
                 member_accesses = self._member_accesses(rule)
 
-                broad_member_access = False
-
-                for member in member_accesses:
-
-                    rights = self._member_access_rights(member)
-
-                    if rights in {
-                        "readwrite",
-                        "readwrite",
-                        "write",
-                    }:
-                        broad_member_access = True
-                        break
-
-                if not broad_member_access:
-
-                    default_access = self._normalise(
-                        self._access_rights(rule)
-                    )
-
-                    if default_access in {
-                        "readwrite",
-                        "write",
-                    }:
-                        broad_member_access = True
+                broad_member_access = self._broad_member_write(rule)
 
                 if (
                     not broad_member_access
@@ -438,133 +522,29 @@ class MendixSecurityAnalyzer:
                 ):
                     continue
 
-                sensitive = bool(categories)
-
-                if sensitive and allow_delete:
-                    severity = "critical"
-                    title = "Sensitive entity allows deletion"
-
-                elif sensitive and broad_member_access:
-                    severity = "critical"
-                    title = (
-                        "Sensitive entity has broad write access "
-                        "without row-level restriction"
-                    )
-
-                elif allow_delete and not xpath:
-                    severity = "high"
-                    title = (
-                        "Entity has broad delete/write access "
-                        "without row-level restriction"
-                    )
-
-                elif broad_member_access and not xpath:
-                    severity = "high"
-                    title = (
-                        "Entity has broad write access "
-                        "without row-level restriction"
-                    )
-
-                elif sensitive and allow_create:
-                    severity = "medium"
-                    title = (
-                        "Sensitive entity allows record creation"
-                    )
-
-                else:
+                classification = self._entity_access_severity(
+                    bool(categories), allow_delete, broad_member_access, xpath, allow_create
+                )
+                if classification is None:
                     continue
-
-                recommendation_parts = []
-
-                if allow_delete:
-                    recommendation_parts.append(
-                        "Restrict delete access to roles that "
-                        "explicitly require deletion."
+                severity, title = classification
+                self.findings.append(
+                    self._entity_access_finding(
+                        {
+                            "entity_name": entity_name,
+                            "rule": rule,
+                            "roles": roles,
+                            "categories": categories,
+                            "allow_create": allow_create,
+                            "allow_delete": allow_delete,
+                            "xpath": xpath,
+                            "member_accesses": member_accesses,
+                            "broad_member_access": broad_member_access,
+                            "severity": severity,
+                            "title": title,
+                        }
                     )
-
-                if allow_create:
-                    recommendation_parts.append(
-                        "Review which roles genuinely require "
-                        "create access."
-                    )
-
-                if broad_member_access:
-                    recommendation_parts.append(
-                        "Replace broad ReadWrite access with the "
-                        "minimum required member permissions."
-                    )
-
-                if not xpath:
-                    recommendation_parts.append(
-                        "Consider an XPath constraint when users "
-                        "should only access records within their "
-                        "permitted business scope."
-                    )
-
-                if categories:
-                    category_text = ", ".join(
-                        sorted(categories)
-                    )
-
-                    recommendation_parts.append(
-                        "Review sensitive data categories "
-                        f"({category_text}) and ensure each role "
-                        "has only the minimum required access."
-                    )
-
-                finding = {
-                    "rule_id": "MXSEC-101",
-                    "severity": severity,
-                    "title": title,
-                    "entity": entity_name,
-                    "module": self._module_from_entity(
-                        entity_name
-                    ),
-                    "roles": roles,
-                    "access": {
-                        "create": allow_create,
-                        "delete": allow_delete,
-                        "default_member_access": (
-                            self._access_rights(rule)
-                        ),
-                        "member_accesses": [
-                            self._member_access_to_dict(
-                                member
-                            )
-                            for member in member_accesses
-                        ],
-                    },
-                    "xpath": xpath,
-                    "sensitive": sensitive,
-                    "sensitive_categories": sorted(
-                        categories
-                    ),
-                    "evidence": {
-                        "create_allowed": allow_create,
-                        "delete_allowed": allow_delete,
-                        "broad_member_access": (
-                            broad_member_access
-                        ),
-                        "xpath_constraint_present": bool(
-                            xpath
-                        ),
-                        "roles": roles,
-                    },
-                    "risk": self._risk_for_entity_access(
-                        sensitive=sensitive,
-                        allow_create=allow_create,
-                        allow_delete=allow_delete,
-                        broad_member_access=(
-                            broad_member_access
-                        ),
-                        xpath=xpath,
-                    ),
-                    "recommendation": " ".join(
-                        recommendation_parts
-                    ),
-                }
-
-                self.findings.append(finding)
+                )
 
     # ------------------------------------------------------------------
     # MXSEC-102
@@ -634,120 +614,108 @@ class MendixSecurityAnalyzer:
     # ------------------------------------------------------------------
 
     def _check_sensitive_attributes(self):
-
         for entity in self._entities():
-
             entity_name = self._qualified_name(entity)
-
             sensitive_attributes = (
                 self._sensitive_attributes(entity)
             )
-
             if not sensitive_attributes:
                 continue
-
             rules = self._entity_access_rules(entity)
-
             for attribute_name, categories in (
                 sensitive_attributes.items()
             ):
-
-                risky_roles = []
-
-                for rule in rules:
-
-                    roles = self._role_names(rule)
-
-                    for member in self._member_accesses(rule):
-
-                        member_attribute = (
-                            self._get(
-                                member,
-                                "attribute",
-                                "",
-                            )
-                        )
-
-                        if (
-                            member_attribute
-                            and (
-                                member_attribute
-                                == attribute_name
-                            )
-                        ):
-                            rights = self._member_access_rights(member)
-
-                            if rights in {
-                                "readwrite",
-                                "write",
-                                "read",
-                                "readonly",
-                            }:
-                                risky_roles.extend(
-                                    roles
-                                )
-
-                risky_roles = sorted(
-                    set(risky_roles)
+                risky_roles = self._risky_attribute_roles(
+                    rules,
+                    attribute_name,
                 )
-
                 if not risky_roles:
                     continue
 
-                severity = "critical"
-
-                category_text = ", ".join(
-                    sorted(categories)
+                self.findings.append(
+                    self._sensitive_attribute_finding(
+                        entity_name,
+                        attribute_name,
+                        categories,
+                        risky_roles,
+                    )
                 )
 
-                self.findings.append({
-                    "rule_id": "MXSEC-106",
-                    "severity": severity,
-                    "title": (
-                        "Sensitive attribute is accessible "
-                        "to application roles"
-                    ),
-                    "entity": entity_name,
-                    "module": self._module_from_entity(
-                        entity_name
-                    ),
-                    "roles": risky_roles,
-                    "attributes": [
-                        {
-                            "name": attribute_name,
-                            "sensitive_categories": sorted(
-                                categories
-                            ),
-                        }
-                    ],
-                    "access": {
-                        "roles_with_access": risky_roles,
-                    },
-                    "xpath": "",
-                    "sensitive": True,
-                    "sensitive_categories": sorted(
-                        categories
-                    ),
-                    "evidence": {
-                        "attribute": attribute_name,
-                        "categories": sorted(
-                            categories
-                        ),
-                        "roles": risky_roles,
-                    },
-                    "risk": (
-                        f"The attribute '{attribute_name}' "
-                        f"appears to contain {category_text} "
-                        "information and is accessible through "
-                        "one or more module roles."
-                    ),
-                    "recommendation": (
-                        "Review whether every listed role needs "
-                        "access to this attribute. Remove "
-                        "unnecessary Read/Write permissions and "
-                        "apply least-privilege access."
-                    ),
-                })
+    def _risky_attribute_roles(self, rules, attribute_name):
+        risky_roles = []
+        readable_rights = {
+            "readwrite",
+            "write",
+            "read",
+            "readonly",
+        }
+
+        for rule in rules:
+            roles = self._role_names(rule)
+            for member in self._member_accesses(rule):
+                member_attribute = self._get(member, "attribute", "")
+                if not member_attribute or member_attribute != attribute_name:
+                    continue
+                rights = self._normalise(
+                    self._get(
+                        member,
+                        "access_rights",
+                        self._get(member, "accessRights", ""),
+                    )
+                )
+                if rights in readable_rights:
+                    risky_roles.extend(roles)
+
+        return sorted(set(risky_roles))
+
+    def _sensitive_attribute_finding(
+        self,
+        entity_name,
+        attribute_name,
+        categories,
+        risky_roles,
+    ):
+        category_text = ", ".join(sorted(categories))
+        return {
+            "rule_id": "MXSEC-106",
+            "severity": "critical",
+            "title": (
+                "Sensitive attribute is accessible "
+                "to application roles"
+            ),
+            "entity": entity_name,
+            "module": self._module_from_entity(entity_name),
+            "roles": risky_roles,
+            "attributes": [
+                {
+                    "name": attribute_name,
+                    "sensitive_categories": sorted(categories),
+                }
+            ],
+            "access": {
+                "roles_with_access": risky_roles,
+            },
+            "xpath": "",
+            "sensitive": True,
+            "sensitive_categories": sorted(categories),
+            "evidence": {
+                "attribute": attribute_name,
+                "categories": sorted(categories),
+                "roles": risky_roles,
+            },
+            "risk": (
+                f"The attribute '{attribute_name}' "
+                f"appears to contain {category_text} "
+                "information and is accessible through "
+                "one or more module roles."
+            ),
+            "recommendation": (
+                "Review whether every listed role needs "
+                "access to this attribute. Remove "
+                "unnecessary Read/Write permissions and "
+                "apply least-privilege access."
+            ),
+        }
 
     # ------------------------------------------------------------------
     # ASSOCIATION CHECKS

@@ -215,64 +215,31 @@ function render(findings) {
                 window.location.search
             );
 
-            parameters.set("application", applicationId);
-
             if (select.value) {
                 parameters.set(select.dataset.filter, select.value);
             } else {
                 parameters.delete(select.dataset.filter);
             }
 
-            window.location.search = parameters.toString();
+            navigateWithParameters(parameters, applicationId);
         });
     });
 
-    document
-        .getElementById("exportCsv")
-        .addEventListener("click", () =>
-            downloadCsv(
-                "secguard-findings.csv",
-                [
-                    [
-                        "Rule",
-                        "Title",
-                        "Severity",
-                        "Risk",
-                        "Category",
-                        "OWASP",
-                        "CWE",
-                        "Location",
-                        "Confidence",
-                        "Platform",
-                        "Detected at",
-                    ],
-                    ...visible.map(finding => [
-                        finding.rule_id,
-                        finding.title,
-                        finding.severity,
-                        (finding.risk || {}).score,
-                        finding.category,
-                        finding.owasp,
-                        finding.cwe,
-                        finding.location,
-                        finding.confidence,
-                        platformLabel(finding.platform),
-                        finding.detected_at,
-                    ]),
-                ]
-            )
-        );
+    wireCsvExport("exportCsv", "secguard-findings.csv", () =>
+        findingsCsvRows(visible, [
+            "rule", "title", "severity", "risk", "category", "owasp", "cwe",
+            "location", "confidence", "platform", "detectedAt",
+        ])
+    );
 }
 
 
 async function load() {
-    if (!applicationId) {
-        renderNoApplicationSelected(view);
-
+    if (!requireApplication(view, applicationId)) {
         return;
     }
 
-    view.innerHTML = '<div class="card empty">Loading findings…</div>';
+    showLoading(view, "findings");
 
     try {
         const payload = await getJson(
@@ -283,11 +250,7 @@ async function load() {
 
         render(payload.findings || []);
     } catch (error) {
-        view.innerHTML = `
-            <div class="notice notice--error">
-                ${escapeHtml(error.message || "Could not load findings.")}
-            </div>
-        `;
+        renderLoadError(view, error, "Could not load findings.");
     }
 }
 

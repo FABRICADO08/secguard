@@ -126,6 +126,26 @@ def _looks_like_robots(body: str) -> bool:
     )
 
 
+def _sitemap_document_urls(
+    document: str,
+    body: str,
+    base_url: str,
+    seen_documents: list[str],
+    queue: list[str],
+    urls: list[str],
+) -> None:
+    for location in SITEMAP_LOCATION.findall(body):
+        absolute = urljoin(document, location)
+        if not is_same_origin(base_url, absolute):
+            continue
+        if absolute.lower().endswith(".xml"):
+            if absolute not in seen_documents and absolute not in queue:
+                queue.append(absolute)
+            continue
+        if absolute not in urls and len(urls) < MAX_SITEMAP_URLS:
+            urls.append(absolute)
+
+
 def collect_sitemap_urls(
     sitemap_urls: list[str],
     base_url: str,
@@ -156,20 +176,9 @@ def collect_sitemap_urls(
         if status != 200 or not body:
             continue
 
-        for location in SITEMAP_LOCATION.findall(body):
-            absolute = urljoin(document, location)
-
-            if not is_same_origin(base_url, absolute):
-                continue
-
-            if absolute.lower().endswith(".xml"):
-                if absolute not in seen_documents and absolute not in queue:
-                    queue.append(absolute)
-
-                continue
-
-            if absolute not in urls and len(urls) < MAX_SITEMAP_URLS:
-                urls.append(absolute)
+        _sitemap_document_urls(
+            document, body, base_url, seen_documents, queue, urls
+        )
 
     return {
         "documents": seen_documents,

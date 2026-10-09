@@ -1,17 +1,6 @@
 import json
 
-if __package__:
-    from .inspect_helpers import (
-        load_model,
-        node_type,
-        walk,
-    )
-else:
-    from inspect_helpers import (
-        load_model,
-        node_type,
-        walk,
-    )
+from backend.platforms.mendix.inspect_utils import load_model, node_type, walk
 
 
 data = load_model()
