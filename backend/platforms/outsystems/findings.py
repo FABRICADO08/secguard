@@ -13,7 +13,7 @@ from backend.rules.base import (
     Finding,
 )
 from backend.platforms.finding_utils import (
-    build_finding,
+    catalogued_finding,
     normalize_findings,
 )
 
@@ -98,14 +98,11 @@ def _evidence(raw: dict[str, Any]) -> dict[str, Any]:
 def to_finding(raw: dict[str, Any]) -> Finding:
     """Map one analyzer result onto the normalized finding schema."""
 
-    rule_id = str(raw.get("rule_id") or "OSSEC-000")
-
-    metadata = RULE_CATALOGUE.get(rule_id, DEFAULT_METADATA)
-
-    return build_finding(
+    return catalogued_finding(
         raw,
-        rule_id,
-        metadata,
+        RULE_CATALOGUE,
+        DEFAULT_METADATA,
+        "OSSEC-000",
         PLATFORM,
         str(raw.get("location") or ""),
         _evidence(raw),

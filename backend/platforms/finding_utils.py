@@ -30,6 +30,23 @@ def build_finding(
     )
 
 
+def catalogued_finding(
+    raw: dict[str, Any],
+    catalogue: dict[str, dict[str, str]],
+    default_metadata: dict[str, str],
+    default_rule_id: str,
+    platform: str,
+    location: str,
+    evidence: dict[str, Any],
+) -> Finding:
+    """Map one analyzer result onto the normalized finding schema."""
+    rule_id = str(raw.get("rule_id") or default_rule_id)
+
+    metadata = catalogue.get(rule_id, default_metadata)
+
+    return build_finding(raw, rule_id, metadata, platform, location, evidence)
+
+
 def normalize_findings(
     raw_findings: list[dict[str, Any]],
     to_finding: Callable[[dict[str, Any]], Finding],

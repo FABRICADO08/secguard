@@ -338,36 +338,6 @@ def callback():
     return redirect(landing)
 
 
-def _github_user(code: str, verifier: str) -> GitHubUser | None:
-    exchange = github_request(
-        "POST",
-        f"{settings.GITHUB_URL}/login/oauth/access_token",
-        headers={"Accept": "application/json"},
-        data={
-            "client_id": settings.GITHUB_CLIENT_ID,
-            "client_secret": settings.GITHUB_CLIENT_SECRET,
-            "code": code,
-            "redirect_uri": _callback_url(),
-            "code_verifier": verifier,
-        },
-    )
-    token = str((exchange.json() or {}).get("access_token") or "")
-    if not token:
-        return None
-
-    profile_response = _api("GET", "/user", token)
-    profile_response.raise_for_status()
-    profile = profile_response.json()
-    return GitHubUser(
-        login=str(profile.get("login") or ""),
-        name=str(profile.get("name") or ""),
-        avatar_url=str(profile.get("avatar_url") or ""),
-        token=token,
-        repositories=fetch_repositories(token),
-        expires=time.time() + settings.SESSION_HOURS * 3600,
-    )
-
-
 @blueprint.post("/auth/logout")
 def logout():
     """Remove the current server-side session and clear its cookie."""
