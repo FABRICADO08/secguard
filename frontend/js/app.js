@@ -282,10 +282,24 @@ function showResults(data) {
 
 
 function scannableOptions(repositories) {
-    return repositories
+    const scannable = repositories
         .filter(item => item.can_trigger)
+        .map(item => ({
+            name: item.name,
+            label: item.display_name || systemName(item.name),
+        }));
+
+    const uses = {};
+
+    scannable.forEach(item => {
+        uses[item.label] = (uses[item.label] || 0) + 1;
+    });
+
+    return scannable
         .map(item => {
-            const label = item.display_name || systemName(item.name);
+            const label = uses[item.label] > 1
+                ? `${item.label} (${item.name})`
+                : item.label;
 
             return `<option value="${escapeHtml(item.name)}">${escapeHtml(label)}</option>`;
         })
@@ -352,14 +366,21 @@ function renderGithubScan(me, data) {
 async function loadGithubScan() {
     const me = await currentUser();
 
-    if (!me.github_enabled || !me.authenticated) {
+    if (!me.unavailable && (!me.github_enabled || !me.authenticated)) {
         renderGithubScan(me, { repositories: [] });
 
         return;
     }
 
     try {
-        renderGithubScan(me, await getJson("/api/repositories"));
+        const data = await getJson("/api/repositories");
+
+        renderGithubScan(
+            me.unavailable
+                ? { github_enabled: data.github_enabled, authenticated: true }
+                : me,
+            data
+        );
     } catch (error) {
         githubScan.innerHTML = "";
 
@@ -379,6 +400,8 @@ async function startRepositoryScan() {
     const label = select.options[select.selectedIndex].textContent;
 
     button.disabled = true;
+
+    clearResults();
 
     setStatus(statusBox, `Starting a scan of ${label}...`);
 
