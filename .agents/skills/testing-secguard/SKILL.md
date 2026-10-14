@@ -331,3 +331,16 @@ What to measure on each page (dashboard, portfolio-security, system-security, fi
 - Sessions live in Flask memory, so restarting Flask signs everyone out. Data in `data/` is kept.
 - For phone scrim clicks, `clientWidth` is 375 at a 390 viewport because of the scrollbar. Click the
   scrim at x of about 360, not 375 (x=375 lands on the scrollbar and looks like a broken scrim).
+
+## Isolated headed Playwright on the 3200x2400 VNC display (recording-friendly)
+- The desktop is 3200x2400, so a default 1024px Chromium window looks tiny in recordings, and `device_scale_factor` in a context does not scale a headed window. Launch Chromium with
+  `args=["--no-sandbox","--window-size=3200,2330","--force-device-scale-factor=3"]` and `new_context(no_viewport=True)`. That gives a CSS viewport of about 1067x700, still isolated from the shared Chrome. Then maximize it with `wmctrl -i -r <id> -b add,maximized_vert,maximized_horz` (get the id from `wmctrl -l`).
+- To drive steps one at a time between `annotate_recording` calls, use an interactive `python -i` in a tty shell. Write `_=p.screenshot(...)`: a bare `p.screenshot()` echoes the PNG bytes into the REPL output.
+- Scan-page selectors (`frontend/js/app.js`):
+  - URL scan: `#applicationUrl`, `#authorized`, `#scanButton`, result in `#status` (class `notice--success|warning|error`) and `#results`.
+  - Model uploads: `#mendixModel`/`#mendixButton`/`#mendixStatus` and `#outsystemsModel`/`#outsystemsButton`/`#outsystemsStatus`. The upload form field is called `model`.
+- Model fixtures in `tests/fixtures/`:
+  - `mendix_model_access.json` gives MXSEC-101 "Sensitive entity allows deletion" and MXSEC-106.
+  - `mendix_model.json` gives MXSEC-101/102/401.
+  - `outsystems_model.json` gives OSSEC-101..107.
+- A closed loopback port gives a 502 with "Could not connect to <url>." (an expected error, not a 500). Check `/tmp/flask.log` for `" 500 "` and `Traceback`.
