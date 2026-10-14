@@ -70,7 +70,7 @@ The frontend is a static application served from the Flask root. Every page rend
 | --- | --- |
 | `/dashboard.html` | Portfolio overview: system count, findings, critical+high and the average rating, plus the systems table. |
 | `/portfolio-security.html` | Findings per month (new, existing, resolved), the portfolio severity split and the systems ranking with CSV export. |
-| `/index.html` | Start a scan of one of your GitHub-connected applications, or upload a Mendix/OutSystems model export. URL scans remain available through `POST /api/discover`. |
+| `/index.html` | Start a scan of one of your GitHub-connected applications (Mendix projects in the repository are analysed by that scan), or upload an OutSystems model export. URL scans and Mendix uploads remain available through `POST /api/discover` and `POST /api/mendix/analyze`. |
 | `/application.html` | System overview: metadata, scan metrics, attack-surface counts, technologies and scan history. |
 | `/system-security.html` | System security: rating, severity split with deltas against the previous scan, activity, and findings grouped by OWASP Top 10, category, severity or platform. |
 | `/findings.html` | All findings of a system, or one group of the chosen grouping. |
@@ -203,6 +203,10 @@ Copy `integrations/github/secguard.yml` to `.github/workflows/secguard.yml` in e
 2. on pull requests, posts a review with inline comments and one-click `suggestion` upgrades on the changed manifest lines,
 3. keeps the report and SBOMs as a run artifact,
 4. uploads the report to SecGuard when the `SECGUARD_URL` repository variable (and `SECGUARD_API_TOKEN` secret) are set.
+
+### Mendix applications on GitHub
+
+When the repository holds a Mendix project (`*.mpr`), the action downloads the matching MxBuild from `https://cdn.mendix.com/runtime/mxbuild-<version>.tar.gz`, exports the model with `mx dump-mpr` (Mendix 10.4 and later) and runs the Mendix security rules on it. The findings (`MXSEC-*`) are part of the application's report, located at the `.mpr` file, and count towards its security health. The version is read from the `.mpr`; set the `mendix-version:` input if that fails, or `mendix: false` to skip the export. Locally, pass an existing export with `python -m backend.repository scan --mendix-model export.json`.
 
 ### Sign in with GitHub
 

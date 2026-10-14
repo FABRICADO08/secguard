@@ -3,7 +3,8 @@
 | New scan
 |--------------------------------------------------------------------------
 | Starts a scan of an application through its GitHub repository's SecGuard
-| workflow, plus the Mendix and OutSystems model uploads.
+| workflow (Mendix projects in the repository included), plus the
+| OutSystems model upload.
 */
 
 const view = renderShell({
@@ -22,12 +23,12 @@ view.innerHTML = `
 
         <div class="card__head">
             <h2>Scan an application</h2>
-            <a class="chip" href="/settings.html">API token</a>
         </div>
 
         <p class="card__subtitle">
-            Each application is scanned from its GitHub repository. Scans
-            run daily at 06:00 UTC; start one now from here.
+            Each application is scanned from its GitHub repository,
+            including the Mendix model when the repository holds a Mendix
+            project. Scans run daily at 06:00 UTC; start one now from here.
         </p>
 
         <div id="githubScan"><div class="muted">Loading applications…</div></div>
@@ -36,37 +37,19 @@ view.innerHTML = `
 
     </section>
 
-    <div class="grid-two">
-
-        <section class="card">
-            <div class="card__head"><h2>Analyze a Mendix model</h2></div>
-            <div class="field">
-                <label for="mendixModel">Model export (JSON)</label>
-                <input type="file" id="mendixModel" accept=".json">
-            </div>
-            <button class="button button--ghost" id="mendixButton"
-                type="button">
-                Analyze Mendix model
-            </button>
-            <div id="mendixStatus" class="muted"
-                style="margin-top:10px"></div>
-        </section>
-
-        <section class="card">
-            <div class="card__head"><h2>Analyze an OutSystems model</h2></div>
-            <div class="field">
-                <label for="outsystemsModel">Model export (JSON)</label>
-                <input type="file" id="outsystemsModel" accept=".json">
-            </div>
-            <button class="button button--ghost" id="outsystemsButton"
-                type="button">
-                Analyze OutSystems model
-            </button>
-            <div id="outsystemsStatus" class="muted"
-                style="margin-top:10px"></div>
-        </section>
-
-    </div>
+    <section class="card">
+        <div class="card__head"><h2>Analyze an OutSystems model</h2></div>
+        <div class="field">
+            <label for="outsystemsModel">Model export (JSON)</label>
+            <input type="file" id="outsystemsModel" accept=".json">
+        </div>
+        <button class="button button--ghost" id="outsystemsButton"
+            type="button">
+            Analyze OutSystems model
+        </button>
+        <div id="outsystemsStatus" class="muted"
+            style="margin-top:10px"></div>
+    </section>
 
     <section class="card hidden" id="results"></section>
 `;
@@ -74,10 +57,6 @@ view.innerHTML = `
 const githubScan = document.getElementById("githubScan");
 const statusBox = document.getElementById("status");
 const results = document.getElementById("results");
-
-const mendixInput = document.getElementById("mendixModel");
-const mendixButton = document.getElementById("mendixButton");
-const mendixStatusBox = document.getElementById("mendixStatus");
 
 const outsystemsInput = document.getElementById("outsystemsModel");
 const outsystemsButton = document.getElementById("outsystemsButton");
@@ -108,7 +87,6 @@ let requestInFlight = false;
 function setBusy(busy) {
     requestInFlight = busy;
 
-    mendixButton.disabled = busy;
     outsystemsButton.disabled = busy;
 }
 
@@ -492,15 +470,6 @@ async function analyzePlatformModel(platform, endpoint, input, box) {
     }
 }
 
-
-mendixButton.addEventListener("click", () =>
-    analyzePlatformModel(
-        "Mendix",
-        "/api/mendix/analyze",
-        mendixInput,
-        mendixStatusBox
-    )
-);
 
 outsystemsButton.addEventListener("click", () =>
     analyzePlatformModel(
