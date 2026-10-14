@@ -184,7 +184,7 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 
 `python -m backend.repository scan <path>` analyses a checked-out repository:
 
-- **Dependencies** from `requirements*.txt`, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, `package.json`, `package-lock.json`, `go.mod`, `pom.xml`, `composer.lock` and `Gemfile.lock`. Without a lockfile, a ranged dependency is checked as the newest release its range allows.
+- **Dependencies** from `requirements*.txt`, `pyproject.toml`, `poetry.lock`, `Pipfile.lock`, `package.json`, `package-lock.json`, `go.mod`, `pom.xml`, `composer.lock`, `Gemfile.lock`, .NET (`*.csproj`/`*.fsproj`/`*.vbproj`, `Directory.Packages.props`, `packages.config`, `packages.lock.json`), Gradle (`build.gradle[.kts]`, `libs.versions.toml`, `gradle.lockfile`), Rust (`Cargo.toml`, `Cargo.lock`), Dart/Flutter (`pubspec.yaml`, `pubspec.lock`), Swift (`Package.swift`, `Package.resolved`) and CocoaPods (`Podfile`, `Podfile.lock`). Latest-version and maintenance data also come from NuGet, crates.io and pub.dev. Without a lockfile, a ranged dependency is checked as the newest release its range allows.
 - **Known vulnerabilities** from [OSV](https://osv.dev), one finding per advisory (aliases merged), with the smallest upgrade that clears every advisory and whether it crosses a major version.
 - **Reachability**: advisories against packages your own code never imports are reported with `tentative` confidence.
 - **Supply chain**: deprecated, unmaintained (no release for 2+ years) and archived packages, single-maintainer packages, typo-squats of popular packages, and brand-new rarely downloaded packages.

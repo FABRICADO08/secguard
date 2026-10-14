@@ -12,11 +12,33 @@ from __future__ import annotations
 import json
 import re
 import sys
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from backend.repository.dependency import (
+    DEVELOPMENT,
+    RUNTIME,
+    Dependency,
+    normalize_package,
+)
+from backend.repository.dependency import line_of as _line_of
+from backend.repository.native_manifests import (
+    parse_cargo_lock,
+    parse_cargo_toml,
+    parse_gradle,
+    parse_gradle_catalog,
+    parse_gradle_lockfile,
+    parse_msbuild,
+    parse_nuget_lock,
+    parse_package_resolved,
+    parse_package_swift,
+    parse_packages_config,
+    parse_podfile,
+    parse_podfile_lock,
+    parse_pubspec,
+    parse_pubspec_lock,
+)
 from backend.repository.versions import (
     GO,
     MAVEN,
@@ -51,51 +73,19 @@ SKIPPED_DIRECTORIES = frozenset(
         ".mypy_cache",
         ".pytest_cache",
         "target",
+        "obj",
+        ".gradle",
+        ".build",
+        ".dart_tool",
+        "Pods",
     }
 )
 
 MAX_MANIFEST_BYTES = 10 * 1024 * 1024
 
-RUNTIME = "runtime"
-DEVELOPMENT = "development"
-
 _REQUIREMENT = re.compile(
     r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*([^;#]*)"
 )
-
-
-@dataclass
-class Dependency:
-    """A direct or transitive dependency and its source location."""
-
-    name: str
-    ecosystem: str
-    version: str = ""
-    spec: str = ""
-    manifest: str = ""
-    line: int = 0
-    direct: bool = True
-    scope: str = RUNTIME
-    resolved_from_range: bool = False
-
-    def key(self) -> tuple[str, str]:
-        """Return the normalized ecosystem and package identity."""
-        return (self.ecosystem, normalize_package(self.ecosystem, self.name))
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize dependency metadata for scan reports."""
-        return asdict(self)
-
-
-def normalize_package(ecosystem: str, name: str) -> str:
-    """Normalize package spelling according to ecosystem conventions."""
-    if ecosystem == PYPI:
-        return re.sub(r"[-_.]+", "-", name).lower()
-
-    if ecosystem in (NPM, PACKAGIST, RUBYGEMS):
-        return name.lower()
-
-    return name
 
 
 def iter_files(root: Path):
@@ -115,14 +105,6 @@ def _read(path: Path) -> str:
         return ""
 
     return path.read_text(encoding="utf-8", errors="replace")
-
-
-def _line_of(text: str, needle: str) -> int:
-    for number, line in enumerate(text.splitlines(), start=1):
-        if needle in line:
-            return number
-
-    return 0
 
 
 def _pin_from_spec(spec: str) -> str:
@@ -545,6 +527,20 @@ PARSERS = (
     (re.compile(r"(^|/)pom\.xml$"), parse_pom),
     (re.compile(r"(^|/)composer\.lock$"), parse_composer_lock),
     (re.compile(r"(^|/)Gemfile\.lock$"), parse_gemfile_lock),
+    (re.compile(r"\.(cs|fs|vb)proj$|(^|/)Directory\.(Packages|Build)\.props$"), parse_msbuild),
+    (re.compile(r"(^|/)packages\.config$"), parse_packages_config),
+    (re.compile(r"(^|/)packages\.lock\.json$"), parse_nuget_lock),
+    (re.compile(r"(^|/)build\.gradle(\.kts)?$"), parse_gradle),
+    (re.compile(r"(^|/)libs\.versions\.toml$"), parse_gradle_catalog),
+    (re.compile(r"(^|/)gradle\.lockfile$"), parse_gradle_lockfile),
+    (re.compile(r"(^|/)Cargo\.toml$"), parse_cargo_toml),
+    (re.compile(r"(^|/)Cargo\.lock$"), parse_cargo_lock),
+    (re.compile(r"(^|/)pubspec\.yaml$"), parse_pubspec),
+    (re.compile(r"(^|/)pubspec\.lock$"), parse_pubspec_lock),
+    (re.compile(r"(^|/)Package\.swift$"), parse_package_swift),
+    (re.compile(r"(^|/)Package\.resolved$"), parse_package_resolved),
+    (re.compile(r"(^|/)Podfile$"), parse_podfile),
+    (re.compile(r"(^|/)Podfile\.lock$"), parse_podfile_lock),
 )
 
 

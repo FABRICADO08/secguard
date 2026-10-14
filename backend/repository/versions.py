@@ -14,8 +14,13 @@ GO = "Go"
 MAVEN = "Maven"
 PACKAGIST = "Packagist"
 RUBYGEMS = "RubyGems"
+NUGET = "NuGet"
+CARGO = "crates.io"
+PUB = "Pub"
+SWIFT = "SwiftURL"
+COCOAPODS = "CocoaPods"
 
-ECOSYSTEMS = (PYPI, NPM, GO, MAVEN, PACKAGIST, RUBYGEMS)
+ECOSYSTEMS = (PYPI, NPM, GO, MAVEN, PACKAGIST, RUBYGEMS, NUGET, CARGO, PUB, SWIFT, COCOAPODS)
 
 _SEMVER = re.compile(
     r"^v?(\d+)(?:\.(\d+))?(?:\.(\d+))?(?:\.(\d+))?"
