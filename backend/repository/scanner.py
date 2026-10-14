@@ -23,6 +23,7 @@ from backend.repository.manifests import (
     discover_dependencies,
     normalize_package,
 )
+from backend.repository.mendix import analyse_mendix
 from backend.repository.quality import analyse_quality
 from backend.repository.reachability import IMPORTED, NOT_IMPORTED, ReachabilityIndex
 from backend.repository.registry import (
@@ -243,8 +244,10 @@ class RepositoryScanner:
         post: Poster | None = None,
         github_fetch: Fetcher | None = None,
         today: datetime | None = None,
+        mendix_model: Path | None = None,
     ) -> None:
         self.root = root
+        self.mendix_model = mendix_model
         self.fetch = fetch
         self.post = post
         self.github_fetch = github_fetch
@@ -384,6 +387,9 @@ class RepositoryScanner:
             dependencies, vulnerabilities, remediations, project_category
         )
 
+        mendix, mendix_findings = analyse_mendix(self.root, self.mendix_model)
+        findings.extend(mendix_findings)
+
         quality = analyse_quality(self.root)
         metrics = quality.metrics()
         quality_findings = [quality_finding(issue) for issue in quality.issues]
@@ -395,7 +401,7 @@ class RepositoryScanner:
 
         license_counts = self._license_counts(records)
 
-        return {
+        report = {
             "schema": SCHEMA,
             "generated_at": self.today.isoformat(),
             "repository": repository,
@@ -413,6 +419,9 @@ class RepositoryScanner:
             "summary": summarize(findings),
             "health": health_summary(findings, freshness_summary, metrics),
         }
+        if mendix:
+            report["mendix"] = mendix
+        return report
 
     def _statistics(self, records: list[dict[str, Any]]) -> dict[str, Any]:
         direct = sum(1 for record in records if record["direct"])

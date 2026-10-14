@@ -5,7 +5,11 @@ from __future__ import annotations
 import hashlib
 from typing import Any
 
-from backend.repository.findings import QUALITY_RECOMMENDATIONS, RULE_CATALOGUE
+from backend.repository.findings import (
+    QUALITY_RECOMMENDATIONS,
+    RULE_CATALOGUE,
+    rule_metadata,
+)
 from backend.repository.sbom import TOOL_NAME, TOOL_VERSION
 
 SCHEMA = "https://json.schemastore.org/sarif-2.1.0.json"
@@ -124,10 +128,7 @@ def _sarif_rules(
 ) -> list[dict[str, Any]]:
     rules = []
     for rule_id in rule_ids:
-        metadata = RULE_CATALOGUE.get(
-            rule_id,
-            {"title": rule_id, "category": "", "cwe": "", "owasp": ""},
-        )
+        metadata = rule_metadata(rule_id) or {"title": rule_id, "category": "", "cwe": "", "owasp": ""}
         rules.append(_sarif_rule(rule_id, metadata, worst))
     return rules
 
