@@ -206,7 +206,7 @@ Copy `integrations/github/secguard.yml` to `.github/workflows/secguard.yml` in e
 
 ### Mendix applications on GitHub
 
-When the repository holds a Mendix project (`*.mpr`), the action downloads the matching MxBuild from `https://cdn.mendix.com/runtime/mxbuild-<version>.tar.gz`, exports the model with `mx dump-mpr` (Mendix 10.4 and later) and runs the Mendix security rules on it. The findings (`MXSEC-*`) are part of the application's report, located at the `.mpr` file, and count towards its security health. The version is read from the `.mpr`; set the `mendix-version:` input if that fails, or `mendix: false` to skip the export. Locally, pass an existing export with `python -m backend.repository scan --mendix-model export.json`.
+For every Mendix project (`*.mpr`, outside `node_modules`, `deployment`, `releases` and `.mendix-cache`; list them with `python -m backend.repository mendix-projects`), the action downloads the matching MxBuild from `https://cdn.mendix.com/runtime/mxbuild-<version>.tar.gz`, exports the model with `mx dump-mpr` (Mendix 10.4 and later) and runs the Mendix security rules on it. The findings (`MXSEC-*`) are part of the application's report, located at their `.mpr` file, and count towards its security health. A project whose export fails is shown as *Not analysed* with the reason on the Application Health page, instead of looking clean. The version is read from each `.mpr`; set the `mendix-version:` input if that fails, or `mendix: false` to skip the export. Locally, pass `--mendix-model` an export file (single project) or a directory holding `<project path>.json`, e.g. `exports/billing/Billing.mpr.json`.
 
 ### Sign in with GitHub
 
