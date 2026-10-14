@@ -16,6 +16,7 @@ from typing import Any
 
 import requests
 
+from backend.repository.mendix import find_projects
 from backend.repository.registry import HttpFetcher, offline_fetcher
 from backend.repository.sarif import to_sarif
 from backend.repository.sbom import cyclonedx, spdx
@@ -170,12 +171,11 @@ def _print_scan_summary(
         f"{counts['critical']} critical / {counts['high']} high / {counts['medium']} medium findings, "
         f"{len(report['quality']['findings'])} maintainability findings."
     )
-    mendix = report.get("mendix")
-    if mendix:
+    for project in (report.get("mendix") or {}).get("projects", []):
         print(
-            f"Mendix: {mendix['findings']} model findings in {', '.join(mendix['projects']) or 'the export'}."
-            if mendix["analyzed"]
-            else f"Mendix: {mendix['reason']}"
+            f"Mendix {project['path']}: {project['findings']} model findings."
+            if project["analyzed"]
+            else f"Mendix {project['path']}: not analysed. {project['reason']}"
         )
 
 
@@ -231,6 +231,12 @@ def _review_coordinates(
     return number, commit
 
 
+def command_mendix_projects(arguments: argparse.Namespace) -> int:
+    for project in find_projects(Path(arguments.path).resolve()):
+        print(project)
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m backend.repository")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -248,9 +254,13 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--offline", action="store_true", help="No registry or advisory lookups.")
     scan.add_argument("--github-token-env", default="GITHUB_TOKEN", help="Env var with a token for upstream repository activity.")
     scan.add_argument("--upload", default="", help="SecGuard server URL to upload the report to.")
-    scan.add_argument("--mendix-model", default="", help="Mendix dump-mpr JSON export to analyse; defaults to $SECGUARD_MENDIX_MODEL.")
+    scan.add_argument("--mendix-model", default="", help="Mendix dump-mpr JSON export, or a directory of <project>.mpr.json exports; defaults to $SECGUARD_MENDIX_MODEL.")
     scan.add_argument("--fail-on", default="none", choices=["none", *SEVERITY_RANK])
     scan.set_defaults(handler=command_scan)
+
+    projects = commands.add_parser("mendix-projects", help="List the Mendix projects (.mpr) the scan analyses.")
+    projects.add_argument("path", nargs="?", default=".")
+    projects.set_defaults(handler=command_mendix_projects)
 
     review = commands.add_parser("review", help="Post inline pull-request review comments.")
     review.add_argument("--report", default="secguard-report.json")

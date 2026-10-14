@@ -172,6 +172,33 @@ function table(headers, rows, empty) {
 }
 
 
+function mendixCard(mendix) {
+    if (!mendix || !(mendix.projects || []).length) {
+        return "";
+    }
+
+    const rows = mendix.projects.map(project => `
+        <tr>
+            <td data-label="Project" class="mono">${escapeHtml(project.path)}</td>
+            <td data-label="Result">${project.analyzed
+                ? `${Number(project.findings || 0)} findings · ${Number(project.entities || 0)} entities`
+                : `<span class="sev-medium">Not analysed</span>
+                   <div class="row-meta">${escapeHtml(project.reason || "")}</div>`}</td>
+        </tr>
+    `);
+
+    return `
+        <section class="card">
+            <div class="card__head"><h2>Mendix model</h2></div>
+            ${mendix.analyzed
+                ? ""
+                : '<p class="muted">Some Mendix projects were not analysed, so their security rules did not run.</p>'}
+            ${table(["Project", "Result"], rows, "")}
+        </section>
+    `;
+}
+
+
 function render(application, access) {
     const report = application.repository || {};
     const meta = report.repository || {};
@@ -251,6 +278,8 @@ function render(application, access) {
             ${aspectCard("Maintainability", health.maintainability,
                 `${(quality.findings || []).length} issues`)}
         </div>
+
+        ${mendixCard(report.mendix)}
 
         <section class="card">
             <div class="card__head">
