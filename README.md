@@ -70,7 +70,7 @@ The frontend is a static application served from the Flask root. Every page rend
 | --- | --- |
 | `/dashboard.html` | Portfolio overview: system count, findings, critical+high and the average rating, plus the systems table. |
 | `/portfolio-security.html` | Findings per month (new, existing, resolved), the portfolio severity split and the systems ranking with CSV export. |
-| `/index.html` | Start a scan or upload a Mendix/OutSystems model export. |
+| `/index.html` | Start a scan of one of your GitHub-connected applications, or upload a Mendix/OutSystems model export. URL scans remain available through `POST /api/discover`. |
 | `/application.html` | System overview: metadata, scan metrics, attack-surface counts, technologies and scan history. |
 | `/system-security.html` | System security: rating, severity split with deltas against the previous scan, activity, and findings grouped by OWASP Top 10, category, severity or platform. |
 | `/findings.html` | All findings of a system, or one group of the chosen grouping. |

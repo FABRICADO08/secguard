@@ -165,7 +165,7 @@ Portfolio scope:
   table with search and per-system delete.
 - `/portfolio-security.html` — findings-per-month trend (new/existing/resolved), severity split and
   the systems ranking with CSV export. The topbar period chip (3/6/12 months) redraws the trend.
-- `/index.html` — scan form (URL + authorization checkbox) and the Mendix/OutSystems model upload
+- `/index.html` — GitHub application picker (`#applicationSelect` + `#scanButton`, needs sign-in and write access; dispatches the repo's SecGuard workflow) and the Mendix/OutSystems model upload
   cards; the result card links into the system security view.
 - `/settings.html` — API token (stored as `secguardApiToken`, sent as `X-API-Key`) and `/api/health`.
 
@@ -337,7 +337,7 @@ What to measure on each page (dashboard, portfolio-security, system-security, fi
   `args=["--no-sandbox","--window-size=3200,2330","--force-device-scale-factor=3"]` and `new_context(no_viewport=True)`. That gives a CSS viewport of about 1067x700, still isolated from the shared Chrome. Then maximize it with `wmctrl -i -r <id> -b add,maximized_vert,maximized_horz` (get the id from `wmctrl -l`).
 - To drive steps one at a time between `annotate_recording` calls, use an interactive `python -i` in a tty shell. Write `_=p.screenshot(...)`: a bare `p.screenshot()` echoes the PNG bytes into the REPL output.
 - Scan-page selectors (`frontend/js/app.js`):
-  - URL scan: `#applicationUrl`, `#authorized`, `#scanButton`, result in `#status` (class `notice--success|warning|error`) and `#results`.
+  - GitHub scan: `#applicationSelect`, `#scanButton`, result in `#status` (class `notice--success|warning|error`). URL scans are API-only now (`POST /api/discover`).
   - Model uploads: `#mendixModel`/`#mendixButton`/`#mendixStatus` and `#outsystemsModel`/`#outsystemsButton`/`#outsystemsStatus`. The upload form field is called `model`.
 - Model fixtures in `tests/fixtures/`:
   - `mendix_model_access.json` gives MXSEC-101 "Sensitive entity allows deletion" and MXSEC-106.
