@@ -2,8 +2,8 @@
 |--------------------------------------------------------------------------
 | New scan
 |--------------------------------------------------------------------------
-| URL discovery plus the Mendix and OutSystems model uploads. All three
-| produce an application record and hand over to the system views.
+| Starts a scan of an application through its GitHub repository's SecGuard
+| workflow, plus the Mendix and OutSystems model uploads.
 */
 
 const view = renderShell({
@@ -25,28 +25,12 @@ view.innerHTML = `
             <a class="chip" href="/settings.html">API token</a>
         </div>
 
-        <div class="field">
-            <label for="applicationUrl">Application URL</label>
-            <input
-                type="url"
-                id="applicationUrl"
-                placeholder="https://app.example.com"
-                autocomplete="off"
-            >
-        </div>
+        <p class="card__subtitle">
+            Each application is scanned from its GitHub repository. Scans
+            run daily at 06:00 UTC; start one now from here.
+        </p>
 
-        <label class="checkbox">
-            <input type="checkbox" id="authorized">
-            <span>
-                I am authorized to assess this application.
-            </span>
-        </label>
-
-        <div class="toolbar" style="margin-top:14px">
-            <button class="button" id="scanButton" type="button">
-                Start scan
-            </button>
-        </div>
+        <div id="githubScan"><div class="muted">Loading applications…</div></div>
 
         <div id="status" class="muted" style="margin-top:12px"></div>
 
@@ -87,9 +71,7 @@ view.innerHTML = `
     <section class="card hidden" id="results"></section>
 `;
 
-const urlInput = document.getElementById("applicationUrl");
-const authorizedInput = document.getElementById("authorized");
-const scanButton = document.getElementById("scanButton");
+const githubScan = document.getElementById("githubScan");
 const statusBox = document.getElementById("status");
 const results = document.getElementById("results");
 
@@ -126,7 +108,6 @@ let requestInFlight = false;
 function setBusy(busy) {
     requestInFlight = busy;
 
-    scanButton.disabled = busy;
     mendixButton.disabled = busy;
     outsystemsButton.disabled = busy;
 }
@@ -300,95 +281,127 @@ function showResults(data) {
 }
 
 
-async function startDiscovery() {
-    if (requestInFlight) {
-        return;
-    }
+function scannableOptions(repositories) {
+    return repositories
+        .filter(item => item.can_trigger)
+        .map(item => {
+            const label = item.display_name || systemName(item.name);
 
-    clearResults();
+            return `<option value="${escapeHtml(item.name)}">${escapeHtml(label)}</option>`;
+        })
+        .join("");
+}
 
-    const url = urlInput.value.trim();
 
-    if (!url) {
-        setStatus(statusBox, "Enter an application URL.", "error");
-
-        return;
-    }
-
-    if (!/^https?:\/\//i.test(url)) {
-        setStatus(
-            statusBox,
-            "URL must start with http:// or https://.",
-            "error"
-        );
-
-        return;
-    }
-
-    if (!authorizedInput.checked) {
-        setStatus(
-            statusBox,
-            "Confirm that you are authorized to assess this application.",
-            "error"
-        );
+function renderGithubScan(me, data) {
+    if (!me.github_enabled) {
+        githubScan.innerHTML = `
+            <div class="notice notice--warning">
+                GitHub sign-in is not configured on this server, so scans
+                start from each repository's SecGuard workflow on GitHub.
+            </div>
+        `;
 
         return;
     }
 
-    setBusy(true);
+    if (!me.authenticated) {
+        githubScan.innerHTML = `
+            <p>
+                <a class="button" href="${escapeHtml(signInUrl())}">
+                    Sign in with GitHub
+                </a>
+            </p>
+        `;
 
-    setStatus(statusBox, "Discovering application...");
+        return;
+    }
+
+    const options = scannableOptions(data.repositories);
+
+    if (!options) {
+        githubScan.innerHTML = `
+            <div class="notice notice--warning">
+                None of your applications can be scanned from your account.
+                Starting a scan needs write access to the application's
+                GitHub repository.
+            </div>
+        `;
+
+        return;
+    }
+
+    githubScan.innerHTML = `
+        <div class="field">
+            <label for="applicationSelect">Application</label>
+            <select id="applicationSelect">${options}</select>
+        </div>
+        <div class="toolbar" style="margin-top:14px">
+            <button class="button" id="scanButton" type="button">
+                Run scan
+            </button>
+        </div>
+    `;
+
+    document
+        .getElementById("scanButton")
+        .addEventListener("click", startRepositoryScan);
+}
+
+
+async function loadGithubScan() {
+    const me = await currentUser();
+
+    if (!me.github_enabled || !me.authenticated) {
+        renderGithubScan(me, { repositories: [] });
+
+        return;
+    }
 
     try {
-        const response = await apiFetch("/api/discover", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ url }),
-        });
-
-        const data = await response.json();
-
-        if (!response.ok) {
-            throw new Error(data.error || "Discovery failed.");
-        }
-
-        if (!data.application) {
-            throw new Error(
-                "Discovery completed but no application data was returned."
-            );
-        }
-
-        showResults(data);
-
-        if (data.partial) {
-            setStatus(
-                statusBox,
-                `${
-                    data.error || "The target could not be fetched."
-                } Only the TLS findings were recorded. Application ID: ${
-                    data.application_id || "unknown"
-                }`,
-                "warning"
-            );
-        } else {
-            setStatus(
-                statusBox,
-                `Discovery completed. Application ID: ${
-                    data.application_id || "unknown"
-                }`,
-                "success"
-            );
-        }
+        renderGithubScan(me, await getJson("/api/repositories"));
     } catch (error) {
-        console.error("Discovery error:", error);
+        githubScan.innerHTML = "";
 
         setStatus(
             statusBox,
-            error.message || "Discovery failed.",
+            error.message || "Could not load applications.",
+            "error"
+        );
+    }
+}
+
+
+async function startRepositoryScan() {
+    const select = document.getElementById("applicationSelect");
+    const button = document.getElementById("scanButton");
+
+    const label = select.options[select.selectedIndex].textContent;
+
+    button.disabled = true;
+
+    setStatus(statusBox, `Starting a scan of ${label}...`);
+
+    try {
+        const result = await triggerRepositoryScan(select.value);
+
+        statusBox.className = "notice notice--success";
+
+        statusBox.innerHTML = `
+            Scan started for ${escapeHtml(label)}. Results appear under
+            My Applications when the workflow finishes.
+            <a href="${escapeHtml(result.actions_url)}" target="_blank" rel="noopener">
+                Follow it on GitHub
+            </a>
+        `;
+    } catch (error) {
+        setStatus(
+            statusBox,
+            error.message || "Could not start the scan.",
             "error"
         );
     } finally {
-        setBusy(false);
+        button.disabled = false;
     }
 }
 
@@ -457,14 +470,6 @@ async function analyzePlatformModel(platform, endpoint, input, box) {
 }
 
 
-scanButton.addEventListener("click", startDiscovery);
-
-urlInput.addEventListener("keydown", event => {
-    if (event.key === "Enter") {
-        startDiscovery();
-    }
-});
-
 mendixButton.addEventListener("click", () =>
     analyzePlatformModel(
         "Mendix",
@@ -482,3 +487,6 @@ outsystemsButton.addEventListener("click", () =>
         outsystemsStatusBox
     )
 );
+
+
+loadGithubScan();
