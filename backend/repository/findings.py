@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import re
 from dataclasses import dataclass
 from typing import Any
 
@@ -108,7 +107,7 @@ def make_finding(
     ).to_dict()
 
 
-MENDIX_RULE = re.compile(r"^MXSEC-\d{3}$")
+MENDIX_RULE_IDS = frozenset({*mendix_rules.RULE_CATALOGUE, mendix_rules.CATALOGUE.default_rule_id})
 
 
 def rule_metadata(rule_id: Any) -> dict[str, str] | None:
@@ -117,7 +116,7 @@ def rule_metadata(rule_id: Any) -> dict[str, str] | None:
     if rule_id in RULE_CATALOGUE:
         return {**RULE_CATALOGUE[rule_id], "platform": PLATFORM}
 
-    if isinstance(rule_id, str) and MENDIX_RULE.match(rule_id):
+    if rule_id in MENDIX_RULE_IDS:
         metadata = mendix_rules.RULE_CATALOGUE.get(rule_id, mendix_rules.DEFAULT_METADATA)
         return {**metadata, "platform": mendix_rules.PLATFORM}
 

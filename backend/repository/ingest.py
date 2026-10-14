@@ -6,6 +6,7 @@ import re
 from typing import Any
 
 from backend.model.application import Application
+from backend.platforms.mendix.findings import PLATFORM as MENDIX_PLATFORM
 from backend.recommendations import build_recommendations
 from backend.repository.findings import PLATFORM, RULE_CATALOGUE, rule_metadata
 from backend.repository.scanner import SCHEMA
@@ -93,9 +94,46 @@ def _application_label(repository: dict[str, Any], name: str) -> str:
     return application_names.name_for(name) or label or name.rsplit("/", 1)[-1]
 
 
+def _clean_mendix(raw: Any) -> dict[str, Any] | None:
+    if not isinstance(raw, dict) or not isinstance(raw.get("projects"), list):
+        return None
+
+    projects = []
+
+    for entry in raw["projects"]:
+        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+            raise InvalidReportError("Every Mendix project must be an object with a path.")
+
+        clean: dict[str, Any] = {"path": entry["path"][:300], "analyzed": entry.get("analyzed") is True}
+
+        if isinstance(entry.get("reason"), str):
+            clean["reason"] = entry["reason"][:500]
+
+        for key in ("modules", "entities", "findings"):
+            if type(entry.get(key)) is int:
+                clean[key] = entry[key]
+
+        projects.append(clean)
+
+    if not projects:
+        return None
+
+    return {"analyzed": all(item["analyzed"] for item in projects), "projects": projects}
+
+
+def _check_mendix_findings(findings: list[dict[str, Any]], mendix: dict[str, Any] | None) -> None:
+    analysed = {item["path"] for item in (mendix or {}).get("projects", []) if item["analyzed"]}
+
+    for finding in findings:
+        if finding.get("platform") == MENDIX_PLATFORM and finding.get("location") not in analysed:
+            raise InvalidReportError("Mendix findings must belong to an analysed Mendix project in the report.")
+
+
 def application_from_report(report: Any) -> tuple[Application, list[dict[str, Any]]]:
     """Validate a scanner report and convert it to a stored application."""
     repository, name, findings, quality = _validated_report(report)
+    mendix = _clean_mendix(report.get("mendix"))
+    _check_mendix_findings(findings, mendix)
     provider = "github" if repository.get("provider") == "github" else "repository"
 
     application = Application.create(
@@ -125,5 +163,8 @@ def application_from_report(report: Any) -> tuple[Application, list[dict[str, An
         "hotspots": quality.get("hotspots") or [],
         "findings": quality["findings"],
     }
+
+    if mendix:
+        application.repository["mendix"] = mendix
 
     return application, findings
