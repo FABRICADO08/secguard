@@ -37,7 +37,11 @@ from backend.repository.registry import (
 from backend.repository.sbom import purl
 from backend.repository.typosquat import typosquat_target
 from backend.repository.versions import compare, newest_satisfying, release_parts
-from backend.repository.vulnerabilities import Poster, find_vulnerabilities
+from backend.repository.vulnerabilities import (
+    Poster,
+    Vulnerability,
+    find_vulnerabilities,
+)
 from backend.risk.scoring import summarize
 
 SCHEMA = "secguard.repository-report/1"
@@ -46,6 +50,67 @@ UNMAINTAINED_YEARS = 2.0
 ABANDONED_YEARS = 4.0
 NEW_PACKAGE_DAYS = 90
 LOW_ADOPTION_DOWNLOADS = 1000
+
+
+def _license_fields(info: PackageInfo | None, verdict: Any) -> dict[str, Any]:
+    if info is None:
+        return {"license": "", "license_spdx": "", "license_category": "", "registry": None}
+    single = len(verdict.options) == 1 and verdict.category != licensing.UNKNOWN
+    return {
+        "license": info.license,
+        "license_spdx": verdict.options[0] if single else "",
+        "license_category": verdict.category,
+        "registry": info.to_dict(),
+    }
+
+
+def _new_and_unadopted(age_days: int | None, downloads: int | None) -> bool:
+    return (
+        age_days is not None and age_days < NEW_PACKAGE_DAYS
+        and downloads is not None and downloads < LOW_ADOPTION_DOWNLOADS
+    )
+
+
+def _typosquat_finding(name, squat, location, evidence, adoption) -> dict[str, Any]:
+    age_days, downloads = adoption
+    suspicious_registry = (age_days is not None and age_days < NEW_PACKAGE_DAYS) or (
+        downloads is not None and downloads < LOW_ADOPTION_DOWNLOADS
+    )
+    published = f" It was first published {age_days} days ago." if age_days is not None else ""
+    adopted = f" It has {downloads} downloads in the last week." if downloads is not None else ""
+    return make_finding(
+        "REPO-SUP-001",
+        "critical" if suspicious_registry else "high",
+        f"`{name}` differs from the popular package `{squat.target}` by {squat.technique}." + published + adopted,
+        f"Confirm `{name}` is the package you intended. If you meant `{squat.target}`, replace it, "
+        "rotate any credentials available to builds that installed it, and review the install scripts it ran.",
+        location,
+        {**evidence, "lookalike_of": squat.target, "technique": squat.technique, "age_days": age_days, "weekly_downloads": downloads},
+        confidence=FIRM if suspicious_registry else TENTATIVE,
+    )
+
+
+def _unmaintained_finding(name, info, activity, idle_years, location, evidence) -> dict[str, Any]:
+    commits = activity.commits_last_year if activity else None
+    contributors = activity.contributors if activity else None
+    detail = f" and {commits} commits in the last year" if commits is not None else ""
+    detail += f"; {contributors} contributors" if contributors is not None else ""
+    return make_finding(
+        "REPO-DEP-003",
+        "medium" if idle_years >= ABANDONED_YEARS else "low",
+        f"{name} has had no release for {idle_years:.1f} years{detail}.",
+        f"Check whether {name} is still maintained; budget for a fork or replacement if not.",
+        location,
+        {**evidence, "latest_release": info.latest_release, "idle_years": round(idle_years, 1),
+         "commits_last_year": commits, "contributors": contributors},
+    )
+
+
+def _floats_unpinned(dependency: Dependency, resolved_counts: bool) -> bool:
+    """A direct runtime range that no lockfile pins to one release."""
+    if not (dependency.direct and dependency.spec and dependency.scope != DEVELOPMENT):
+        return False
+    return not dependency.version or (resolved_counts and dependency.resolved_from_range)
 
 
 def _years_between(start: str, end: datetime) -> float | None:
@@ -280,11 +345,8 @@ class RepositoryScanner:
         record = {
             **dependency.to_dict(),
             "purl": package_url,
-            "license": info.license if info else "",
-            "license_spdx": verdict.options[0] if len(verdict.options) == 1 and verdict.category != licensing.UNKNOWN else "",
-            "license_category": verdict.category if info else "",
+            **_license_fields(info, verdict),
             "reachability": reach,
-            "registry": info.to_dict() if info else None,
             "upstream": activity.__dict__ if activity else None,
             "freshness": freshness,
             "vulnerabilities": [item.id for item in found],
@@ -337,15 +399,7 @@ class RepositoryScanner:
             "schema": SCHEMA,
             "generated_at": self.today.isoformat(),
             "repository": repository,
-            "statistics": {
-                "dependencies": len(records),
-                "direct": sum(1 for record in records if record["direct"]),
-                "transitive": sum(1 for record in records if not record["direct"]),
-                "vulnerable": sum(1 for record in records if record["vulnerabilities"]),
-                "ecosystems": sorted({record["ecosystem"] for record in records}),
-                "registry_lookups": self.fetch is not offline_fetcher,
-                "advisory_lookups": self.post is not None,
-            },
+            "statistics": self._statistics(records),
             "dependencies": records,
             "vulnerabilities": advisories,
             "licenses": {"project": repository["license"], "project_category": project_category, "categories": license_counts},
@@ -358,6 +412,18 @@ class RepositoryScanner:
             "findings": findings,
             "summary": summarize(findings),
             "health": health_summary(findings, freshness_summary, metrics),
+        }
+
+    def _statistics(self, records: list[dict[str, Any]]) -> dict[str, Any]:
+        direct = sum(1 for record in records if record["direct"])
+        return {
+            "dependencies": len(records),
+            "direct": direct,
+            "transitive": len(records) - direct,
+            "vulnerable": sum(1 for record in records if record["vulnerabilities"]),
+            "ecosystems": sorted({record["ecosystem"] for record in records}),
+            "registry_lookups": self.fetch is not offline_fetcher,
+            "advisory_lookups": self.post is not None,
         }
 
     @staticmethod
@@ -448,30 +514,14 @@ class RepositoryScanner:
     def _lookalike_findings(
         self, dependency, location, evidence, age_days, downloads
     ):
-        name = dependency.name
-        squat = typosquat_target(dependency.ecosystem, name)
+        squat = typosquat_target(dependency.ecosystem, dependency.name)
         if squat:
-            suspicious_registry = (age_days is not None and age_days < NEW_PACKAGE_DAYS) or (
-                downloads is not None and downloads < LOW_ADOPTION_DOWNLOADS
-            )
-
-            yield make_finding(
-                "REPO-SUP-001",
-                "critical" if suspicious_registry else "high",
-                f"`{name}` differs from the popular package `{squat.target}` by {squat.technique}."
-                + (f" It was first published {age_days} days ago." if age_days is not None else "")
-                + (f" It has {downloads} downloads in the last week." if downloads is not None else ""),
-                f"Confirm `{name}` is the package you intended. If you meant `{squat.target}`, replace it, "
-                "rotate any credentials available to builds that installed it, and review the install scripts it ran.",
-                location,
-                {**evidence, "lookalike_of": squat.target, "technique": squat.technique, "age_days": age_days, "weekly_downloads": downloads},
-                confidence=FIRM if suspicious_registry else TENTATIVE,
-            )
-        elif age_days is not None and age_days < NEW_PACKAGE_DAYS and downloads is not None and downloads < LOW_ADOPTION_DOWNLOADS:
+            yield _typosquat_finding(dependency.name, squat, location, evidence, (age_days, downloads))
+        elif _new_and_unadopted(age_days, downloads):
             yield make_finding(
                 "REPO-SUP-002",
                 "low",
-                f"`{name}` was first published {age_days} days ago and has {downloads} weekly downloads.",
+                f"`{dependency.name}` was first published {age_days} days ago and has {downloads} weekly downloads.",
                 "Review the package source and maintainer before depending on it; prefer established alternatives.",
                 location,
                 {**evidence, "age_days": age_days, "weekly_downloads": downloads},
@@ -505,7 +555,7 @@ class RepositoryScanner:
                 confidence=CONFIRMED,
             )
 
-        self._emit_maintenance_findings(
+        yield from self._emit_maintenance_findings(
             dependency, info, activity, location, evidence, runtime
         )
         behind = (freshness.get("behind") or {}).get("major", 0)
@@ -523,29 +573,21 @@ class RepositoryScanner:
     def _emit_maintenance_findings(
         self, dependency, info, activity, location, evidence, runtime
     ):
-        name = dependency.name
         idle_years = _years_between(info.latest_release, self.today)
-        if not info.deprecated and idle_years is not None and idle_years >= UNMAINTAINED_YEARS:
-            commits = activity.commits_last_year if activity else None
-            if commits is None or commits < 5:
-                yield make_finding(
-                    "REPO-DEP-003",
-                    "medium" if idle_years >= ABANDONED_YEARS else "low",
-                    f"{name} has had no release for {idle_years:.1f} years"
-                    + (f" and {commits} commits in the last year" if commits is not None else "")
-                    + (f"; {activity.contributors} contributors" if activity and activity.contributors is not None else "")
-                    + ".",
-                    f"Check whether {name} is still maintained; budget for a fork or replacement if not.",
-                    location,
-                    {**evidence, "latest_release": info.latest_release, "idle_years": round(idle_years, 1),
-                     "commits_last_year": commits, "contributors": activity.contributors if activity else None},
-                )
+        commits = activity.commits_last_year if activity else None
+        if (
+            not info.deprecated
+            and idle_years is not None
+            and idle_years >= UNMAINTAINED_YEARS
+            and (commits is None or commits < 5)
+        ):
+            yield _unmaintained_finding(dependency.name, info, activity, idle_years, location, evidence)
 
         if info.maintainers == 1 and runtime:
             yield make_finding(
                 "REPO-DEP-007",
                 "informational",
-                f"{name} is published by a single maintainer account.",
+                f"{dependency.name} is published by a single maintainer account.",
                 "Single-maintainer packages are a bus-factor and account-takeover risk; monitor releases closely.",
                 location,
                 {**evidence, "maintainers": 1},
@@ -557,27 +599,27 @@ class RepositoryScanner:
         location = _location(dependency)
         evidence = {"package": name, "ecosystem": dependency.ecosystem, "version": dependency.version, "scope": dependency.scope}
         runtime = dependency.scope != DEVELOPMENT
-        age_days = None
-        if info and info.first_release:
-            first = parse_time(info.first_release)
-            age_days = (self.today - first).days if first else None
         downloads = info.weekly_downloads if info else None
         yield from self._lookalike_findings(
-            dependency, location, evidence, age_days, downloads
+            dependency, location, evidence, self._age_days(info), downloads
         )
-        if info is None:
-            if dependency.direct and not dependency.version and dependency.spec and runtime:
-                yield self._unpinned(dependency, location, evidence)
-            return
-        yield from self._registry_status_findings(
-            dependency, info, freshness, activity, location, evidence
-        )
+        if info is not None:
+            yield from self._registry_status_findings(
+                dependency, info, freshness, activity, location, evidence
+            )
 
-        if dependency.direct and (dependency.resolved_from_range or not dependency.version) and dependency.spec and runtime:
+        if _floats_unpinned(dependency, resolved_counts=info is not None):
             yield self._unpinned(dependency, location, evidence)
+
+        if info is None:
+            return
 
         if runtime:
             yield from self._license_findings(dependency, info, verdict, project_category, location, evidence)
+
+    def _age_days(self, info: PackageInfo | None) -> int | None:
+        first = parse_time(info.first_release) if info and info.first_release else None
+        return (self.today - first).days if first else None
 
     def _unpinned(self, dependency, location, evidence):
         return make_finding(

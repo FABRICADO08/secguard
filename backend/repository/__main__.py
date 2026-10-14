@@ -115,21 +115,29 @@ def _repository_metadata(
         "provider": "github" if os.environ.get("GITHUB_ACTIONS") or arguments.name else "local",
         "trigger": os.environ.get("GITHUB_EVENT_NAME", "manual"),
     }
-    application_name = (
-        arguments.application_name
-        or os.environ.get("SECGUARD_APPLICATION_NAME", "")
-    )
-    if application_name.strip():
-        problem = application_names.name_problem(application_name)
-        if problem:
-            raise SystemExit(f"--application-name: {problem}")
-        repository["application_name"] = application_names.normalise(application_name)
+    application_name = _application_name(arguments)
+    if application_name:
+        repository["application_name"] = application_name
+    url = _repository_url()
+    if url:
+        repository["url"] = url
+    return repository
 
+
+def _application_name(arguments: argparse.Namespace) -> str:
+    value = arguments.application_name or os.environ.get("SECGUARD_APPLICATION_NAME", "")
+    if not value.strip():
+        return ""
+    problem = application_names.name_problem(value)
+    if problem:
+        raise SystemExit(f"--application-name: {problem}")
+    return application_names.normalise(value)
+
+
+def _repository_url() -> str:
     server_url = os.environ.get("GITHUB_SERVER_URL")
     repository_name = os.environ.get("GITHUB_REPOSITORY")
-    if server_url and repository_name:
-        repository["url"] = f"{server_url}/{repository_name}"
-    return repository
+    return f"{server_url}/{repository_name}" if server_url and repository_name else ""
 
 
 def _write_scan_outputs(

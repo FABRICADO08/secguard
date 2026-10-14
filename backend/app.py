@@ -11,17 +11,39 @@ from flask import Flask, jsonify, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
 from backend.config import settings
-from backend.security import github_auth
-from backend.storage.scans import application_exists, load_application
+from backend.discovery.api_discovery import discover_common_api_paths
+from backend.discovery.crawler import crawl
+from backend.discovery.endpoints import discover_endpoints
+from backend.discovery.fingerprint import TargetUnreachableError, fetch_application
+from backend.discovery.technology import detect_technologies
+from backend.platforms.mendix.service import analyze_model
 from backend.route_applications import register_routes as register_application_routes
 from backend.route_discovery import register_routes as register_discovery_routes
 from backend.route_frontend import register_routes as register_frontend_routes
 from backend.route_models import register_routes as register_model_routes
 from backend.route_repositories import register_routes as register_repository_routes
+from backend.scanners.configuration import scan_exposed_paths
+from backend.security import github_auth
+from backend.storage.scans import application_exists, load_application
 
 ROOT = Path(__file__).resolve().parent.parent
 FRONTEND = ROOT / "frontend"
 MAX_MODEL_BYTES = 25 * 1024 * 1024
+
+# Route modules look these up on this module at request time, so they can
+# be replaced in one place (tests substitute network and analysis calls).
+__all__ = [
+    "MAX_MODEL_BYTES",
+    "TargetUnreachableError",
+    "analyze_model",
+    "app",
+    "crawl",
+    "detect_technologies",
+    "discover_common_api_paths",
+    "discover_endpoints",
+    "fetch_application",
+    "scan_exposed_paths",
+]
 
 
 class _FirstForwardedValue:

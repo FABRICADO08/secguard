@@ -279,19 +279,25 @@ def _function_bindings(function: ast.AST) -> tuple[dict[str, int], set[str]]:
     return stored, loaded | declared_outer
 
 
+def _binding_targets(child: ast.AST) -> list[ast.AST]:
+    if isinstance(child, (ast.For, ast.AsyncFor, ast.comprehension)):
+        return [child.target]
+    if isinstance(child, ast.Assign):
+        return [target for target in child.targets if isinstance(target, (ast.Tuple, ast.List))]
+    if isinstance(child, ast.withitem) and child.optional_vars is not None:
+        return [child.optional_vars]
+    return []
+
+
 def _unpacked_names(function: ast.AST) -> set[str]:
-    unpacked: set[str] = set()
-    for child in ast.walk(function):
-        targets = []
-        if isinstance(child, (ast.For, ast.AsyncFor, ast.comprehension)):
-            targets.append(child.target)
-        elif isinstance(child, ast.Assign):
-            targets.extend(target for target in child.targets if isinstance(target, (ast.Tuple, ast.List)))
-        elif isinstance(child, ast.withitem) and child.optional_vars is not None:
-            targets.append(child.optional_vars)
-        for target in targets:
-            unpacked.update(name.id for name in ast.walk(target) if isinstance(name, ast.Name))
-    return unpacked
+    return {
+        name.id
+        for child in ast.walk(function)
+        for target in _binding_targets(child)
+        for name in ast.walk(target)
+        if isinstance(name, ast.Name)
+    }
+
 
 def _unused_locals(function: ast.AST) -> list[tuple[str, int]]:
     stored, used = _function_bindings(function)
@@ -354,34 +360,43 @@ def _record_python_function(
     report.functions.append(
         FunctionMetrics(path, node.name, node.lineno, span, cyclomatic, cognitive, len(parameters))
     )
-    end = node.end_lineno or node.lineno
-    if cyclomatic > COMPLEXITY_WARNING or cognitive > COGNITIVE_WARNING:
-        report.issues.append(
-            Issue("REPO-MNT-001", path, node.lineno, node.name,
-                  f"`{node.name}` has cyclomatic complexity {cyclomatic} and cognitive complexity {cognitive}.",
-                  float(cyclomatic), end)
-        )
-    if span > FUNCTION_LINES:
-        report.issues.append(
-            Issue("REPO-MNT-002", path, node.lineno, node.name,
-                  f"`{node.name}` is {span} lines long.", float(span), end)
-        )
-    if len(parameters) > PARAMETERS:
-        report.issues.append(
-            Issue("REPO-MNT-003", path, node.lineno, node.name,
-                  f"`{node.name}` takes {len(parameters)} parameters.", float(len(parameters)), end)
-        )
+    report.issues.extend(_function_size_issues(path, node, report.functions[-1]))
     for name, line in _unused_locals(node):
         report.issues.append(
             Issue("REPO-MNT-006", path, line, name, f"Local variable `{name}` in `{node.name}` is assigned but never used.")
         )
     if not is_test and not node.name.startswith("_"):
-        report.documentable += 1
-        report.documented += ast.get_docstring(node) is not None
-        report.annotatable += 1
-        report.annotated += node.returns is not None and all(
-            argument.annotation is not None for argument in parameters
-        )
+        _count_function_documentation(node, parameters, report)
+
+
+def _function_size_issues(
+    path: str, node: ast.FunctionDef | ast.AsyncFunctionDef, metrics: FunctionMetrics
+) -> list[Issue]:
+    end = node.end_lineno or node.lineno
+    checks = (
+        (metrics.cyclomatic > COMPLEXITY_WARNING or metrics.cognitive > COGNITIVE_WARNING, "REPO-MNT-001",
+         f"`{node.name}` has cyclomatic complexity {metrics.cyclomatic} and cognitive complexity {metrics.cognitive}.",
+         metrics.cyclomatic),
+        (metrics.lines > FUNCTION_LINES, "REPO-MNT-002", f"`{node.name}` is {metrics.lines} lines long.", metrics.lines),
+        (metrics.parameters > PARAMETERS, "REPO-MNT-003",
+         f"`{node.name}` takes {metrics.parameters} parameters.", metrics.parameters),
+    )
+    return [
+        Issue(rule_id, path, node.lineno, node.name, message, float(metric), end)
+        for exceeded, rule_id, message, metric in checks
+        if exceeded
+    ]
+
+
+def _count_function_documentation(
+    node: ast.FunctionDef | ast.AsyncFunctionDef, parameters: list[ast.arg], report: QualityReport
+) -> None:
+    report.documentable += 1
+    report.documented += ast.get_docstring(node) is not None
+    report.annotatable += 1
+    report.annotated += node.returns is not None and all(
+        argument.annotation is not None for argument in parameters
+    )
 
 
 def _analyse_python(path: str, source: str, report: QualityReport) -> None:
@@ -421,17 +436,16 @@ def _unused_imports(path: str, tree: ast.Module, report: QualityReport) -> None:
             report.issues.append(Issue("REPO-MNT-005", path, line, name, f"`{name}` is imported but never used."))
 
 
+def _import_bindings(node: ast.stmt) -> list[str]:
+    if isinstance(node, ast.Import):
+        return [(alias.asname or alias.name).split(".")[0] for alias in node.names]
+    if isinstance(node, ast.ImportFrom) and node.module != "__future__":
+        return [alias.asname or alias.name for alias in node.names if alias.name != "*"]
+    return []
+
+
 def _imported_names(tree: ast.Module) -> dict[str, int]:
-    imported: dict[str, int] = {}
-    for node in tree.body:
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                imported[(alias.asname or alias.name).split(".")[0]] = node.lineno
-        elif isinstance(node, ast.ImportFrom) and node.module != "__future__":
-            for alias in node.names:
-                if alias.name != "*":
-                    imported[alias.asname or alias.name] = node.lineno
-    return imported
+    return {name: node.lineno for node in tree.body for name in _import_bindings(node)}
 
 
 def _used_names(tree: ast.Module) -> set[str]:
@@ -574,16 +588,32 @@ def _coverage_findings(report: QualityReport) -> None:
     if report.has_web_api and not report.api_specs:
         report.issues.append(Issue("REPO-MNT-013", "", 0, "", "The code serves an HTTP API but no OpenAPI/Swagger specification was found."))
     metrics = report.metrics()
-    if metrics["docstring_coverage"] is not None and report.documentable >= 10 and metrics["docstring_coverage"] < 0.5:
-        report.issues.append(
-            Issue("REPO-MNT-009", "", 0, "", f"Only {metrics['docstring_coverage']:.0%} of public modules, classes and functions have a docstring.",
-                  metrics["docstring_coverage"])
-        )
-    if metrics["type_annotation_coverage"] is not None and report.annotatable >= 10 and metrics["type_annotation_coverage"] < 0.5:
-        report.issues.append(
-            Issue("REPO-MNT-010", "", 0, "", f"Only {metrics['type_annotation_coverage']:.0%} of public functions are fully type-annotated.",
-                  metrics["type_annotation_coverage"])
-        )
+    ratios = (
+        ("REPO-MNT-009", metrics["docstring_coverage"], report.documentable,
+         "of public modules, classes and functions have a docstring."),
+        ("REPO-MNT-010", metrics["type_annotation_coverage"], report.annotatable,
+         "of public functions are fully type-annotated."),
+    )
+    for rule_id, coverage, population, subject in ratios:
+        if coverage is not None and population >= 10 and coverage < 0.5:
+            report.issues.append(Issue(rule_id, "", 0, "", f"Only {coverage:.0%} {subject}", coverage))
+
+
+def _source_language(path: Path, root: Path, relative: str, report: QualityReport) -> str | None:
+    """The language to analyse ``path`` as; records READMEs and API specs."""
+    name = path.name.lower()
+    if name.startswith("readme"):
+        report.has_readme = report.has_readme or path.parent == root
+        return None
+    if re.fullmatch(r"(openapi|swagger)[^/]*\.(ya?ml|json)", name) or name.endswith((".raml", ".graphql")):
+        report.api_specs.append(relative)
+        return None
+    language = SOURCE_SUFFIXES.get(path.suffix.lower())
+    if language is None or path.stat().st_size > MAX_SOURCE_BYTES:
+        return None
+    if re.search(r"\.min\.(js|css)$|(^|/)(migrations|fixtures|generated)/", relative):
+        return None
+    return language
 
 
 def analyse_quality(root: Path) -> QualityReport:
@@ -593,26 +623,9 @@ def analyse_quality(root: Path) -> QualityReport:
 
     for path in iter_files(root):
         relative = path.relative_to(root).as_posix()
-        name = path.name.lower()
-
-        if name.startswith("readme"):
-            if path.parent == root:
-                report.has_readme = True
-            continue
-
-        if re.fullmatch(r"(openapi|swagger)[^/]*\.(ya?ml|json)", name) or name.endswith((".raml", ".graphql")):
-            report.api_specs.append(relative)
-            continue
-
-        language = SOURCE_SUFFIXES.get(path.suffix.lower())
-
-        if language is None or path.stat().st_size > MAX_SOURCE_BYTES:
-            continue
-
-        if re.search(r"\.min\.(js|css)$|(^|/)(migrations|fixtures|generated)/", relative):
-            continue
-
-        _inspect_quality_file(path, relative, language, report, normalised)
+        language = _source_language(path, root, relative, report)
+        if language is not None:
+            _inspect_quality_file(path, relative, language, report, normalised)
 
     _duplicates(normalised, report)
     _coverage_findings(report)

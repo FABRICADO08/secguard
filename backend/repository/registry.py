@@ -161,16 +161,8 @@ def _pypi(name: str, fetch: Fetcher) -> PackageInfo | None:
     license_text = _pypi_license(info)
 
     downloads = fetch(f"https://pypistats.org/api/packages/{quote(name.lower())}/recent")
-
-    weekly = None
-
-    if isinstance(downloads, dict):
-        weekly = (downloads.get("data") or {}).get("last_week")
-
-    urls = info.get("project_urls") or {}
-
-    ordered = sorted(dates.values())
-
+    weekly = (downloads.get("data") or {}).get("last_week") if isinstance(downloads, dict) else None
+    first_release, latest_release = _release_bounds(dates.values())
     latest = _stable_latest(PYPI, list(dates), str(info.get("version") or ""))
 
     return PackageInfo(
@@ -183,15 +175,22 @@ def _pypi(name: str, fetch: Fetcher) -> PackageInfo | None:
         ),
         maintainers=None,
         weekly_downloads=weekly if isinstance(weekly, int) else None,
-        first_release=ordered[0] if ordered else "",
-        latest_release=ordered[-1] if ordered else "",
+        first_release=first_release,
+        latest_release=latest_release,
         release_dates=dates,
-        repository=next(
-            (_github_repository(str(url)) for url in [*urls.values(), info.get("home_page") or ""]
-             if _github_repository(str(url))),
-            "",
-        ),
+        repository=_pypi_repository(info),
     )
+
+
+def _release_bounds(dates: Any) -> tuple[str, str]:
+    ordered = sorted(dates)
+    return (ordered[0], ordered[-1]) if ordered else ("", "")
+
+
+def _pypi_repository(info: dict[str, Any]) -> str:
+    urls = [*(info.get("project_urls") or {}).values(), info.get("home_page") or ""]
+    candidates = (_github_repository(str(url)) for url in urls)
+    return next((repository for repository in candidates if repository), "")
 
 
 def _npm_license(manifest: dict[str, Any], document: dict[str, Any]) -> str:
@@ -202,39 +201,42 @@ def _npm_license(manifest: dict[str, Any], document: dict[str, Any]) -> str:
 
 
 def _npm(name: str, fetch: Fetcher) -> PackageInfo | None:
-    encoded = quote(name, safe="@")
-    encoded = encoded.replace("/", "%2F")
-
-    document = fetch(f"https://registry.npmjs.org/{encoded}")
+    document = fetch(f"https://registry.npmjs.org/{quote(name, safe='@').replace('/', '%2F')}")
 
     if not isinstance(document, dict) or "versions" not in document:
         return None
 
-    times = {
+    times = _npm_release_times(document)
+    latest = str((document.get("dist-tags") or {}).get("latest") or "")
+    manifest = (document.get("versions") or {}).get(latest) or {}
+    downloads = fetch(f"https://api.npmjs.org/downloads/point/last-week/{name}")
+    first_release, latest_release = _release_bounds(times.values())
+
+    return PackageInfo(
+        latest=latest,
+        weekly_downloads=downloads.get("downloads") if isinstance(downloads, dict) else None,
+        first_release=str((document.get("time") or {}).get("created") or first_release),
+        latest_release=times.get(latest, latest_release),
+        release_dates=times,
+        **_npm_manifest_fields(document, manifest),
+    )
+
+
+def _npm_manifest_fields(document: dict[str, Any], manifest: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "license": _npm_license(manifest, document),
+        "deprecated": str(manifest.get("deprecated") or ""),
+        "maintainers": len(document.get("maintainers") or []) or None,
+        "repository": _npm_repository(document),
+    }
+
+
+def _npm_release_times(document: dict[str, Any]) -> dict[str, str]:
+    return {
         key: str(value)
         for key, value in (document.get("time") or {}).items()
         if key not in {"created", "modified"}
     }
-
-    latest = str((document.get("dist-tags") or {}).get("latest") or "")
-
-    manifest = (document.get("versions") or {}).get(latest) or {}
-
-    license_value = _npm_license(manifest, document)
-    downloads = fetch(f"https://api.npmjs.org/downloads/point/last-week/{name}")
-    ordered = sorted(times.values())
-
-    return PackageInfo(
-        latest=latest,
-        license=license_value,
-        deprecated=str(manifest.get("deprecated") or ""),
-        maintainers=len(document.get("maintainers") or []) or None,
-        weekly_downloads=(downloads or {}).get("downloads") if isinstance(downloads, dict) else None,
-        first_release=str((document.get("time") or {}).get("created") or (ordered[0] if ordered else "")),
-        latest_release=times.get(latest, ordered[-1] if ordered else ""),
-        release_dates=times,
-        repository=_npm_repository(document),
-    )
 
 
 def _go(name: str, fetch: Fetcher) -> PackageInfo | None:

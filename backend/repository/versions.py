@@ -142,6 +142,14 @@ def _npm_tilde_or_wildcard_matches(
     return current[:2] == base[:2] and current >= base
 
 
+def _npm_comparator_base(
+    numbers: list[str | None],
+) -> tuple[tuple[int, int, int], list[bool]]:
+    wildcard = [value is None or not value.isdigit() for value in numbers]
+    base = tuple(0 if wild else int(value) for value, wild in zip(numbers, wildcard))
+    return base, wildcard
+
+
 def _npm_comparator(part: str, version: str) -> bool:
     match = re.match(r"^(\^|~|>=|<=|>|<|=)?v?(\d+)(?:\.(\d+|x|\*))?(?:\.(\d+|x|\*))?", part)
 
@@ -149,9 +157,7 @@ def _npm_comparator(part: str, version: str) -> bool:
         return False
 
     operator = match.group(1) or "="
-    numbers = [match.group(index) for index in (2, 3, 4)]
-    base = tuple(int(value) if value and value.isdigit() else 0 for value in numbers)
-    wildcard = [value is None or not value.isdigit() for value in numbers]
+    base, wildcard = _npm_comparator_base([match.group(index) for index in (2, 3, 4)])
     current = release_parts(NPM, version)
 
     if operator == "^":

@@ -48,29 +48,29 @@ def _license_choice(license_text: str, spdx_id: bool) -> list[dict[str, Any]]:
     return [{"license": {"name": license_text}}]
 
 
+def _cyclonedx_component(dependency: dict[str, Any]) -> dict[str, Any]:
+    reference = dependency.get("purl") or (
+        f"{dependency['ecosystem']}:{dependency['name']}@{dependency.get('version', '')}"
+    )
+    component: dict[str, Any] = {
+        "type": "library",
+        "bom-ref": reference,
+        "name": dependency["name"],
+        "scope": "optional" if dependency.get("scope") == "development" else "required",
+    }
+    for key in ("version", "purl"):
+        if dependency.get(key):
+            component[key] = dependency[key]
+    licenses = _license_choice(
+        dependency.get("license_spdx") or "", True
+    ) or _license_choice(dependency.get("license") or "", False)
+    if licenses:
+        component["licenses"] = licenses
+    return component
+
+
 def _cyclonedx_components(report: dict[str, Any]) -> list[dict[str, Any]]:
-    components = []
-    for dependency in report.get("dependencies") or []:
-        reference = dependency.get("purl") or (
-            f"{dependency['ecosystem']}:{dependency['name']}@{dependency.get('version', '')}"
-        )
-        component: dict[str, Any] = {
-            "type": "library",
-            "bom-ref": reference,
-            "name": dependency["name"],
-            "scope": "optional" if dependency.get("scope") == "development" else "required",
-        }
-        if dependency.get("version"):
-            component["version"] = dependency["version"]
-        if dependency.get("purl"):
-            component["purl"] = dependency["purl"]
-        licenses = _license_choice(
-            dependency.get("license_spdx") or "", True
-        ) or _license_choice(dependency.get("license") or "", False)
-        if licenses:
-            component["licenses"] = licenses
-        components.append(component)
-    return components
+    return [_cyclonedx_component(dependency) for dependency in report.get("dependencies") or []]
 
 
 def _cyclonedx_vulnerabilities(report: dict[str, Any]) -> list[dict[str, Any]]:

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any
 
 from backend.rules.base import Finding
@@ -30,21 +31,24 @@ def build_finding(
     )
 
 
-def catalogued_finding(
-    raw: dict[str, Any],
-    catalogue: dict[str, dict[str, str]],
-    default_metadata: dict[str, str],
-    default_rule_id: str,
-    platform: str,
-    location: str,
-    evidence: dict[str, Any],
-) -> Finding:
-    """Map one analyzer result onto the normalized finding schema."""
-    rule_id = str(raw.get("rule_id") or default_rule_id)
+@dataclass(frozen=True)
+class FindingCatalogue:
+    """Rule metadata one platform analyzer maps its results onto."""
 
-    metadata = catalogue.get(rule_id, default_metadata)
+    platform: str
+    rules: dict[str, dict[str, str]]
+    default_metadata: dict[str, str]
+    default_rule_id: str
 
-    return build_finding(raw, rule_id, metadata, platform, location, evidence)
+    def finding(
+        self, raw: dict[str, Any], location: str, evidence: dict[str, Any]
+    ) -> Finding:
+        """Map one analyzer result onto the normalized finding schema."""
+        rule_id = str(raw.get("rule_id") or self.default_rule_id)
+        metadata = self.rules.get(rule_id, self.default_metadata)
+        return build_finding(
+            raw, rule_id, metadata, self.platform, location, evidence
+        )
 
 
 def normalize_findings(

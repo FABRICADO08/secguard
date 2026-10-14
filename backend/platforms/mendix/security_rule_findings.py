@@ -43,15 +43,21 @@ class FindingHelpersMixin:
 
     @staticmethod
     def _entity_finding_title(rule, sensitive: bool) -> str:
-        if sensitive and rule.allow_delete:
-            return "Sensitive entity allows deletion"
-        if sensitive and rule.has_write_access and rule.allow_create and not rule.has_xpath_constraint:
-            return "Sensitive entity has broad write access without row-level restriction"
-        if rule.allow_delete and rule.has_write_access and not rule.has_xpath_constraint:
-            return "Entity has broad delete/write access without row-level restriction"
-        if rule.allow_create and rule.has_write_access and not rule.has_xpath_constraint:
-            return "Entity has broad write access without row-level restriction"
-        return "Potential excessive entity access"
+        unrestricted_write = rule.has_write_access and not rule.has_xpath_constraint
+        titles = (
+            (sensitive and rule.allow_delete,
+             "Sensitive entity allows deletion"),
+            (sensitive and unrestricted_write and rule.allow_create,
+             "Sensitive entity has broad write access without row-level restriction"),
+            (unrestricted_write and rule.allow_delete,
+             "Entity has broad delete/write access without row-level restriction"),
+            (unrestricted_write and rule.allow_create,
+             "Entity has broad write access without row-level restriction"),
+        )
+        return next(
+            (title for matched, title in titles if matched),
+            "Potential excessive entity access",
+        )
 
     @staticmethod
     def _entity_access_evidence(rule) -> Dict[str, Any]:
