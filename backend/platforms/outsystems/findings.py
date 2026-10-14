@@ -13,7 +13,7 @@ from backend.rules.base import (
     Finding,
 )
 from backend.platforms.finding_utils import (
-    catalogued_finding,
+    FindingCatalogue,
     normalize_findings,
 )
 
@@ -95,34 +95,17 @@ def _evidence(raw: dict[str, Any]) -> dict[str, Any]:
     return evidence
 
 
+CATALOGUE = FindingCatalogue(PLATFORM, RULE_CATALOGUE, DEFAULT_METADATA, "OSSEC-000")
+
+
 def to_finding(raw: dict[str, Any]) -> Finding:
     """Map one analyzer result onto the normalized finding schema."""
-
-    return catalogued_finding(
-        raw,
-        RULE_CATALOGUE,
-        DEFAULT_METADATA,
-        "OSSEC-000",
-        PLATFORM,
-        str(raw.get("location") or ""),
-        _evidence(raw),
-    )
+    return CATALOGUE.finding(raw, str(raw.get("location") or ""), _evidence(raw))
 
 
-def to_findings(
-    raw_findings: list[dict[str, Any]],
-) -> list[dict[str, Any]]:
+def to_findings(raw_findings: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Normalize analyzer output, worst findings first."""
-
-    return normalize_findings(
-        raw_findings,
-        to_finding,
-    )
+    return normalize_findings(raw_findings, to_finding)
 
 
-__all__ = [
-    "PLATFORM",
-    "RULE_CATALOGUE",
-    "to_finding",
-    "to_findings",
-]
+__all__ = ["PLATFORM", "RULE_CATALOGUE", "to_finding", "to_findings"]

@@ -109,18 +109,19 @@ def _upgrade_comment(
         f"{len(group)} known {worst}-or-lower vulnerabilit"
         f"{'y' if len(group) == 1 else 'ies'}** ({advisories})."
     )
-    source = root / path
+    return ReviewComment(path, line, body + _upgrade_suggestion(root / path, line, evidence, target))
+
+
+def _upgrade_suggestion(source: Path, line: int, evidence: dict[str, Any], target: str) -> str:
     lines = source.read_text(encoding="utf-8", errors="replace").splitlines() if source.is_file() else []
-    if target and 0 < line <= len(lines):
-        replacement = suggested_line(lines[line - 1], str(evidence.get("version")), target)
-        if replacement is not None:
-            note = (
-                " This crosses a major version; review the changelog."
-                if evidence.get("breaking_upgrade") and target == evidence.get("upgrade_to")
-                else ""
-            )
-            body += f"\n\nUpgrade to `{target}`:{note}\n\n```suggestion\n{replacement}\n```"
-    return ReviewComment(path, line, body)
+    if not target or not 0 < line <= len(lines):
+        return ""
+    replacement = suggested_line(lines[line - 1], str(evidence.get("version")), target)
+    if replacement is None:
+        return ""
+    breaking = evidence.get("breaking_upgrade") and target == evidence.get("upgrade_to")
+    note = " This crosses a major version; review the changelog." if breaking else ""
+    return f"\n\nUpgrade to `{target}`:{note}\n\n```suggestion\n{replacement}\n```"
 
 
 def _finding_comments(

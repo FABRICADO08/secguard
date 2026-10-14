@@ -65,14 +65,21 @@ def _validated_report(report: Any) -> tuple[dict[str, Any], str, list, dict]:
     if not REPOSITORY_NAME.match(name):
         raise InvalidReportError("Repository name must look like 'owner/repo'.")
 
+    findings, quality = _validated_findings(report)
+    return repository, name, findings, quality
+
+
+def _validated_findings(report: dict[str, Any]) -> tuple[list, dict]:
     raw_findings = report.get("findings") or []
     quality = report.get("quality") or {}
-    if not isinstance(raw_findings, list) or not isinstance(quality, dict) or not isinstance(quality.get("findings") or [], list):
+    if not isinstance(quality, dict):
         raise InvalidReportError("Findings must be lists.")
-
+    raw_quality = quality.get("findings") or []
+    if not isinstance(raw_findings, list) or not isinstance(raw_quality, list):
+        raise InvalidReportError("Findings must be lists.")
     findings = [_clean_finding(item) for item in raw_findings]
-    quality_findings = [_clean_finding(item) for item in quality.get("findings") or []]
-    return repository, name, findings, {**quality, "findings": quality_findings}
+    quality_findings = [_clean_finding(item) for item in raw_quality]
+    return findings, {**quality, "findings": quality_findings}
 
 
 def _application_label(repository: dict[str, Any], name: str) -> str:

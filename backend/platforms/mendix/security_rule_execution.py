@@ -26,37 +26,46 @@ class EntityAccessRulesMixin:
         return self._entity_finding(entity, rule, sensitivity, risk, module_type)
 
     def _entity_access_risk(self, rule, module_type, sensitivity):
-        write = bool(rule.has_write_access)
-        create = bool(rule.allow_create)
-        delete = bool(rule.allow_delete)
-        xpath = bool(rule.has_xpath_constraint)
-        broad_roles = len(rule.roles) >= 5
-        sensitive = bool(sensitivity["sensitive"])
-        sensitivity_level = sensitivity["highest_severity"]
-
+        access = {
+            "write": bool(rule.has_write_access),
+            "create": bool(rule.allow_create),
+            "delete": bool(rule.allow_delete),
+            "xpath": bool(rule.has_xpath_constraint),
+            "broad_roles": len(rule.roles) >= 5,
+        }
         if module_type == "technical":
-            if not sensitive or not (delete or create):
-                return None
-            if sensitivity_level not in {"high", "critical"}:
-                return None
-            if not broad_roles and not delete:
-                return None
-            inputs = RiskInputs(
-                base_score=35, sensitive=True,
-                sensitivity_severity=sensitivity_level, create=create,
-                delete=delete, write=write, xpath=xpath, broad_roles=broad_roles,
-            )
-            return self._risk_above(inputs, 70)
+            return self._technical_entity_risk(access, sensitivity)
+        return self._application_entity_risk(access, sensitivity)
 
-        dangerous_write = write and (create or delete)
-        sensitive_modification = sensitive and (write or create or delete)
-        broad_dangerous_access = broad_roles and dangerous_write and not xpath
-        if not (sensitive_modification or broad_dangerous_access):
+    @staticmethod
+    def _technical_rule_qualifies(access, sensitivity) -> bool:
+        if not sensitivity["sensitive"] or not (access["delete"] or access["create"]):
+            return False
+        if sensitivity["highest_severity"] not in {"high", "critical"}:
+            return False
+        return access["broad_roles"] or access["delete"]
+
+    def _technical_entity_risk(self, access, sensitivity):
+        if not self._technical_rule_qualifies(access, sensitivity):
+            return None
+        inputs = RiskInputs(
+            base_score=35, sensitive=True,
+            sensitivity_severity=sensitivity["highest_severity"], **access,
+        )
+        return self._risk_above(inputs, 70)
+
+    def _application_entity_risk(self, access, sensitivity):
+        sensitive = bool(sensitivity["sensitive"])
+        modifies = access["write"] or access["create"] or access["delete"]
+        dangerous_write = access["write"] and (access["create"] or access["delete"])
+        broad_dangerous_access = (
+            access["broad_roles"] and dangerous_write and not access["xpath"]
+        )
+        if not ((sensitive and modifies) or broad_dangerous_access):
             return None
         inputs = RiskInputs(
             base_score=25, sensitive=sensitive,
-            sensitivity_severity=sensitivity_level, create=create,
-            delete=delete, write=write, xpath=xpath, broad_roles=broad_roles,
+            sensitivity_severity=sensitivity["highest_severity"], **access,
         )
         return self._risk_above(inputs, 55)
 

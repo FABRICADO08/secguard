@@ -347,6 +347,17 @@ def remediation(
     )
 
 
+def _osv_query(dependency: Dependency) -> dict[str, Any]:
+    return {
+        "package": {"name": dependency.name, "ecosystem": dependency.ecosystem},
+        "version": dependency.version,
+    }
+
+
+def _result_ids(result: dict[str, Any] | None) -> list[str]:
+    return [str(item.get("id")) for item in (result or {}).get("vulns") or [] if item.get("id")]
+
+
 def _query_vulnerability_ids(
     dependencies: list[Dependency], post: Poster
 ) -> dict[int, list[str]]:
@@ -355,30 +366,12 @@ def _query_vulnerability_ids(
         for index, dependency in enumerate(dependencies)
         if dependency.version
     ]
-
     identifiers: dict[int, list[str]] = {}
-
     for start in range(0, len(checkable), BATCH_SIZE):
         chunk = checkable[start:start + BATCH_SIZE]
-
-        response = post(
-            OSV_BATCH,
-            {
-                "queries": [
-                    {
-                        "package": {"name": dependency.name, "ecosystem": dependency.ecosystem},
-                        "version": dependency.version,
-                    }
-                    for _, dependency in chunk
-                ]
-            },
-        )
-
-        results = (response or {}).get("results") or []
-
-        for (index, _), result in zip(chunk, results):
-            ids = [str(item.get("id")) for item in (result or {}).get("vulns") or [] if item.get("id")]
-
+        response = post(OSV_BATCH, {"queries": [_osv_query(dependency) for _, dependency in chunk]})
+        for (index, _), result in zip(chunk, (response or {}).get("results") or []):
+            ids = _result_ids(result)
             if ids:
                 identifiers[index] = ids
     return identifiers

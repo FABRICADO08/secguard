@@ -11,26 +11,31 @@ class ParserAccessMixin:
         for node in self._find_nodes_by_exact_type("DomainModels$Association"):
             self._parse_association(node)
 
+    @staticmethod
+    def _text(node: Dict[str, Any], key: str) -> str:
+        return str(node.get(key, "") or "")
+
     def _parse_association(self, node: Dict[str, Any]) -> None:
-        name = str(node.get("$QualifiedName", "") or node.get("name", "") or "")
+        text = self._text
+        name = text(node, "$QualifiedName") or text(node, "name")
         if not name or name in self.associations_by_name:
             return
         parent_behavior, child_behavior = self._association_delete_behaviors(node)
         values = {
-            "id": str(node.get("$ID", "") or ""),
-            "name": str(node.get("name", "") or ""),
+            "id": text(node, "$ID"),
+            "name": text(node, "name"),
             "qualified_name": name,
-            "type": str(node.get("type", "") or ""),
-            "owner": str(node.get("owner", "") or ""),
-            "parent_id": str(node.get("parent", "") or ""),
-            "child_id": str(node.get("child", "") or ""),
-            "parent": str(node.get("parent", "") or ""),
-            "child": str(node.get("child", "") or ""),
+            "type": text(node, "type"),
+            "owner": text(node, "owner"),
+            "parent_id": text(node, "parent"),
+            "child_id": text(node, "child"),
+            "parent": text(node, "parent"),
+            "child": text(node, "child"),
             "parent_entity": None, "child_entity": None,
             "parent_name": "", "child_name": "",
             "parent_delete_behavior": parent_behavior,
             "child_delete_behavior": child_behavior,
-            "documentation": str(node.get("documentation", "") or ""),
+            "documentation": text(node, "documentation"),
         }
         association = self._construct(Association, values)
         self.associations_by_name[name] = association
