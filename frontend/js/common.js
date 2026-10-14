@@ -772,6 +772,7 @@ function currentUser() {
             github_enabled: false,
             authenticated: false,
             user: null,
+            unavailable: true,
         }));
     }
 
