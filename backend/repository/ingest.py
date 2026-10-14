@@ -7,7 +7,7 @@ from typing import Any
 
 from backend.model.application import Application
 from backend.recommendations import build_recommendations
-from backend.repository.findings import PLATFORM, RULE_CATALOGUE
+from backend.repository.findings import PLATFORM, RULE_CATALOGUE, rule_metadata
 from backend.repository.scanner import SCHEMA
 from backend.risk.scoring import summarize
 from backend.rules.base import Finding
@@ -28,7 +28,9 @@ def _clean_finding(raw: Any) -> dict[str, Any]:
 
     rule_id = raw.get("rule_id")
 
-    if rule_id not in RULE_CATALOGUE:
+    metadata = rule_metadata(rule_id)
+
+    if metadata is None:
         raise InvalidReportError(f"Unknown repository rule '{rule_id}'.")
 
     values = {name: raw.get(name) for name in _FINDING_FIELDS if raw.get(name) is not None}
@@ -40,14 +42,12 @@ def _clean_finding(raw: Any) -> dict[str, Any]:
         if name in values and not isinstance(values[name], str):
             raise InvalidReportError(f"Finding field '{name}' must be a string.")
 
-    metadata = RULE_CATALOGUE[rule_id]
-
     # Category, platform, CWE and OWASP mapping are owned by the server;
     # risk is recomputed rather than trusted.
     return Finding(
         **{"title": metadata["title"], "severity": "medium", **values},
         category=metadata["category"],
-        platform=PLATFORM,
+        platform=metadata["platform"],
         cwe=metadata["cwe"],
         owasp=metadata["owasp"],
     ).to_dict()

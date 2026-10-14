@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from typing import Any
 
+from backend.platforms.mendix import findings as mendix_rules
 from backend.repository.quality import Issue
 from backend.risk.confidence import CONFIRMED, FIRM, TENTATIVE
 from backend.rules.base import Finding
@@ -106,6 +108,22 @@ def make_finding(
     ).to_dict()
 
 
+MENDIX_RULE = re.compile(r"^MXSEC-\d{3}$")
+
+
+def rule_metadata(rule_id: Any) -> dict[str, str] | None:
+    """Catalogue entry and platform for a rule a repository report may carry."""
+
+    if rule_id in RULE_CATALOGUE:
+        return {**RULE_CATALOGUE[rule_id], "platform": PLATFORM}
+
+    if isinstance(rule_id, str) and MENDIX_RULE.match(rule_id):
+        metadata = mendix_rules.RULE_CATALOGUE.get(rule_id, mendix_rules.DEFAULT_METADATA)
+        return {**metadata, "platform": mendix_rules.PLATFORM}
+
+    return None
+
+
 def quality_finding(issue: Issue) -> dict[str, Any]:
     location = f"{issue.path}:{issue.line}" if issue.path and issue.line else issue.path or "repository"
 
@@ -137,4 +155,5 @@ __all__ = [
     "TENTATIVE",
     "make_finding",
     "quality_finding",
+    "rule_metadata",
 ]

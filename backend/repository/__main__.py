@@ -85,6 +85,10 @@ def command_scan(arguments: argparse.Namespace) -> int:
     else:
         options["fetch"] = offline_fetcher
 
+    mendix_model = arguments.mendix_model or os.environ.get("SECGUARD_MENDIX_MODEL", "")
+    if mendix_model:
+        options["mendix_model"] = Path(mendix_model).resolve()
+
     report = scan_repository(root, _repository_metadata(arguments, root), **options)
     _write_scan_outputs(arguments, report)
 
@@ -166,6 +170,13 @@ def _print_scan_summary(
         f"{counts['critical']} critical / {counts['high']} high / {counts['medium']} medium findings, "
         f"{len(report['quality']['findings'])} maintainability findings."
     )
+    mendix = report.get("mendix")
+    if mendix:
+        print(
+            f"Mendix: {mendix['findings']} model findings in {', '.join(mendix['projects']) or 'the export'}."
+            if mendix["analyzed"]
+            else f"Mendix: {mendix['reason']}"
+        )
 
 
 def _should_fail(report: dict[str, Any], fail_on: str) -> bool:
@@ -237,6 +248,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--offline", action="store_true", help="No registry or advisory lookups.")
     scan.add_argument("--github-token-env", default="GITHUB_TOKEN", help="Env var with a token for upstream repository activity.")
     scan.add_argument("--upload", default="", help="SecGuard server URL to upload the report to.")
+    scan.add_argument("--mendix-model", default="", help="Mendix dump-mpr JSON export to analyse; defaults to $SECGUARD_MENDIX_MODEL.")
     scan.add_argument("--fail-on", default="none", choices=["none", *SEVERITY_RANK])
     scan.set_defaults(handler=command_scan)
 
