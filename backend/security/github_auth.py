@@ -175,6 +175,13 @@ def repository_name(application: dict[str, Any]) -> str:
     return str(value or "")
 
 
+def _user_can_view(user: GitHubUser | None, application: dict[str, Any]) -> bool:
+    if user is None:
+        return False
+
+    return application.get("platform") != "Repository" or repository_name(application).lower() in user.repositories
+
+
 def can_view(application: dict[str, Any]) -> bool:
     """
     Check whether the current user may access a stored application.
@@ -182,20 +189,17 @@ def can_view(application: dict[str, Any]) -> bool:
     With GitHub sign-in enabled nothing is visible without a session, and
     GitHub-connected applications also need read access to their repository.
     """
-    if not enabled():
-        return True
-
-    user = current_user()
-
-    if user is None:
-        return False
-
-    return application.get("platform") != "Repository" or repository_name(application).lower() in user.repositories
+    return not enabled() or _user_can_view(current_user(), application)
 
 
 def visible(applications: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Filter application summaries to records visible to the current user."""
-    return [application for application in applications if can_view(application)]
+    if not enabled():
+        return applications
+
+    user = current_user()
+
+    return [application for application in applications if _user_can_view(user, application)]
 
 
 def _callback_url() -> str:
