@@ -24,7 +24,7 @@ def _code_issues(relative: str, text: str, language: str) -> list[SecurityIssue]
     return python_issues(relative, text) if language == "Python" else pattern_issues(relative, text, language)
 
 
-def _scan_file(path: Path, relative: str, current: set[str]) -> list[SecurityIssue]:
+def _scan_file(path: Path, relative: str, current: set[str], searched: set[str]) -> list[SecurityIssue]:
     language = SOURCE_SUFFIXES.get(path.suffix.lower(), "")
     secrets = scans_for_secrets(relative, SUFFIXES)
     if not (language or secrets) or path.stat().st_size > MAX_SOURCE_BYTES:
@@ -32,17 +32,26 @@ def _scan_file(path: Path, relative: str, current: set[str]) -> list[SecurityIss
     text = path.read_text(encoding="utf-8", errors="replace")
     issues = _code_issues(relative, text, language) if language else []
     if secrets:
+        searched.add(relative)
         found, values = tree_secrets(relative, text)
         issues += found
         current.update(values)
     return issues
 
 
+def _history_eligible(root: Path, relative: str, searched: set[str]) -> bool:
+    """Deleted files are eligible; files still present only when their contents were searched."""
+    if relative in searched:
+        return True
+    return scans_for_secrets(relative, SUFFIXES) and not (root / relative).exists()
+
+
 def analyse_code_security(root: Path, history: bool = True) -> list[SecurityIssue]:
     current: set[str] = set()
+    searched: set[str] = set()
     issues: list[SecurityIssue] = []
     for path in iter_files(root):
-        issues += _scan_file(path, path.relative_to(root).as_posix(), current)
+        issues += _scan_file(path, path.relative_to(root).as_posix(), current, searched)
     if history:
-        issues += history_secrets(root, current, SUFFIXES)
+        issues += history_secrets(root, current, lambda relative: _history_eligible(root, relative, searched))
     return issues

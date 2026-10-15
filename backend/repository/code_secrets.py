@@ -5,6 +5,7 @@ from __future__ import annotations
 import shutil
 import subprocess  # nosec B404 - runs the local git binary with fixed arguments
 import threading
+from collections.abc import Callable
 from pathlib import Path, PurePosixPath
 
 from backend.repository.code_issues import SecurityIssue, is_test_path, suppressed
@@ -56,11 +57,11 @@ def tree_secrets(path: str, text: str) -> tuple[list[SecurityIssue], set[str]]:
 
 def _git_log(root: Path) -> subprocess.Popen[str] | None:
     git = shutil.which("git")
-    if git is None or not (root / ".git").exists():
+    if git is None:
         return None
     return subprocess.Popen(  # nosec B603 - fixed argument list, no shell
-        [git, "-C", str(root), "log", "-p", "--no-color", "--no-ext-diff", "--unified=0",
-         f"--max-count={HISTORY_COMMITS}", "--format=%x00%H %aI"],
+        [git, "-C", str(root), "log", "-p", "--relative", "--no-color", "--no-ext-diff", "--unified=0",
+         f"--max-count={HISTORY_COMMITS}", "--format=%x00%H %aI", "--", "."],
         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, text=True, errors="replace",
     )
 
@@ -73,8 +74,12 @@ def _history_issue(state: dict[str, str], label: str, value: str) -> SecurityIss
     )
 
 
-def history_secrets(root: Path, current: set[str], source_suffixes: set[str] | frozenset[str]) -> list[SecurityIssue]:
-    """Secrets added in past commits that are no longer in the working tree."""
+def history_secrets(root: Path, current: set[str], eligible: Callable[[str], bool]) -> list[SecurityIssue]:
+    """Secrets added in past commits under ``root`` that are no longer in the working tree.
+
+    ``eligible`` limits history to paths whose working-tree copy was searched, so a secret
+    in a file that was skipped is never reported as removed.
+    """
     process = _git_log(root)
     if process is None or process.stdout is None:
         return []
@@ -84,7 +89,7 @@ def history_secrets(root: Path, current: set[str], source_suffixes: set[str] | f
     state = {"commit": "", "date": "", "path": ""}
     try:
         for raw in process.stdout:
-            _history_line(raw.rstrip("\n"), state, issues, current, source_suffixes)
+            _history_line(raw.rstrip("\n"), state, issues, current, eligible)
     finally:
         timer.cancel()
         process.kill()
@@ -92,12 +97,12 @@ def history_secrets(root: Path, current: set[str], source_suffixes: set[str] | f
     return list(issues.values())
 
 
-def _history_line(line, state, issues, current, source_suffixes) -> None:
+def _history_line(line, state, issues, current, eligible) -> None:
     if line.startswith("\x00"):
         state["commit"], _, state["date"] = line[1:].partition(" ")
     elif line.startswith("+++ "):
         target = line[4:]
-        state["path"] = target[2:] if target.startswith("b/") and scans_for_secrets(target[2:], source_suffixes) else ""
+        state["path"] = target[2:] if target.startswith("b/") and eligible(target[2:]) else ""
     elif line.startswith("+") and state["path"]:
         for label, value in line_secrets(line[1:]):
             if value not in current and value not in issues:

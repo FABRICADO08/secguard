@@ -119,3 +119,51 @@ def test_code_security_findings_reach_sarif_and_storage(tmp_path):
     assert "argument list" in rule["help"]["text"]
     _, findings = application_from_report(report)
     assert any(item["rule_id"] == "REPO-SEC-002" for item in findings)
+
+
+def test_constant_only_strings_and_suppressed_debug_are_not_reported():
+    source = '''import os
+
+def handler(cursor):
+    cursor.execute("SELECT " + "* FROM users")
+    os.system("echo " + "hello")
+    cursor.execute("SELECT * FROM {}".format("users"))
+'''
+    assert python_issues("app.py", source) == []
+    assert python_issues("site/settings.py", "DEBUG = True  # nosec - local only\n") == []
+
+
+def test_snippets_never_contain_the_secret():
+    (issue,) = python_issues("app.py", f'import os\nos.system("deploy --key {AWS_KEY} " + target)\n')
+
+    assert AWS_KEY not in issue.snippet
+    assert "[REDACTED]" in issue.snippet
+
+
+def _repository_with_removed_secret(root, path):
+    _git(root, "init", "-q")
+    _git(root, "config", "user.email", "dev@example.invalid")
+    _git(root, "config", "user.name", "Dev")
+    target = root / path
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(f"AWS={AWS_KEY}\n")
+    _git(root, "add", path)
+    _git(root, "commit", "-qm", "add config")
+    return target
+
+
+def test_history_is_read_when_scanning_a_subdirectory(tmp_path):
+    target = _repository_with_removed_secret(tmp_path, "packages/api/settings.env")
+    target.write_text("AWS=${AWS_ACCESS_KEY_ID}\n")
+    _git(tmp_path, "commit", "-qam", "use env")
+
+    (issue,) = analyse_code_security(tmp_path / "packages" / "api")
+
+    assert (issue.rule_id, issue.path) == ("REPO-SEC-006", "settings.env")
+
+
+def test_secret_in_an_oversized_file_is_not_reported_as_removed(tmp_path, monkeypatch):
+    monkeypatch.setattr("backend.repository.code_security.MAX_SOURCE_BYTES", 10)
+    _repository_with_removed_secret(tmp_path, "settings.env")
+
+    assert analyse_code_security(tmp_path) == []
