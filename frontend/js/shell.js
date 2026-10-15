@@ -310,7 +310,7 @@ function renderShell(options) {
             <nav class="rail" aria-label="Sections">
 
                 <a class="rail__brand" href="/dashboard.html" title="SecGuard">
-                    S
+                    <img src="/img/secguard-shield.png" alt="SecGuard">
                 </a>
 
                 ${railItems

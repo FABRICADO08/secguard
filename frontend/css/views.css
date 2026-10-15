@@ -769,23 +769,10 @@ pre.evidence {
     margin: 0;
 }
 
-.login__brand {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    font-weight: 600;
-    font-size: 16px;
-}
-
 .login__logo {
-    width: 32px;
-    height: 32px;
-    border-radius: 8px;
-    display: grid;
-    place-items: center;
-    background: var(--accent);
-    color: #fff;
-    font-weight: 700;
+    width: min(240px, 70%);
+    height: auto;
+    justify-self: center;
 }
 
 .login__action {
