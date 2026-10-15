@@ -32,6 +32,61 @@ function aspectCard(title, aspect, caption) {
 }
 
 
+const MAINTAINABILITY_PROPERTIES = [
+    ["volume", "Volume", value => `${Number(value.lines || 0).toLocaleString()} lines of code`],
+    ["duplication", "Duplication", value => `${Number(value.percent || 0)}% duplicated`],
+    ["unit_size", "Unit size", riskProfile],
+    ["unit_complexity", "Unit complexity", riskProfile],
+    ["unit_interfacing", "Unit interfacing", riskProfile],
+    ["module_coupling", "Module coupling", riskProfile],
+    ["component_balance", "Component balance",
+        value => `${Number(value.components || 0)} components, Gini ${Number(value.gini || 0)}`],
+];
+
+
+function riskProfile(value) {
+    const profile = value.profile || {};
+
+    return `${Number(profile.moderate || 0)}% moderate · ${Number(profile.high || 0)}% high · ${
+        Number(profile.very_high || 0)}% very high risk`;
+}
+
+
+function maintainabilityCard(maintainability) {
+    if (!maintainability || maintainability.rating === null || maintainability.rating === undefined) {
+        return "";
+    }
+
+    const properties = maintainability.properties || {};
+
+    const rows = MAINTAINABILITY_PROPERTIES.map(([key, label, describe]) => {
+        const value = properties[key];
+
+        return `
+            <tr>
+                <td data-label="Property">${escapeHtml(label)}</td>
+                <td data-label="Rating">${value ? ratingMarkup(value.rating) : '<span class="muted">Not measured</span>'}</td>
+                <td data-label="Detail">${value ? escapeHtml(describe(value)) : ""}</td>
+            </tr>
+        `;
+    });
+
+    return `
+        <section class="card">
+            <div class="card__head">
+                <h2>Maintainability rating</h2>
+                ${ratingMarkup(maintainability.rating)}
+            </div>
+            <p class="muted">
+                ISO 25010-style rating from ${Number(maintainability.units || 0)} units
+                (functions and methods); each property is rated from 0.5 to 5.5 stars.
+            </p>
+            ${table(["Property", "Rating", "Detail"], rows, "No source code measured.")}
+        </section>
+    `;
+}
+
+
 function percent(value) {
     return value === null || value === undefined
         ? "-"
@@ -278,6 +333,8 @@ function render(application, access) {
             ${aspectCard("Maintainability", health.maintainability,
                 `${(quality.findings || []).length} issues`)}
         </div>
+
+        ${maintainabilityCard(report.maintainability)}
 
         ${mendixCard(report.mendix)}
 

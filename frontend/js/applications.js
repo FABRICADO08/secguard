@@ -47,6 +47,12 @@ function applicationRow(repository) {
                 </span>
             </td>
 
+            <td data-label="Maintainability">
+                ${scan && scan.maintainability !== null && scan.maintainability !== undefined
+                    ? ratingMarkup(scan.maintainability)
+                    : '<span class="muted">-</span>'}
+            </td>
+
             <td data-label="Findings">
                 ${scan
                     ? severityChips(scan.severity_counts)
@@ -102,6 +108,7 @@ function render(data) {
                         <tr>
                             <th>Application</th>
                             <th>Health</th>
+                            <th>Maintainability</th>
                             <th>Findings</th>
                             <th>Last scan</th>
                             <th></th>

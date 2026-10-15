@@ -418,6 +418,7 @@ class RepositoryScanner:
             "findings": findings,
             "summary": summarize(findings),
             "health": health_summary(findings, freshness_summary, metrics),
+            "maintainability": quality.maintainability(),
         }
         if mendix:
             report["mendix"] = mendix
