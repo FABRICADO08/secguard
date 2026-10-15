@@ -327,6 +327,12 @@ def parse_cargo_toml(text: str, manifest: str) -> list[Dependency]:
     ]
 
 
+_CRATES_IO_SOURCES = {
+    "registry+https://github.com/rust-lang/crates.io-index",
+    "sparse+https://index.crates.io/",
+}
+
+
 def parse_cargo_lock(text: str, manifest: str) -> list[Dependency]:
     """Parse crates resolved from crates.io in a Cargo.lock."""
     try:
@@ -340,7 +346,7 @@ def parse_cargo_lock(text: str, manifest: str) -> list[Dependency]:
         if isinstance(item, dict)
         and item.get("name")
         and item.get("version")
-        and "crates.io" in str(item.get("source") or "")
+        and item.get("source") in _CRATES_IO_SOURCES
     ]
 
 
