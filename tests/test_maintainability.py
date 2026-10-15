@@ -44,6 +44,34 @@ function render(a, b) {
     assert "if" not in units and "for" not in units
 
 
+def test_typed_parameters_do_not_end_the_unit():
+    source = """
+function f(a: {x: number}, b: {y: string}) {
+    if (a.x) {
+        return 1;
+    }
+    return 0;
+}
+"""
+    (unit,) = brace_units("f.ts", source)
+
+    assert (unit.name, unit.lines, unit.complexity, unit.parameters) == ("f", 6, 2, 2)
+
+
+def test_expression_arrows_do_not_swallow_the_next_function():
+    source = """
+const increment = (x) => x + 1
+function calculate(y) {
+    if (y) { return y; }
+    return 0;
+}
+"""
+    units = {unit.name: unit for unit in brace_units("m.js", source)}
+
+    assert "increment" not in units
+    assert (units["calculate"].line, units["calculate"].lines, units["calculate"].complexity) == (3, 4, 2)
+
+
 def test_imports_resolve_to_repository_files():
     known = {"pkg/a.py", "pkg/b.py", "pkg/__init__.py", "web/app.js", "web/util/index.js"}
 
@@ -70,6 +98,8 @@ def test_simple_units_rate_well_and_large_complex_units_rate_badly():
     assert good["rating"] > 4.5
     assert bad["rating"] < 3
     assert good["properties"]["module_coupling"] is None
+    unresolved = maintainability_rating(small, file_lines, 0, {"a/x.py": set(), "b/y.py": set()})
+    assert unresolved["properties"]["module_coupling"] is None
     assert bad["properties"]["unit_size"]["profile"]["very_high"] == 100.0
 
 
