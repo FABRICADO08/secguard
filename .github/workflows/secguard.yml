@@ -1,6 +1,7 @@
 # SecGuard scanning itself, using the action from this checkout.
 #
-# Runs every day at 06:00 UTC, on pull requests, and on demand from
+# Runs every day at 06:00 UTC, on every push to main (so fixed alerts
+# close as soon as the fix merges), on pull requests, and on demand from
 # Actions > SecGuard > Run workflow. GitHub schedules are in UTC; for
 # 06:00 in UTC+2 use "0 4 * * *".
 
@@ -10,6 +11,8 @@ on:
   schedule:
     - cron: "0 6 * * *"
   workflow_dispatch:
+  push:
+    branches: [main]
   pull_request:
 
 permissions:
