@@ -6,6 +6,7 @@ import hashlib
 from typing import Any
 
 from backend.repository.findings import (
+    CODE_SECURITY_RECOMMENDATIONS,
     QUALITY_RECOMMENDATIONS,
     RULE_CATALOGUE,
     rule_metadata,
@@ -160,6 +161,7 @@ def _sarif_rule(
         },
         "properties": properties,
     }
-    if rule_id in QUALITY_RECOMMENDATIONS:
-        rule["help"] = {"text": QUALITY_RECOMMENDATIONS[rule_id]}
+    recommendation = QUALITY_RECOMMENDATIONS.get(rule_id) or CODE_SECURITY_RECOMMENDATIONS.get(rule_id)
+    if recommendation:
+        rule["help"] = {"text": recommendation}
     return rule
