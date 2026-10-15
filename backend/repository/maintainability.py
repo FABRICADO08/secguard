@@ -122,7 +122,7 @@ def maintainability_rating(
         "unit_size": profile_rating(((unit.lines, unit.lines) for unit in units), UNIT_SIZE),
         "unit_complexity": profile_rating(((unit.complexity, unit.lines) for unit in units), UNIT_COMPLEXITY),
         "unit_interfacing": profile_rating(((unit.parameters, 1) for unit in units), UNIT_INTERFACING),
-        "module_coupling": module_coupling(imports, file_lines) if imports else None,
+        "module_coupling": module_coupling(imports, file_lines) if any(imports.values()) else None,
         "component_balance": component_balance(file_lines),
     }
     rated = [value["rating"] for value in properties.values() if value]

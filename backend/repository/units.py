@@ -43,11 +43,12 @@ def _clean(line: str) -> str:
     return _LINE_COMMENT.sub("", _STRINGS.sub('""', line))
 
 
-def _header(line: str) -> tuple[str, str] | None:
+def _header(line: str) -> tuple[str, str, int] | None:
+    """Name, parameter text and the column just past the parameter list."""
     for pattern in _HEADERS:
         match = pattern.search(line)
         if match and match.group(1) not in _CONTROL:
-            return match.group(1), match.group(2)
+            return match.group(1), match.group(2), match.end(2) + 1
     return None
 
 
@@ -56,12 +57,23 @@ def _parameter_count(arguments: str) -> int:
     return sum(1 for part in flat.split(",") if part.strip() and part.strip() != "void")
 
 
-def _body_end(lines: list[str], start: int) -> int | None:
-    """Index of the line closing the first brace opened at or after ``start``."""
+def _expression_arrow(rest: str) -> bool:
+    rest = rest.strip()
+    body = rest[2:].strip()
+    return rest.startswith("=>") and bool(body) and not body.startswith("{")
+
+
+def _body_end(lines: list[str], start: int, column: int) -> int | None:
+    """Index of the line closing the body brace opened after the header's parameter list."""
     depth = 0
     opened = False
     for index in range(start, len(lines)):
-        for character in lines[index]:
+        text = lines[index][column:] if index == start else lines[index]
+        if not opened and (index == start and _expression_arrow(text) or index > start and _header(text)):
+            return None
+        for character in text:
+            if character == ";" and not opened:
+                return None
             if character == "{":
                 depth += 1
                 opened = True
@@ -80,7 +92,7 @@ def brace_units(path: str, text: str) -> list[Unit]:
     index = 0
     while index < len(lines):
         found = _header(lines[index])
-        end = _body_end(lines, index) if found else None
+        end = _body_end(lines, index, found[2]) if found else None
         if found is None or end is None:
             index += 1
             continue
