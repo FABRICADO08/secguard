@@ -197,7 +197,7 @@ Outputs: a JSON report, SARIF for GitHub code scanning, CycloneDX 1.5 and SPDX 2
 
 ### GitHub Action
 
-Copy `integrations/github/secguard.yml` to `.github/workflows/secguard.yml` in each repository. It scans every day at 06:00 UTC (adjust the cron for your timezone), on every pull request, and on demand from **Actions > SecGuard > Run workflow**. Each run:
+Copy `integrations/github/secguard.yml` to `.github/workflows/secguard.yml` in each repository. It scans every day at 06:00 UTC (adjust the cron for your timezone), on every push to the default branch, so alerts for fixed code close as soon as the fix merges, on every pull request, and on demand from **Actions > SecGuard > Run workflow**. Each run:
 
 1. publishes results to the repository's code scanning alerts,
 2. on pull requests, posts a review with inline comments and one-click `suggestion` upgrades on the changed manifest lines,
