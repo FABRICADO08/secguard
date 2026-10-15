@@ -9,12 +9,36 @@ from urllib.parse import quote
 from uuid import uuid4
 
 from backend.repository.manifests import normalize_package
-from backend.repository.versions import GO, MAVEN, NPM, PACKAGIST, PYPI, RUBYGEMS
+from backend.repository.versions import (
+    CARGO,
+    COCOAPODS,
+    GO,
+    MAVEN,
+    NPM,
+    NUGET,
+    PACKAGIST,
+    PUB,
+    PYPI,
+    RUBYGEMS,
+    SWIFT,
+)
 
 TOOL_NAME = "SecGuard"
 TOOL_VERSION = "1.0"
 
-_PURL_TYPES = {PYPI: "pypi", NPM: "npm", GO: "golang", MAVEN: "maven", PACKAGIST: "composer", RUBYGEMS: "gem"}
+_PURL_TYPES = {
+    PYPI: "pypi",
+    NPM: "npm",
+    GO: "golang",
+    MAVEN: "maven",
+    PACKAGIST: "composer",
+    RUBYGEMS: "gem",
+    NUGET: "nuget",
+    CARGO: "cargo",
+    PUB: "pub",
+    SWIFT: "swift",
+    COCOAPODS: "cocoapods",
+}
 
 
 def purl(ecosystem: str, name: str, version: str) -> str:

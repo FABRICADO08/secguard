@@ -18,8 +18,11 @@ from urllib.parse import quote
 import requests
 
 from backend.repository.versions import (
+    CARGO,
     GO,
     NPM,
+    NUGET,
+    PUB,
     PYPI,
     RUBYGEMS,
     compare,
@@ -269,7 +272,86 @@ def _rubygems(name: str, fetch: Fetcher) -> PackageInfo | None:
     )
 
 
-LOOKUPS = {PYPI: _pypi, NPM: _npm, GO: _go, RUBYGEMS: _rubygems}
+def _nuget(name: str, fetch: Fetcher) -> PackageInfo | None:
+    document = fetch(f"https://api.nuget.org/v3-flatcontainer/{quote(name.lower())}/index.json")
+    listed = document.get("versions") if isinstance(document, dict) else None
+    versions = [str(version) for version in listed or []]
+
+    if not versions:
+        return None
+
+    return PackageInfo(
+        latest=_stable_latest(NUGET, versions, versions[-1]),
+        release_dates=dict.fromkeys(versions, ""),
+    )
+
+
+def _crate_releases(document: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:
+    versions = [item for item in document.get("versions") or [] if isinstance(item, dict) and item.get("num")]
+
+    return (
+        {str(item["num"]): str(item.get("created_at") or "") for item in versions},
+        {str(item["num"]): str(item.get("license") or "") for item in versions},
+    )
+
+
+def _crates(name: str, fetch: Fetcher) -> PackageInfo | None:
+    document = fetch(f"https://crates.io/api/v1/crates/{quote(name)}")
+
+    if not isinstance(document, dict) or not isinstance(document.get("crate"), dict):
+        return None
+
+    crate = document["crate"]
+    dates, licenses = _crate_releases(document)
+    latest = str(crate.get("max_stable_version") or crate.get("max_version") or "")
+
+    return PackageInfo(
+        latest=latest,
+        license=licenses.get(latest, ""),
+        first_release=str(crate.get("created_at") or ""),
+        latest_release=dates.get(latest, ""),
+        release_dates=dates,
+        repository=_github_repository(str(crate.get("repository") or "")),
+    )
+
+
+def _pub_releases(document: dict[str, Any]) -> dict[str, str]:
+    return {
+        str(item["version"]): str(item.get("published") or "")
+        for item in document.get("versions") or []
+        if isinstance(item, dict) and item.get("version")
+    }
+
+
+def _pub_repository(latest: dict[str, Any]) -> str:
+    pubspec = latest.get("pubspec")
+
+    if not isinstance(pubspec, dict):
+        return ""
+
+    return _github_repository(str(pubspec.get("repository") or pubspec.get("homepage") or ""))
+
+
+def _pub(name: str, fetch: Fetcher) -> PackageInfo | None:
+    document = fetch(f"https://pub.dev/api/packages/{quote(name)}")
+
+    if not isinstance(document, dict) or not isinstance(document.get("latest"), dict):
+        return None
+
+    latest = document["latest"]
+    dates = _pub_releases(document)
+
+    return PackageInfo(
+        latest=str(latest.get("version") or ""),
+        deprecated="Discontinued on pub.dev" if document.get("isDiscontinued") else "",
+        first_release=min((date for date in dates.values() if date), default=""),
+        latest_release=str(latest.get("published") or ""),
+        release_dates=dates,
+        repository=_pub_repository(latest),
+    )
+
+
+LOOKUPS = {PYPI: _pypi, NPM: _npm, GO: _go, RUBYGEMS: _rubygems, NUGET: _nuget, CARGO: _crates, PUB: _pub}
 
 
 def package_info(ecosystem: str, name: str, fetch: Fetcher) -> PackageInfo | None:

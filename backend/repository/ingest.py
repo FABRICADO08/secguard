@@ -94,26 +94,25 @@ def _application_label(repository: dict[str, Any], name: str) -> str:
     return application_names.name_for(name) or label or name.rsplit("/", 1)[-1]
 
 
+def _clean_mendix_project(entry: Any) -> dict[str, Any]:
+    if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
+        raise InvalidReportError("Every Mendix project must be an object with a path.")
+
+    clean: dict[str, Any] = {"path": entry["path"][:300], "analyzed": entry.get("analyzed") is True}
+
+    if isinstance(entry.get("reason"), str):
+        clean["reason"] = entry["reason"][:500]
+
+    clean.update({key: entry[key] for key in ("modules", "entities", "findings") if type(entry.get(key)) is int})
+
+    return clean
+
+
 def _clean_mendix(raw: Any) -> dict[str, Any] | None:
     if not isinstance(raw, dict) or not isinstance(raw.get("projects"), list):
         return None
 
-    projects = []
-
-    for entry in raw["projects"]:
-        if not isinstance(entry, dict) or not isinstance(entry.get("path"), str):
-            raise InvalidReportError("Every Mendix project must be an object with a path.")
-
-        clean: dict[str, Any] = {"path": entry["path"][:300], "analyzed": entry.get("analyzed") is True}
-
-        if isinstance(entry.get("reason"), str):
-            clean["reason"] = entry["reason"][:500]
-
-        for key in ("modules", "entities", "findings"):
-            if type(entry.get(key)) is int:
-                clean[key] = entry[key]
-
-        projects.append(clean)
+    projects = [_clean_mendix_project(entry) for entry in raw["projects"]]
 
     if not projects:
         return None

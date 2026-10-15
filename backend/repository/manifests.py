@@ -9,14 +9,38 @@ developer would edit while still naming the version actually installed.
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import posixpath
 import re
 import sys
-from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 from xml.etree import ElementTree
 
+from backend.repository.dependency import (
+    DEVELOPMENT,
+    RUNTIME,
+    Dependency,
+    normalize_package,
+)
+from backend.repository.dependency import line_of as _line_of
+from backend.repository.native_manifests import (
+    parse_cargo_lock,
+    parse_cargo_toml,
+    parse_gradle,
+    parse_gradle_catalog,
+    parse_gradle_lockfile,
+    parse_msbuild,
+    parse_nuget_lock,
+    parse_package_resolved,
+    parse_package_swift,
+    parse_packages_config,
+    parse_podfile,
+    parse_podfile_lock,
+    parse_pubspec,
+    parse_pubspec_lock,
+)
 from backend.repository.versions import (
     GO,
     MAVEN,
@@ -51,51 +75,19 @@ SKIPPED_DIRECTORIES = frozenset(
         ".mypy_cache",
         ".pytest_cache",
         "target",
+        "obj",
+        ".gradle",
+        ".build",
+        ".dart_tool",
+        "Pods",
     }
 )
 
 MAX_MANIFEST_BYTES = 10 * 1024 * 1024
 
-RUNTIME = "runtime"
-DEVELOPMENT = "development"
-
 _REQUIREMENT = re.compile(
     r"^\s*([A-Za-z0-9][A-Za-z0-9._-]*)\s*(\[[^\]]*\])?\s*([^;#]*)"
 )
-
-
-@dataclass
-class Dependency:
-    """A direct or transitive dependency and its source location."""
-
-    name: str
-    ecosystem: str
-    version: str = ""
-    spec: str = ""
-    manifest: str = ""
-    line: int = 0
-    direct: bool = True
-    scope: str = RUNTIME
-    resolved_from_range: bool = False
-
-    def key(self) -> tuple[str, str]:
-        """Return the normalized ecosystem and package identity."""
-        return (self.ecosystem, normalize_package(self.ecosystem, self.name))
-
-    def to_dict(self) -> dict[str, Any]:
-        """Serialize dependency metadata for scan reports."""
-        return asdict(self)
-
-
-def normalize_package(ecosystem: str, name: str) -> str:
-    """Normalize package spelling according to ecosystem conventions."""
-    if ecosystem == PYPI:
-        return re.sub(r"[-_.]+", "-", name).lower()
-
-    if ecosystem in (NPM, PACKAGIST, RUBYGEMS):
-        return name.lower()
-
-    return name
 
 
 def iter_files(root: Path):
@@ -115,14 +107,6 @@ def _read(path: Path) -> str:
         return ""
 
     return path.read_text(encoding="utf-8", errors="replace")
-
-
-def _line_of(text: str, needle: str) -> int:
-    for number, line in enumerate(text.splitlines(), start=1):
-        if needle in line:
-            return number
-
-    return 0
 
 
 def _pin_from_spec(spec: str) -> str:
@@ -545,7 +529,78 @@ PARSERS = (
     (re.compile(r"(^|/)pom\.xml$"), parse_pom),
     (re.compile(r"(^|/)composer\.lock$"), parse_composer_lock),
     (re.compile(r"(^|/)Gemfile\.lock$"), parse_gemfile_lock),
+    (re.compile(r"\.(cs|fs|vb)proj$|(^|/)Directory\.(Packages|Build)\.props$"), parse_msbuild),
+    (re.compile(r"(^|/)packages\.config$"), parse_packages_config),
+    (re.compile(r"(^|/)packages\.lock\.json$"), parse_nuget_lock),
+    (re.compile(r"(^|/)build\.gradle(\.kts)?$"), parse_gradle),
+    (re.compile(r"(^|/)libs\.versions\.toml$"), parse_gradle_catalog),
+    (re.compile(r"(^|/)gradle\.lockfile$"), parse_gradle_lockfile),
+    (re.compile(r"(^|/)Cargo\.toml$"), parse_cargo_toml),
+    (re.compile(r"(^|/)Cargo\.lock$"), parse_cargo_lock),
+    (re.compile(r"(^|/)pubspec\.yaml$"), parse_pubspec),
+    (re.compile(r"(^|/)pubspec\.lock$"), parse_pubspec_lock),
+    (re.compile(r"(^|/)Package\.swift$"), parse_package_swift),
+    (re.compile(r"(^|/)Package\.resolved$"), parse_package_resolved),
+    (re.compile(r"(^|/)Podfile$"), parse_podfile),
+    (re.compile(r"(^|/)Podfile\.lock$"), parse_podfile_lock),
 )
+
+
+def _definition_root(manifest: str) -> str:
+    root = posixpath.dirname(manifest)
+
+    return posixpath.dirname(root) if posixpath.basename(root) == "gradle" else root
+
+
+def _root_depth(definition: Dependency) -> int:
+    root = _definition_root(definition.manifest)
+
+    return root.count("/") + 1 if root else 0
+
+
+def _applies_to(definition: Dependency, reference: Dependency) -> bool:
+    root = _definition_root(definition.manifest)
+
+    if root and not reference.manifest.startswith(root + "/"):
+        return False
+
+    if reference.alias:
+        return definition.alias == reference.alias
+
+    return definition.key() == reference.key()
+
+
+def _resolve_reference(reference: Dependency, definitions: list[Dependency]) -> list[Dependency]:
+    """A versionless reference takes the version from the nearest applicable definition(s)."""
+    candidates = [item for item in definitions if item.ecosystem == reference.ecosystem and _applies_to(item, reference)]
+
+    if not candidates:
+        return [] if reference.alias else [reference]
+
+    depth = max(_root_depth(item) for item in candidates)
+    nearest = [item for item in candidates if _root_depth(item) == depth]
+
+    return [
+        dataclasses.replace(reference, name=item.name, version=item.version, spec=item.spec, alias="")
+        for item in nearest
+    ]
+
+
+def _apply_definitions(found: list[Dependency]) -> list[Dependency]:
+    """Attach central version definitions to the references they serve; drop unused definitions."""
+    definitions = [item for item in found if item.defines]
+    applied: list[Dependency] = []
+
+    for dependency in found:
+        if dependency.defines:
+            continue
+
+        if dependency.direct and not dependency.spec and not dependency.version:
+            applied.extend(_resolve_reference(dependency, definitions))
+        else:
+            applied.append(dependency)
+
+    return applied
 
 
 def _merge(found: list[Dependency]) -> list[Dependency]:
@@ -557,6 +612,7 @@ def _merge(found: list[Dependency]) -> list[Dependency]:
     the manifest line. Lockfile-only packages are transitive.
     """
 
+    found = _apply_definitions(found)
     declared = [dependency for dependency in found if dependency.direct]
     locked = [dependency for dependency in found if not dependency.direct]
 
