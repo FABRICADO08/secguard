@@ -98,15 +98,17 @@ button {
 }
 
 .rail__brand {
-    width: 34px;
-    height: 34px;
-    border-radius: 8px;
-    background: var(--accent-dark);
-    color: #fff;
+    width: 38px;
+    height: 38px;
     display: grid;
     place-items: center;
-    font-weight: 700;
     margin-bottom: 10px;
+}
+
+.rail__brand img {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
 }
 
 .rail__brand:hover {

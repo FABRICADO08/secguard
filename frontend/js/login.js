@@ -81,10 +81,11 @@ async function load() {
     document.body.innerHTML = `
         <main class="login">
             <section class="login__card">
-                <div class="login__brand">
-                    <span class="login__logo" aria-hidden="true">S</span>
-                    <span>SecGuard</span>
-                </div>
+                <img
+                    class="login__logo"
+                    src="/img/secguard-logo.png"
+                    alt="SecGuard - People, Access, Safer spaces"
+                >
                 <h1>Sign in</h1>
                 <p class="muted">
                     Use your GitHub account. You will see the applications
