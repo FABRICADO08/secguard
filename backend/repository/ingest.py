@@ -154,7 +154,7 @@ def application_from_report(report: Any) -> tuple[Application, list[dict[str, An
 
     application.repository = {
         key: report.get(key)
-        for key in ("schema", "generated_at", "repository", "statistics", "dependencies", "vulnerabilities", "licenses", "freshness", "health")
+        for key in ("schema", "generated_at", "repository", "statistics", "dependencies", "vulnerabilities", "licenses", "freshness", "health", "maintainability")
     }
 
     application.repository["quality"] = {

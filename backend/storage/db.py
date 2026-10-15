@@ -273,6 +273,7 @@ def application_summary(data: dict[str, Any]) -> dict[str, Any]:
         "severity_counts": security.get("severity_counts", {}),
         "repository": (repository.get("repository") or {}).get("name", ""),
         "health": repository.get("health") or {},
+        "maintainability": (repository.get("maintainability") or {}).get("rating"),
     }
 
 

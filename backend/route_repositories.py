@@ -67,6 +67,7 @@ def _scan_summary(application: dict | None) -> dict | None:
             "id",
             "updated_at",
             "health",
+            "maintainability",
             "severity_counts",
             "total_findings",
             "risk_grade",

@@ -15,7 +15,9 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+from backend.repository.maintainability import maintainability_rating
 from backend.repository.manifests import iter_files
+from backend.repository.units import BRACE_LANGUAGES, Unit, brace_units, import_targets
 
 SOURCE_SUFFIXES = {
     ".py": "Python", ".js": "JavaScript", ".jsx": "JavaScript", ".mjs": "JavaScript",
@@ -81,6 +83,21 @@ class QualityReport:
     has_readme: bool = False
     api_specs: list[str] = field(default_factory=list)
     has_web_api: bool = False
+    brace_units: list[Unit] = field(default_factory=list)
+    file_lines: dict[str, int] = field(default_factory=dict)
+    import_sources: dict[str, tuple[str, str]] = field(default_factory=dict)
+
+    def maintainability(self) -> dict[str, Any]:
+        units = [
+            Unit(item.path, item.name, item.line, item.lines, item.cyclomatic, item.parameters)
+            for item in self.functions
+        ] + self.brace_units
+        known = set(self.import_sources)
+        imports = {
+            path: import_targets(path, text, language, known)
+            for path, (language, text) in self.import_sources.items()
+        }
+        return maintainability_rating(units, self.file_lines, self.duplicated_lines, imports)
 
     def metrics(self) -> dict[str, Any]:
         return {
@@ -572,6 +589,11 @@ def _inspect_quality_file(
     report.code_lines += len(code)
     report.languages[language] = report.languages.get(language, 0) + len(code)
     normalised[relative] = code
+    report.file_lines[relative] = len(code)
+    if language in ("Python", "JavaScript", "TypeScript"):
+        report.import_sources[relative] = (language, text)
+    if language in BRACE_LANGUAGES:
+        report.brace_units.extend(brace_units(relative, text))
     if language == "Python":
         _analyse_python(relative, text, report)
         if len(lines) > FILE_LINES:
