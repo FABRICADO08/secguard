@@ -89,6 +89,8 @@ def command_scan(arguments: argparse.Namespace) -> int:
     mendix_model = arguments.mendix_model or os.environ.get("SECGUARD_MENDIX_MODEL", "")
     if mendix_model:
         options["mendix_model"] = Path(mendix_model).resolve()
+    if arguments.no_history:
+        options["secret_history"] = False
 
     report = scan_repository(root, _repository_metadata(arguments, root), **options)
     _write_scan_outputs(arguments, report)
@@ -252,6 +254,7 @@ def main(argv: list[str] | None = None) -> int:
     scan.add_argument("--cyclonedx", default="")
     scan.add_argument("--spdx", default="")
     scan.add_argument("--offline", action="store_true", help="No registry or advisory lookups.")
+    scan.add_argument("--no-history", action="store_true", help="Do not search git history for committed secrets.")
     scan.add_argument("--github-token-env", default="GITHUB_TOKEN", help="Env var with a token for upstream repository activity.")
     scan.add_argument("--upload", default="", help="SecGuard server URL to upload the report to.")
     scan.add_argument("--mendix-model", default="", help="Mendix dump-mpr JSON export, or a directory of <project>.mpr.json exports; defaults to $SECGUARD_MENDIX_MODEL.")

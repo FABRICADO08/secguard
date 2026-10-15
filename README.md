@@ -190,6 +190,7 @@ Findings are normalised (rule id, severity, confidence, category, CWE, OWASP, ev
 - **Supply chain**: deprecated, unmaintained (no release for 2+ years) and archived packages, single-maintainer packages, typo-squats of popular packages, and brand-new rarely downloaded packages.
 - **Licences**: SPDX expressions are classified (permissive, weak/strong/network copyleft, non-commercial) and compared with the project's own licence; `GPL OR commercial` dual licensing is flagged.
 - **Freshness**: major/minor versions behind the latest release, libyears and a freshness index.
+- **Code security** (`REPO-SEC-*`): your own code is checked for SQL, OS command and code injection, unsafe deserialization, disabled TLS verification and debug mode (Python through its syntax tree; JavaScript/TypeScript, Java/Kotlin/Scala, C#, Go, PHP and Ruby through line patterns), plus hard-coded secrets in source and config files. Secrets that were committed and later removed are reported from git history (last 1000 commits; the workflow checks out full history, `--no-history` turns it off). Test directories are skipped; mark a reviewed line with `secguard-ignore` or `nosec`.
 - **Code quality**: cyclomatic and cognitive complexity, long functions, many parameters, oversized classes/files, unused imports and variables, unreachable code, duplicated blocks, docstring and type-annotation coverage, missing README or API specification.
 - **Health**: security, open-source and maintainability scores (0-100), an overall A-F grade and a star rating.
 

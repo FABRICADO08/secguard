@@ -31,6 +31,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # Full history, so secrets removed from the code but still in git are found.
+          fetch-depth: 0
 
       - uses: FABRICADO08/secguard@main
         with:

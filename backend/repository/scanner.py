@@ -9,10 +9,12 @@ from pathlib import Path
 from typing import Any
 
 from backend.repository import licenses as licensing
+from backend.repository.code_security import analyse_code_security
 from backend.repository.findings import (
     CONFIRMED,
     FIRM,
     TENTATIVE,
+    code_security_finding,
     make_finding,
     quality_finding,
 )
@@ -247,6 +249,7 @@ class RepositoryScanner:
         mendix_model: Path | None = None,
     ) -> None:
         self.root = root
+        self.secret_history = True
         self.mendix_model = mendix_model
         self.fetch = fetch
         self.post = post
@@ -389,6 +392,7 @@ class RepositoryScanner:
 
         mendix, mendix_findings = analyse_mendix(self.root, self.mendix_model)
         findings.extend(mendix_findings)
+        findings.extend(code_security_finding(issue) for issue in analyse_code_security(self.root, self.secret_history))
 
         quality = analyse_quality(self.root)
         metrics = quality.metrics()
@@ -679,4 +683,7 @@ class RepositoryScanner:
         )
 
 def scan_repository(root: Path, repository: dict[str, Any] | None = None, **options: Any) -> dict[str, Any]:
-    return RepositoryScanner(root, **options).run(repository)
+    secret_history = options.pop("secret_history", True)
+    scanner = RepositoryScanner(root, **options)
+    scanner.secret_history = secret_history
+    return scanner.run(repository)
