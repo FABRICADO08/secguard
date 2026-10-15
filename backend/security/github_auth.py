@@ -176,13 +176,21 @@ def repository_name(application: dict[str, Any]) -> str:
 
 
 def can_view(application: dict[str, Any]) -> bool:
-    """Check whether the current user may access a stored application."""
-    if application.get("platform") != "Repository" or not enabled():
+    """
+    Check whether the current user may access a stored application.
+
+    With GitHub sign-in enabled nothing is visible without a session, and
+    GitHub-connected applications also need read access to their repository.
+    """
+    if not enabled():
         return True
 
     user = current_user()
 
-    return user is not None and repository_name(application).lower() in user.repositories
+    if user is None:
+        return False
+
+    return application.get("platform") != "Repository" or repository_name(application).lower() in user.repositories
 
 
 def visible(applications: list[dict[str, Any]]) -> list[dict[str, Any]]:

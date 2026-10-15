@@ -511,7 +511,7 @@ def _duplicate_windows(
             chunk = "\n".join(text for _, text in lines[index:index + DUPLICATE_WINDOW])
             if len(chunk) < DUPLICATE_WINDOW * 8:
                 continue
-            digest = hashlib.sha1(chunk.encode("utf-8")).hexdigest()
+            digest = hashlib.sha1(chunk.encode("utf-8"), usedforsecurity=False).hexdigest()
             windows.setdefault(digest, []).append((path, index))
     return windows
 
