@@ -14,7 +14,14 @@ DEVELOPMENT = "development"
 
 @dataclass
 class Dependency:
-    """A direct or transitive dependency and its source location."""
+    """
+    A direct or transitive dependency and its source location.
+
+    ``defines`` marks a central version definition (NuGet ``PackageVersion``,
+    Gradle catalog entry, Cargo workspace dependency) that only applies to
+    references beneath it. ``alias`` is the name a reference uses to look a
+    definition up when that differs from the package name.
+    """
 
     name: str
     ecosystem: str
@@ -25,6 +32,8 @@ class Dependency:
     direct: bool = True
     scope: str = RUNTIME
     resolved_from_range: bool = False
+    defines: bool = False
+    alias: str = ""
 
     def key(self) -> tuple[str, str]:
         """Return the normalized ecosystem and package identity."""
@@ -32,7 +41,10 @@ class Dependency:
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize dependency metadata for scan reports."""
-        return asdict(self)
+        data = asdict(self)
+        data.pop("defines")
+        data.pop("alias")
+        return data
 
 
 def normalize_package(ecosystem: str, name: str) -> str:

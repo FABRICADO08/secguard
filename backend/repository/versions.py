@@ -180,6 +180,54 @@ def _npm_comparator(part: str, version: str) -> bool:
     }[operator]
 
 
+def _cargo_range_match(spec: str, version: str) -> bool:
+    """Cargo requirements: comma-separated comparators, a bare version meaning ``^``."""
+    parts = [part.strip() for part in spec.split(",") if part.strip()]
+
+    return all(part == "*" or _npm_comparator(part if part[0] in "^~=<>" else f"^{part}", version) for part in parts)
+
+
+def _pub_range_match(spec: str, version: str) -> bool:
+    return spec == "any" or _npm_range_match(spec, version)
+
+
+def _nuget_bound(value: str, version: str, lower: bool, inclusive: bool) -> bool:
+    if not value.strip():
+        return True
+
+    order = compare(NUGET, version, value.strip())
+
+    if order == 0:
+        return inclusive
+
+    return order > 0 if lower else order < 0
+
+
+def _nuget_range_match(spec: str, version: str) -> bool:
+    """NuGet ranges: a bare version is a minimum, ``[a,b)`` an interval, ``1.*`` a float."""
+    interval = re.fullmatch(r"([\[(])([^,\])]*)(?:,([^\])]*))?([\])])", spec)
+
+    if interval is None:
+        if "*" in spec:
+            return _npm_comparator(spec.replace("*", "x"), version)
+        return bool(spec) and compare(NUGET, version, spec) >= 0
+
+    opening, low, high, closing = interval.groups()
+
+    if high is None:
+        return opening == "[" and closing == "]" and compare(NUGET, version, low.strip()) == 0
+
+    return _nuget_bound(low, version, True, opening == "[") and _nuget_bound(high, version, False, closing == "]")
+
+
+_RANGE_MATCHERS = {
+    NPM: _npm_range_match,
+    CARGO: _cargo_range_match,
+    PUB: _pub_range_match,
+    NUGET: _nuget_range_match,
+}
+
+
 def satisfies(ecosystem: str, spec: str, version: str) -> bool:
     """Whether ``version`` is allowed by a manifest range."""
 
@@ -189,8 +237,8 @@ def satisfies(ecosystem: str, spec: str, version: str) -> bool:
         except (InvalidSpecifier, InvalidVersion):
             return False
 
-    if ecosystem == NPM:
-        return not is_prerelease(NPM, version) and _npm_range_match(spec, version)
+    if ecosystem in _RANGE_MATCHERS:
+        return not is_prerelease(ecosystem, version) and _RANGE_MATCHERS[ecosystem](spec.strip(), version)
 
     return False
 

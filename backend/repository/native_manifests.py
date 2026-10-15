@@ -63,8 +63,8 @@ def parse_msbuild(text: str, manifest: str) -> list[Dependency]:
     """
     Parse NuGet references from project files and central package props.
 
-    A central ``PackageVersion`` is treated like a lockfile entry so that a
-    versionless ``PackageReference`` borrows its version.
+    A central ``PackageVersion`` is a definition: a versionless
+    ``PackageReference`` in a project beneath it borrows its version.
     """
     root = _xml_root(text)
 
@@ -77,7 +77,7 @@ def parse_msbuild(text: str, manifest: str) -> list[Dependency]:
         kind = _local_name(element.tag)
         name = element.get("Include") or element.get("Update") or ""
 
-        if kind not in ("PackageReference", "PackageVersion") or not name:
+        if kind not in ("PackageReference", "GlobalPackageReference", "PackageVersion") or not name:
             continue
 
         spec = element.get("VersionOverride") or element.get("Version") or _child_text(element, "Version")
@@ -89,7 +89,7 @@ def parse_msbuild(text: str, manifest: str) -> list[Dependency]:
                 spec=spec,
                 manifest=manifest,
                 line=line_of(text, f'"{name}"'),
-                direct=kind == "PackageReference",
+                defines=kind == "PackageVersion",
             )
         )
 
@@ -177,21 +177,29 @@ def _gradle_dependency(name: str, spec: str, manifest: str, line: int, scope: st
     )
 
 
+_GRADLE_CATALOG_REFERENCE = re.compile(r"\b(\w+)\s*\(?\s*(libs\.[\w.]+)")
+
+
+def _gradle_line(line: str, manifest: str, number: int):
+    for pattern in (_GRADLE_STRING, _GRADLE_MAP):
+        for configuration, group, artifact, spec in pattern.findall(line):
+            if configuration.lower().endswith(_GRADLE_CONFIGURATIONS):
+                yield _gradle_dependency(f"{group}:{artifact}", spec, manifest, number, _gradle_scope(configuration))
+
+    for configuration, accessor in _GRADLE_CATALOG_REFERENCE.findall(line):
+        if configuration.lower().endswith(_GRADLE_CONFIGURATIONS):
+            reference = _gradle_dependency(accessor, "", manifest, number, _gradle_scope(configuration))
+            reference.alias = accessor
+            yield reference
+
+
 def parse_gradle(text: str, manifest: str) -> list[Dependency]:
-    """Parse string and map dependency notations from Groovy or Kotlin build scripts."""
-    dependencies = []
-
-    for number, line in enumerate(text.splitlines(), start=1):
-        for pattern in (_GRADLE_STRING, _GRADLE_MAP):
-            for configuration, group, artifact, spec in pattern.findall(line):
-                if configuration.lower().endswith(_GRADLE_CONFIGURATIONS):
-                    dependencies.append(
-                        _gradle_dependency(
-                            f"{group}:{artifact}", spec, manifest, number, _gradle_scope(configuration)
-                        )
-                    )
-
-    return dependencies
+    """Parse string, map and version-catalog (``libs.x``) notations from Groovy or Kotlin build scripts."""
+    return [
+        dependency
+        for number, line in enumerate(text.splitlines(), start=1)
+        for dependency in _gradle_line(line, manifest, number)
+    ]
 
 
 def _catalog_module(entry: dict[str, Any]) -> str:
@@ -228,23 +236,51 @@ def _catalog_entry(entry: Any, versions: dict[str, Any]) -> tuple[str, str]:
     return (_catalog_module(entry), _catalog_version(entry, versions))
 
 
+def _catalog_accessor(alias: str, prefix: str = "libs") -> str:
+    return prefix + "." + re.sub(r"[-_.]", ".", alias)
+
+
+def _catalog_definition(module: str, version: str, accessor: str, manifest: str, line: int) -> Dependency:
+    definition = _gradle_dependency(module, version, manifest, line)
+    definition.defines = True
+    definition.alias = accessor
+    return definition
+
+
 def parse_gradle_catalog(text: str, manifest: str) -> list[Dependency]:
-    """Parse libraries from a Gradle version catalog (libs.versions.toml)."""
+    """
+    Parse library and bundle definitions from a Gradle version catalog
+    (libs.versions.toml); build scripts reference them as ``libs.<alias>``.
+    """
     try:
         catalog = tomllib.loads(text)
     except tomllib.TOMLDecodeError:
         return []
 
     versions = catalog.get("versions") or {}
-    dependencies = []
+    libraries = {
+        alias: (*_catalog_entry(entry, versions), line_of(text, alias))
+        for alias, entry in (catalog.get("libraries") or {}).items()
+    }
+    definitions = [
+        _catalog_definition(module, version, _catalog_accessor(alias), manifest, line)
+        for alias, (module, version, line) in libraries.items()
+        if module
+    ]
 
-    for alias, entry in (catalog.get("libraries") or {}).items():
-        module, version = _catalog_entry(entry, versions)
+    for bundle, members in (catalog.get("bundles") or {}).items():
+        definitions.extend(_bundle_definitions(bundle, members, libraries, manifest))
 
-        if module:
-            dependencies.append(_gradle_dependency(module, version, manifest, line_of(text, alias)))
+    return definitions
 
-    return dependencies
+
+def _bundle_definitions(
+    bundle: str, members: Any, libraries: dict[str, tuple[str, str, int]], manifest: str
+) -> list[Dependency]:
+    accessor = _catalog_accessor(bundle, "libs.bundles")
+    entries = [libraries.get(alias, ("", "", 0)) for alias in (members if isinstance(members, list) else [])]
+
+    return [_catalog_definition(module, version, accessor, manifest, line) for module, version, line in entries if module]
 
 
 def parse_gradle_lockfile(text: str, manifest: str) -> list[Dependency]:
@@ -281,24 +317,37 @@ _CARGO_SECTIONS = {
 
 
 def _cargo_tables(document: dict[str, Any]):
-    tables = [document, document.get("workspace") or {}]
-    tables.extend(target for target in (document.get("target") or {}).values() if isinstance(target, dict))
+    workspace = document.get("workspace") if isinstance(document.get("workspace"), dict) else {}
+    tables = [(document, False), (workspace, True)]
+    tables.extend((target, False) for target in (document.get("target") or {}).values() if isinstance(target, dict))
 
-    for table in tables:
+    for table, defines in tables:
         for section, scope in _CARGO_SECTIONS.items():
             if isinstance(table.get(section), dict):
-                yield table[section], scope
+                yield table[section], scope, defines
+
+
+def _cargo_source(key: str, value: Any) -> tuple[str, str] | None:
+    """The crates.io package name and requirement, or None for other sources."""
+    if not isinstance(value, dict):
+        return key, str(value)
+
+    if value.get("path") or value.get("git") or value.get("registry") or value.get("registry-index"):
+        return None
+
+    return str(value.get("package") or key), str(value.get("version") or "")
 
 
 def _cargo_dependency(key: str, value: Any, scope: str, text: str, manifest: str) -> Dependency | None:
-    if isinstance(value, dict):
-        if not value.get("version") and (value.get("path") or value.get("git") or value.get("workspace")):
-            return None
-        name = str(value.get("package") or key)
-        spec = str(value.get("version") or "")
-    else:
-        name, spec = key, str(value)
+    if isinstance(value, dict) and value.get("workspace") is True:
+        return Dependency(name=key, ecosystem=CARGO, manifest=manifest, line=line_of(text, key), scope=scope, alias=key)
 
+    source = _cargo_source(key, value)
+
+    if source is None:
+        return None
+
+    name, spec = source
     pinned = spec.strip().startswith("=")
 
     return Dependency(
@@ -309,6 +358,7 @@ def _cargo_dependency(key: str, value: Any, scope: str, text: str, manifest: str
         manifest=manifest,
         line=line_of(text, key),
         scope=scope,
+        alias=key,
     )
 
 
@@ -319,12 +369,16 @@ def parse_cargo_toml(text: str, manifest: str) -> list[Dependency]:
     except tomllib.TOMLDecodeError:
         return []
 
-    return [
-        dependency
-        for table, scope in _cargo_tables(document)
-        for key, value in table.items()
-        if (dependency := _cargo_dependency(key, value, scope, text, manifest))
-    ]
+    found = []
+
+    for table, scope, defines in _cargo_tables(document):
+        for key, value in table.items():
+            dependency = _cargo_dependency(key, value, scope, text, manifest)
+            if dependency is not None:
+                dependency.defines = defines
+                found.append(dependency)
+
+    return found
 
 
 _CRATES_IO_SOURCES = {
@@ -346,7 +400,8 @@ def parse_cargo_lock(text: str, manifest: str) -> list[Dependency]:
         if isinstance(item, dict)
         and item.get("name")
         and item.get("version")
-        and item.get("source") in _CRATES_IO_SOURCES
+        and isinstance(item.get("source"), str)
+        and item["source"] in _CRATES_IO_SOURCES
     ]
 
 
@@ -362,6 +417,13 @@ def _yaml_lines(text: str):
 
         if line.strip() and not line.lstrip().startswith("#"):
             yield number, line
+
+
+_PUB_DEV_HOSTS = ("https://pub.dev", "https://pub.dartlang.org")
+
+
+def _is_pub_dev(url: str) -> bool:
+    return not url or url.rstrip("/") in _PUB_DEV_HOSTS
 
 
 class _PubspecReader:
@@ -404,7 +466,7 @@ class _PubspecReader:
     def _nested(self, key: str, value: str) -> None:
         current = self.found[-1]
 
-        if key in ("sdk", "path", "git"):
+        if key in ("sdk", "path", "git") or (key in ("hosted", "url") and not _is_pub_dev(value)):
             self.local.add(id(current))
         elif key == "version":
             current.spec = value
@@ -447,6 +509,8 @@ def _pub_lock_packages(text: str) -> dict[str, dict[str, str]]:
             current = packages.setdefault(key, {})
         elif depth == 4 and current is not None:
             current[key] = value
+        elif depth == 6 and key == "url" and current is not None:
+            current["url"] = value
 
     return packages
 
@@ -465,7 +529,7 @@ def parse_pubspec_lock(text: str, manifest: str) -> list[Dependency]:
             scope=DEVELOPMENT if fields.get("dependency") == "direct dev" else RUNTIME,
         )
         for name, fields in packages.items()
-        if fields.get("source") == "hosted" and fields.get("version")
+        if fields.get("source") == "hosted" and fields.get("version") and _is_pub_dev(fields.get("url", ""))
     ]
 
 

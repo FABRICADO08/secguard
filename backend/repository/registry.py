@@ -280,7 +280,10 @@ def _nuget(name: str, fetch: Fetcher) -> PackageInfo | None:
     if not versions:
         return None
 
-    return PackageInfo(latest=_stable_latest(NUGET, versions, versions[-1]))
+    return PackageInfo(
+        latest=_stable_latest(NUGET, versions, versions[-1]),
+        release_dates=dict.fromkeys(versions, ""),
+    )
 
 
 def _crate_releases(document: dict[str, Any]) -> tuple[dict[str, str], dict[str, str]]:

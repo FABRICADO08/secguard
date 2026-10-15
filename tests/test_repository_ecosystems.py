@@ -4,6 +4,7 @@ from backend.repository.manifests import discover_dependencies
 from backend.repository.registry import package_info
 from backend.repository.sbom import purl
 from backend.repository.scanner import scan_repository
+from backend.repository.versions import newest_satisfying
 
 FILES = {
     "api/Api.csproj": """<Project Sdk="Microsoft.NET.Sdk">
@@ -30,6 +31,9 @@ FILES = {
     testImplementation("junit:junit:4.13.2")
     implementation group: 'com.google.code.gson', name: 'gson', version: '2.8.5'
     implementation "org.example:dynamic:$exampleVersion"
+    implementation(libs.retrofit)
+    implementation libs.bundles.json
+    implementation libs.missing
 }
 """,
     "gradle/libs.versions.toml": """[versions]
@@ -38,6 +42,11 @@ retrofit = "2.9.0"
 [libraries]
 retrofit = { module = "com.squareup.retrofit2:retrofit", version.ref = "retrofit" }
 guava = "com.google.guava:guava:31.0-jre"
+moshi-core = "com.squareup.moshi:moshi:1.15.0"
+unused = "org.unused:lib:1.0.0"
+
+[bundles]
+json = ["moshi-core", "guava"]
 """,
     "core/Cargo.toml": """[package]
 name = "core"
@@ -133,15 +142,24 @@ def test_dotnet_references_borrow_central_versions(tmp_path):
     assert found[("NuGet", "NUnit")].scope == "development"
 
 
-def test_gradle_scripts_and_version_catalogs(tmp_path):
+def test_gradle_scripts(tmp_path):
     found = _found(tmp_path)
 
     assert found[("Maven", "com.squareup.okhttp3:okhttp")].version == "4.9.0"
     assert found[("Maven", "junit:junit")].scope == "development"
     assert found[("Maven", "com.google.code.gson:gson")].version == "2.8.5"
     assert found[("Maven", "org.example:dynamic")].version == ""
+
+
+def test_gradle_version_catalog_references(tmp_path):
+    found = _found(tmp_path)
+
     assert found[("Maven", "com.squareup.retrofit2:retrofit")].version == "2.9.0"
+    assert found[("Maven", "com.squareup.retrofit2:retrofit")].manifest == "android/app/build.gradle"
     assert found[("Maven", "com.google.guava:guava")].version == "31.0-jre"
+    assert found[("Maven", "com.squareup.moshi:moshi")].version == "1.15.0"
+    assert ("Maven", "org.unused:lib") not in found
+    assert not [key for key in found if key[1].startswith("libs.")]
 
 
 def test_cargo_ranges_take_the_locked_version(tmp_path):
@@ -239,3 +257,80 @@ def test_nuget_advisories_reach_the_report(tmp_path):
     finding = next(item for item in report["findings"] if "GHSA-newtonsoft" in json.dumps(item))
     assert finding["location"] == "api/Api.csproj:3"
     assert "13.0.1" in json.dumps(finding)
+
+
+def _discover(tmp_path, files):
+    for name, text in files.items():
+        (tmp_path / name).parent.mkdir(parents=True, exist_ok=True)
+        (tmp_path / name).write_text(text)
+    return discover_dependencies(tmp_path)
+
+
+def test_nuget_references_use_the_nearest_central_props(tmp_path):
+    props = '<Project><ItemGroup><PackageVersion Include="Foo" Version="{}" />{}</ItemGroup></Project>'
+    found = _discover(tmp_path, {
+        "service-a/Directory.Packages.props": props.format("1.0.0", ""),
+        "service-b/Directory.Packages.props": props.format("2.0.0", '<PackageVersion Include="Unused" Version="1.0.0" />'),
+        "service-b/src/Service.csproj": '<Project><ItemGroup><PackageReference Include="Foo" /></ItemGroup></Project>',
+    })
+
+    assert [(item.name, item.version, item.manifest, item.direct) for item in found] == [
+        ("Foo", "2.0.0", "service-b/src/Service.csproj", True)
+    ]
+
+
+def test_cargo_workspace_definitions_and_non_registry_sources(tmp_path):
+    found = _discover(tmp_path, {
+        "Cargo.toml": """[workspace.dependencies]
+serde = "=1.0.100"
+renamed = { package = "real-crate", version = "=2.0.0" }
+unused = "=3.0.0"
+""",
+        "member/Cargo.toml": """[dependencies]
+serde = { workspace = true }
+renamed = { workspace = true }
+widget = { git = "https://example.com/fork", version = "1.2.3" }
+private = { version = "1.0", registry = "internal" }
+""",
+        "Cargo.lock": """[[package]]
+name = "weird"
+version = "1.0.0"
+source = ["registry+https://github.com/rust-lang/crates.io-index"]
+""",
+    })
+
+    assert {(item.name, item.version, item.manifest) for item in found} == {
+        ("serde", "1.0.100", "member/Cargo.toml"),
+        ("real-crate", "2.0.0", "member/Cargo.toml"),
+    }
+
+
+def test_pub_packages_from_private_hosts_are_skipped(tmp_path):
+    found = _discover(tmp_path, {
+        "pubspec.yaml": "name: app\ndependencies:\n  private_pkg:\n    hosted: https://packages.example.org\n    version: 1.0.0\n",
+        "pubspec.lock": """packages:
+  http:
+    dependency: transitive
+    description:
+      name: http
+      url: "https://packages.example.org"
+    source: hosted
+    version: "1.0.0"
+  path:
+    dependency: transitive
+    description:
+      name: path
+      url: "https://pub.dev"
+    source: hosted
+    version: "1.9.0"
+""",
+    })
+
+    assert [(item.name, item.version) for item in found] == [("path", "1.9.0")]
+
+
+def test_unlocked_native_ranges_resolve_to_the_newest_allowed_release():
+    assert newest_satisfying("crates.io", "1", ["1.0.0", "1.9.0", "2.0.0"]) == "1.9.0"
+    assert newest_satisfying("Pub", "^0.13.0", ["0.13.3", "0.13.6", "1.0.0"]) == "0.13.6"
+    assert newest_satisfying("NuGet", "[1.0,2.0)", ["1.0.0", "1.5.0", "2.0.0"]) == "1.5.0"
+    assert newest_satisfying("NuGet", "1.0", ["0.9.0", "1.5.0", "3.0.0-beta"]) == "1.5.0"

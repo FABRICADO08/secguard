@@ -9,7 +9,9 @@ developer would edit while still naming the version actually installed.
 
 from __future__ import annotations
 
+import dataclasses
 import json
+import posixpath
 import re
 import sys
 from pathlib import Path
@@ -544,6 +546,63 @@ PARSERS = (
 )
 
 
+def _definition_root(manifest: str) -> str:
+    root = posixpath.dirname(manifest)
+
+    return posixpath.dirname(root) if posixpath.basename(root) == "gradle" else root
+
+
+def _root_depth(definition: Dependency) -> int:
+    root = _definition_root(definition.manifest)
+
+    return root.count("/") + 1 if root else 0
+
+
+def _applies_to(definition: Dependency, reference: Dependency) -> bool:
+    root = _definition_root(definition.manifest)
+
+    if root and not reference.manifest.startswith(root + "/"):
+        return False
+
+    if reference.alias:
+        return definition.alias == reference.alias
+
+    return definition.key() == reference.key()
+
+
+def _resolve_reference(reference: Dependency, definitions: list[Dependency]) -> list[Dependency]:
+    """A versionless reference takes the version from the nearest applicable definition(s)."""
+    candidates = [item for item in definitions if item.ecosystem == reference.ecosystem and _applies_to(item, reference)]
+
+    if not candidates:
+        return [] if reference.alias else [reference]
+
+    depth = max(_root_depth(item) for item in candidates)
+    nearest = [item for item in candidates if _root_depth(item) == depth]
+
+    return [
+        dataclasses.replace(reference, name=item.name, version=item.version, spec=item.spec, alias="")
+        for item in nearest
+    ]
+
+
+def _apply_definitions(found: list[Dependency]) -> list[Dependency]:
+    """Attach central version definitions to the references they serve; drop unused definitions."""
+    definitions = [item for item in found if item.defines]
+    applied: list[Dependency] = []
+
+    for dependency in found:
+        if dependency.defines:
+            continue
+
+        if dependency.direct and not dependency.spec and not dependency.version:
+            applied.extend(_resolve_reference(dependency, definitions))
+        else:
+            applied.append(dependency)
+
+    return applied
+
+
 def _merge(found: list[Dependency]) -> list[Dependency]:
     """
     One entry per (ecosystem, package, version).
@@ -553,6 +612,7 @@ def _merge(found: list[Dependency]) -> list[Dependency]:
     the manifest line. Lockfile-only packages are transitive.
     """
 
+    found = _apply_definitions(found)
     declared = [dependency for dependency in found if dependency.direct]
     locked = [dependency for dependency in found if not dependency.direct]
 
