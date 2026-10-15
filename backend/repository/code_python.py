@@ -73,6 +73,13 @@ def _string_parts(node: ast.AST) -> str:
     )
 
 
+def runtime_value(node: ast.expr) -> bool:
+    """Whether evaluating the expression reads anything other than literals."""
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and isinstance(node.func.value, ast.Constant):
+        return any(runtime_value(value) for value in [*node.args, *(keyword.value for keyword in node.keywords)])
+    return any(isinstance(child, (ast.Name, ast.Attribute, ast.Call, ast.Subscript)) for child in ast.walk(node))
+
+
 def _interpolated(node: ast.expr) -> bool:
     return isinstance(node, ast.JoinedStr) and any(isinstance(value, ast.FormattedValue) for value in node.values)
 
@@ -89,6 +96,8 @@ def _format_call(node: ast.expr) -> bool:
 
 def built_string(node: ast.expr) -> str:
     """How a string is assembled at runtime, or "" when it is a literal."""
+    if not runtime_value(node):
+        return ""
     if _interpolated(node):
         return "an f-string"
     if _format_call(node):
@@ -114,7 +123,7 @@ def _sql(call: ast.Call, name: str) -> tuple[str, dict[str, str]] | None:
 
 def _command(call: ast.Call, name: str) -> tuple[str, dict[str, str]] | None:
     argument = _first_argument(call)
-    dynamic = argument is not None and not isinstance(argument, ast.Constant)
+    dynamic = argument is not None and runtime_value(argument)
     if name in SHELL_CALLS and dynamic:
         return "REPO-SEC-002", {}
     if name in SUBPROCESS_CALLS and dynamic and _is_constant(_keyword(call, "shell"), True):
@@ -123,7 +132,7 @@ def _command(call: ast.Call, name: str) -> tuple[str, dict[str, str]] | None:
 
 
 def _code(call: ast.Call, name: str) -> tuple[str, dict[str, str]] | None:
-    if name in CODE_CALLS and call.args and not isinstance(call.args[0], ast.Constant):
+    if name in CODE_CALLS and call.args and runtime_value(call.args[0]):
         return "REPO-SEC-003", {}
     return None
 
@@ -158,6 +167,7 @@ def _django_debug(tree: ast.Module, path: str, lines: list[str]) -> list[Securit
         if isinstance(node, ast.Assign)
         and any(isinstance(target, ast.Name) and target.id == "DEBUG" for target in node.targets)
         and _is_constant(node.value, True)
+        and not suppressed(lines[node.lineno - 1])
     ]
 
 

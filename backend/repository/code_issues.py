@@ -8,6 +8,7 @@ from pathlib import PurePosixPath
 from typing import Any
 
 from backend.risk.confidence import FIRM
+from backend.rules.generic.clientside import SECRET_PATTERNS
 
 TEST_DIRECTORIES = frozenset(
     {"test", "tests", "__tests__", "spec", "specs", "testdata", "test-data", "fixtures", "__fixtures__", "__mocks__", "e2e"}
@@ -43,4 +44,6 @@ def suppressed(line: str) -> bool:
 
 def snippet(line: str) -> str:
     text = line.strip()
+    for _, pattern in SECRET_PATTERNS:
+        text = pattern.sub("[REDACTED]", text)
     return text if len(text) <= 160 else text[:157] + "..."
