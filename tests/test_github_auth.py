@@ -402,3 +402,23 @@ def test_first_forwarded_value_wins_over_spoofed_hops(github):
 
     query = parse_qs(urlparse(login.headers["Location"]).query)
     assert query["redirect_uri"] == ["https://secguard.example/auth/github/callback"]
+
+
+def test_signed_out_api_callers_see_no_applications(client, github, tmp_path):
+    scans.save_application({"id": "url-scan", "name": "Shop", "platform": "Generic", "target_url": "https://shop.test"})
+
+    assert client.get("/api/applications").get_json()["applications"] == []
+    assert client.get("/api/applications/url-scan").status_code == 404
+    assert client.get("/api/applications/url-scan/findings").status_code == 404
+
+    sign_in(client)
+
+    assert [item["id"] for item in client.get("/api/applications").get_json()["applications"]] == ["url-scan"]
+
+
+def test_responses_carry_security_headers(client):
+    headers = client.get("/api/health").headers
+
+    assert "frame-ancestors 'none'" in headers["Content-Security-Policy"]
+    assert headers["X-Content-Type-Options"] == "nosniff"
+    assert headers["X-Frame-Options"] == "DENY"
