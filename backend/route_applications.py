@@ -164,13 +164,16 @@ def _register_workflow_route(app):
         if finding is None:
             return jsonify({"success": False, "error": "Finding not found."}), 404
         system = triage.system_key(load_application(application_id))
-        key = finding_key(finding)
-        previous = triage_store.load_system(system).get(key, {})
-        update, problem = triage.clean_update(request.get_json(silent=True), previous)
-        if problem:
+        payload = request.get_json(silent=True)
+        actor = _actor()
+
+        def change(previous: dict) -> tuple[dict | None, str]:
+            update, problem = triage.clean_update(payload, previous)
+            return (None, problem) if problem else (triage.apply_update(previous, update, actor), "")
+
+        record, problem = triage_store.update_record(system, finding_key(finding), change)
+        if record is None:
             return jsonify({"success": False, "error": problem}), 400
-        record = triage.apply_update(previous, update, _actor())
-        triage_store.save_record(system, key, record)
         today = datetime.now(timezone.utc).date()
         return jsonify(
             {"success": True, "workflow": triage.workflow(finding, record, today)}

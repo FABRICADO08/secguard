@@ -149,7 +149,10 @@ def test_repository_decisions_follow_the_repository_not_the_display_name():
 def test_unchanged_values_add_no_audit_entry():
     update, problem = triage.clean_update({"owner": ""}, {})
     record = triage.apply_update({}, update, "alice", datetime(2026, 1, 1, tzinfo=timezone.utc))
+    earlier = {"owner": "alice", "updated_by": "alice", "history": [{"by": "alice"}]}
+    resaved = triage.apply_update(earlier, triage.clean_update({}, earlier)[0], "bob")
 
     assert problem == ""
-    assert record["history"] == []
+    assert record == {}
+    assert resaved == earlier
     assert triage.workflow({"severity": "info"}, record, date(2026, 1, 1))["due_date"] == ""

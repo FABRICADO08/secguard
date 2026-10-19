@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import ssl
 import threading
+from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
 from urllib.parse import parse_qsl, unquote, urlsplit
@@ -378,13 +379,27 @@ def load_triage(system: str) -> dict[str, dict[str, Any]]:
     return {str(finding): _as_dict(data) for finding, data in rows}
 
 
-def save_triage(system: str, finding: str, record: dict[str, Any]) -> None:
+def update_triage(
+    system: str,
+    finding: str,
+    change: Callable[[dict[str, Any]], tuple[dict[str, Any] | None, str]],
+) -> tuple[dict[str, Any] | None, str]:
+    """Read, change and write one record while holding a per-finding transaction lock."""
     with _connection() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_xact_lock(hashtext(%s))", (f"{system}\n{finding}",))
         cursor.execute(
-            """
-            INSERT INTO finding_triage (system, finding, data)
-            VALUES (%s, %s, %s)
-            ON CONFLICT (system, finding) DO UPDATE SET data = EXCLUDED.data
-            """,
-            (system, finding, record),
+            "SELECT data FROM finding_triage WHERE system = %s AND finding = %s",
+            (system, finding),
         )
+        row = cursor.fetchone()
+        record, problem = change(_as_dict(row[0]) if row else {})
+        if record is not None:
+            cursor.execute(
+                """
+                INSERT INTO finding_triage (system, finding, data)
+                VALUES (%s, %s, %s)
+                ON CONFLICT (system, finding) DO UPDATE SET data = EXCLUDED.data
+                """,
+                (system, finding, record),
+            )
+    return record, problem

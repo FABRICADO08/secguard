@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
@@ -39,15 +40,23 @@ def load_system(system: str) -> dict[str, dict[str, Any]]:
     return {key[len(prefix):]: value for key, value in _load_file().items() if key.startswith(prefix)}
 
 
-def save_record(system: str, finding: str, record: dict[str, Any]) -> None:
+def update_record(
+    system: str,
+    finding: str,
+    change: Callable[[dict[str, Any]], tuple[dict[str, Any] | None, str]],
+) -> tuple[dict[str, Any] | None, str]:
+    """Apply ``change`` to one finding's record atomically; a ``None`` record leaves it untouched."""
+    if db.use_database():
+        return db.update_triage(system, finding, change)
     with _lock:
-        if db.use_database():
-            db.save_triage(system, finding, record)
-            return
         records = _load_file()
+        record, problem = change(records.get(_key(system, finding), {}))
+        if record is None:
+            return None, problem
         records[_key(system, finding)] = record
         path = _path()
         path.parent.mkdir(parents=True, exist_ok=True)
         temporary = path.with_suffix(".json.tmp")
         temporary.write_text(json.dumps(records, indent=2, ensure_ascii=False), encoding="utf-8")
         temporary.replace(path)
+        return record, problem

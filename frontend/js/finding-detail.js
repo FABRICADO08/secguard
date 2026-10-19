@@ -109,6 +109,15 @@ function workflowCard(finding, canEdit) {
 }
 
 
+function workflowChange(form) {
+    const change = Object.fromEntries(new FormData(form));
+    if (change.due_date === form.elements.due_date.defaultValue) {
+        delete change.due_date;
+    }
+    return change;
+}
+
+
 function wireWorkflow(finding) {
     const form = document.getElementById("workflowForm");
 
@@ -121,7 +130,7 @@ function wireWorkflow(finding) {
             {
                 method: "PUT",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(Object.fromEntries(new FormData(form))),
+                body: JSON.stringify(workflowChange(form)),
             }
         );
         const data = await response.json();
