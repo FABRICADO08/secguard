@@ -40,6 +40,14 @@ function references(finding) {
 }
 
 
+function historyValue(field, value) {
+    if (!value) {
+        return "-";
+    }
+    return field === "status" ? WORKFLOW_STATUSES[value] || value : value;
+}
+
+
 function historyMarkup(history) {
     if (!history.length) {
         return '<p class="muted">No changes recorded yet.</p>';
@@ -54,7 +62,8 @@ function historyMarkup(history) {
                 <span class="muted">${escapeHtml(formatDateTime(entry.at))}</span>
                 <div>${Object.entries(entry.changes || {})
                     .map(([field, change]) => `${escapeHtml(titleCase(field))}: ${
-                        escapeHtml(change.from || "-")} → ${escapeHtml(change.to || "-")}`)
+                        escapeHtml(historyValue(field, change.from))} → ${
+                        escapeHtml(historyValue(field, change.to))}`)
                     .join("<br>")}</div>
             </li>
         `)
