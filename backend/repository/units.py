@@ -63,24 +63,36 @@ def _expression_arrow(rest: str) -> bool:
     return rest.startswith("=>") and bool(body) and not body.startswith("{")
 
 
+def _not_a_body(text: str, index: int, start: int) -> bool:
+    return _expression_arrow(text) if index == start else bool(_header(text))
+
+
+def _walk_braces(text: str, depth: int, opened: bool) -> tuple[int, bool, bool | None]:
+    """Advance brace depth over one line; outcome is True when the body closes, False when there is none."""
+    for character in text:
+        if character == ";" and not opened:
+            return depth, opened, False
+        if character == "{":
+            depth += 1
+            opened = True
+        elif character == "}" and opened:
+            depth -= 1
+            if depth == 0:
+                return depth, opened, True
+    return depth, opened, None
+
+
 def _body_end(lines: list[str], start: int, column: int) -> int | None:
     """Index of the line closing the body brace opened after the header's parameter list."""
     depth = 0
     opened = False
     for index in range(start, len(lines)):
         text = lines[index][column:] if index == start else lines[index]
-        if not opened and (index == start and _expression_arrow(text) or index > start and _header(text)):
+        if not opened and _not_a_body(text, index, start):
             return None
-        for character in text:
-            if character == ";" and not opened:
-                return None
-            if character == "{":
-                depth += 1
-                opened = True
-            elif character == "}" and opened:
-                depth -= 1
-                if depth == 0:
-                    return index
+        depth, opened, outcome = _walk_braces(text, depth, opened)
+        if outcome is not None:
+            return index if outcome else None
         if not opened and index > start + 2:
             return None
     return None

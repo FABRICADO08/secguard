@@ -495,6 +495,8 @@ input[type="url"],
 input[type="password"],
 input[type="search"],
 input[type="file"],
+input[type="date"],
+textarea,
 select {
     width: 100%;
     padding: 9px 10px;
@@ -801,4 +803,36 @@ pre.evidence {
 
 .login code {
     overflow-wrap: anywhere;
+}
+
+
+.pill--overdue {
+    background: #fde8e8;
+    color: #b42318;
+}
+
+.workflow-form {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(min(180px, 100%), 1fr));
+    gap: 12px;
+    align-items: end;
+}
+
+.workflow-form__reason {
+    grid-column: 1 / -1;
+}
+
+.workflow-form textarea {
+    font: inherit;
+}
+
+.audit {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+}
+
+.audit li {
+    padding: 8px 0;
+    border-top: 1px solid var(--border);
 }

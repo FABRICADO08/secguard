@@ -861,3 +861,22 @@ async function triggerRepositoryScan(fullName) {
 
     return data;
 }
+
+
+const WORKFLOW_STATUSES = {
+    open: "Open",
+    in_progress: "In progress",
+    false_positive: "False positive",
+    accepted_risk: "Accepted risk",
+};
+
+
+function workflowChip(finding) {
+    const workflow = finding.workflow || {};
+    const label = WORKFLOW_STATUSES[workflow.status] || "Open";
+    const overdue = workflow.overdue
+        ? ' <span class="pill pill--overdue">Overdue</span>'
+        : "";
+
+    return `<span class="pill">${escapeHtml(label)}</span>${overdue}`;
+}

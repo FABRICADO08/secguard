@@ -20,7 +20,14 @@ const view = renderFindingPage(applicationId, [
     { text: groupName || "All findings" },
 ]);
 
-const FILTER_KEYS = ["severity", "category", "platform"];
+const FILTER_KEYS = ["severity", "category", "platform", "status"];
+
+
+function filterValue(finding, key) {
+    return key === "status"
+        ? String((finding.workflow || {}).status || "open")
+        : String(finding[key] || "");
+}
 
 
 function filtersFromLocation() {
@@ -68,6 +75,8 @@ function findingRow(finding) {
 
             <td data-label="Risk">${riskChip(finding)}</td>
 
+            <td data-label="Status">${workflowChip(finding)}</td>
+
             <td data-label="Finding age">
                 ${escapeHtml(findingAge(finding.detected_at))}
             </td>
@@ -89,11 +98,20 @@ function findingRow(finding) {
 }
 
 
+function optionLabel(key, value) {
+    if (key === "platform") {
+        return platformLabel(value);
+    }
+
+    return key === "status" ? WORKFLOW_STATUSES[value] || value : titleCase(value);
+}
+
+
 function optionsFor(findings, key, selected) {
     const values = [
         ...new Set(
             findings
-                .map(finding => String(finding[key] || ""))
+                .map(finding => filterValue(finding, key))
                 .filter(Boolean)
         ),
     ].sort();
@@ -105,7 +123,7 @@ function optionsFor(findings, key, selected) {
                 <option
                     value="${escapeHtml(value)}"
                     ${value === selected ? "selected" : ""}
-                >${escapeHtml(key === "platform" ? platformLabel(value) : titleCase(value))}</option>
+                >${escapeHtml(optionLabel(key, value))}</option>
             `
         ),
     ].join("");
@@ -126,7 +144,7 @@ function render(findings) {
             FILTER_KEYS.every(
                 key =>
                     !filters[key] ||
-                    String(finding[key] || "").toLowerCase() ===
+                    filterValue(finding, key).toLowerCase() ===
                         filters[key].toLowerCase()
             )
         )
@@ -170,6 +188,16 @@ function render(findings) {
                             )}
                         </select>
                     </div>
+                    <div class="field">
+                        <label for="status">Status</label>
+                        <select id="status" data-filter="status">
+                            ${optionsFor(
+                                scoped,
+                                "status",
+                                filters.status
+                            )}
+                        </select>
+                    </div>
                     <button class="chip" id="exportCsv" type="button">
                         Export as CSV
                     </button>
@@ -187,6 +215,7 @@ function render(findings) {
                             <th>Type</th>
                             <th>Location</th>
                             <th>Risk</th>
+                            <th>Status</th>
                             <th>Finding age</th>
                             <th>Confidence</th>
                             <th>Platform</th>
@@ -197,7 +226,7 @@ function render(findings) {
                             ? visible.map(findingRow).join("")
                             : `
                                 <tr>
-                                    <td colspan="6" class="empty">
+                                    <td colspan="7" class="empty">
                                         No finding matches these filters.
                                     </td>
                                 </tr>
