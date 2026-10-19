@@ -118,6 +118,36 @@ def _connection(init=None):
         connection.close()
 
 
+TABLES = (
+    """
+            CREATE TABLE IF NOT EXISTS applications (
+                id TEXT PRIMARY KEY,
+                data JSONB NOT NULL
+            )
+    """,
+    """
+            CREATE TABLE IF NOT EXISTS findings (
+                application_id TEXT PRIMARY KEY,
+                data JSONB NOT NULL
+            )
+    """,
+    """
+            CREATE TABLE IF NOT EXISTS application_names (
+                repository TEXT PRIMARY KEY,
+                name TEXT NOT NULL
+            )
+    """,
+    """
+            CREATE TABLE IF NOT EXISTS finding_triage (
+                system TEXT NOT NULL,
+                finding TEXT NOT NULL,
+                data JSONB NOT NULL,
+                PRIMARY KEY (system, finding)
+            )
+    """,
+)
+
+
 def init_schema(connection=None) -> None:
     """Create the core tables; safe to call on every request.
 
@@ -145,30 +175,8 @@ def init_schema(connection=None) -> None:
         return
 
     with connection.cursor() as cursor:
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS applications (
-                id TEXT PRIMARY KEY,
-                data JSONB NOT NULL
-            )
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS findings (
-                application_id TEXT PRIMARY KEY,
-                data JSONB NOT NULL
-            )
-            """
-        )
-        cursor.execute(
-            """
-            CREATE TABLE IF NOT EXISTS application_names (
-                repository TEXT PRIMARY KEY,
-                name TEXT NOT NULL
-            )
-            """
-        )
+        for statement in TABLES:
+            cursor.execute(statement)
 
 
 def reset() -> None:
@@ -357,3 +365,26 @@ def set_name(repository: str, name: str) -> None:
                 """,
                 (repository.lower(), name),
             )
+
+
+# ------------------------------------------------------------- finding triage
+
+
+def load_triage(system: str) -> dict[str, dict[str, Any]]:
+    with _connection() as connection, connection.cursor() as cursor:
+        cursor.execute("SELECT finding, data FROM finding_triage WHERE system = %s", (system,))
+        rows = cursor.fetchall()
+
+    return {str(finding): _as_dict(data) for finding, data in rows}
+
+
+def save_triage(system: str, finding: str, record: dict[str, Any]) -> None:
+    with _connection() as connection, connection.cursor() as cursor:
+        cursor.execute(
+            """
+            INSERT INTO finding_triage (system, finding, data)
+            VALUES (%s, %s, %s)
+            ON CONFLICT (system, finding) DO UPDATE SET data = EXCLUDED.data
+            """,
+            (system, finding, record),
+        )
