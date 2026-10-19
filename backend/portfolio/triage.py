@@ -141,7 +141,8 @@ def apply_update(
         for field, value in update.items()
         if str(previous.get(field) or (OPEN if field == "status" else "")) != value
     }
+    if not changes:
+        return previous
     history = list(previous.get("history") or [])
-    if changes:
-        history = (history + [{"at": moment, "by": actor, "changes": changes}])[-MAX_HISTORY:]
+    history = (history + [{"at": moment, "by": actor, "changes": changes}])[-MAX_HISTORY:]
     return {**update, "updated_at": moment, "updated_by": actor, "history": history}
