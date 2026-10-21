@@ -44,7 +44,7 @@ def security_health(findings: list[dict[str, Any]]) -> int:
         finding
         for finding in findings
         if finding.get("rule_id") in ("REPO-DEP-001", "REPO-SUP-001", "REPO-SUP-002")
-        or str(finding.get("rule_id") or "").startswith(("MXSEC-", "REPO-SEC-"))
+        or str(finding.get("rule_id") or "").startswith(("MXSEC-", "REPO-SEC-", "REPO-IAC-"))
     ]
 
     return _clamp(100 - application_risk_score(exploitable))
