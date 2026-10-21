@@ -1,18 +1,22 @@
 """HTTP routes for application records, findings, and rule catalogues."""
 
-from flask import jsonify, request, current_app
+from datetime import datetime, timezone
+
+from flask import current_app, jsonify, request
 
 from backend.model.normalized import platform_model_statistics
 from backend.platforms.mendix.findings import RULE_CATALOGUE as MENDIX_RULE_CATALOGUE
 from backend.platforms.outsystems.findings import (
     RULE_CATALOGUE as OUTSYSTEMS_RULE_CATALOGUE,
 )
-from backend.portfolio.summary import portfolio_summary
+from backend.portfolio import triage
+from backend.portfolio.summary import finding_key, portfolio_summary
 from backend.repository.findings import RULE_CATALOGUE as REPOSITORY_RULE_CATALOGUE
 from backend.risk.scoring import summarize
 from backend.rules.engine import default_rules
 from backend.security import github_auth
-from backend.security.auth import require_api_token
+from backend.security.auth import request_is_authorized, require_api_token
+from backend.storage import triage as triage_store
 from backend.storage.findings import load_findings
 from backend.storage.scans import (
     application_exists,
@@ -109,17 +113,17 @@ def _register_finding_routes(app):
             return jsonify(
                 {"success": False, "error": "Application not found."}
             ), 404
-        findings = load_findings(application_id)
+        findings = _with_workflow(application_id)
         filters = {
             key: str(request.args.get(key)).lower()
-            for key in ("severity", "category", "platform", "rule_id")
+            for key in ("severity", "category", "platform", "rule_id", "status")
             if request.args.get(key)
         }
         for key, value in filters.items():
             findings = [
                 finding
                 for finding in findings
-                if str(finding.get(key, "")).lower() == value
+                if _field(finding, key).lower() == value
             ]
         return jsonify(
             {
@@ -138,10 +142,76 @@ def _register_finding_routes(app):
             return jsonify(
                 {"success": False, "error": "Application not found."}
             ), 404
-        for finding in load_findings(application_id):
-            if finding.get("id") == finding_id:
-                return jsonify({"success": True, "finding": finding})
-        return jsonify({"success": False, "error": "Finding not found."}), 404
+        finding = _find(application_id, finding_id)
+        if finding is None:
+            return jsonify({"success": False, "error": "Finding not found."}), 404
+        return jsonify(
+            {"success": True, "finding": finding, "can_edit": _can_triage(application_id)}
+        )
+
+
+def _register_workflow_route(app):
+    @app.put("/api/applications/<application_id>/findings/<finding_id>/workflow")
+    def update_finding_workflow(application_id: str, finding_id: str):
+        """Record a status, owner, due date or reason change on a finding."""
+        if not application_exists(application_id):
+            return jsonify({"success": False, "error": "Application not found."}), 404
+        if not _can_triage(application_id):
+            return jsonify(
+                {"success": False, "error": "You need write access to this application."}
+            ), 403
+        finding = _find(application_id, finding_id)
+        if finding is None:
+            return jsonify({"success": False, "error": "Finding not found."}), 404
+        system = triage.system_key(load_application(application_id))
+        payload = request.get_json(silent=True)
+        actor = _actor()
+
+        def change(previous: dict) -> tuple[dict | None, str]:
+            update, problem = triage.clean_update(payload, previous)
+            return (None, problem) if problem else (triage.apply_update(previous, update, actor), "")
+
+        record, problem = triage_store.update_record(system, finding_key(finding), change)
+        if record is None:
+            return jsonify({"success": False, "error": problem}), 400
+        today = datetime.now(timezone.utc).date()
+        return jsonify(
+            {"success": True, "workflow": triage.workflow(finding, record, today)}
+        )
+
+
+def _with_workflow(application_id: str) -> list[dict]:
+    system = triage.system_key(load_application(application_id))
+    return triage.annotate(load_findings(application_id), triage_store.load_system(system))
+
+
+def _find(application_id: str, finding_id: str) -> dict | None:
+    return next(
+        (item for item in _with_workflow(application_id) if item.get("id") == finding_id),
+        None,
+    )
+
+
+def _field(finding: dict, key: str) -> str:
+    if key == "status":
+        return str(finding["workflow"]["status"])
+    return str(finding.get(key, ""))
+
+
+def _actor() -> str:
+    user = github_auth.current_user() if github_auth.enabled() else None
+    return user.login if user else "administrator"
+
+
+def _can_triage(application_id: str) -> bool:
+    """Deployment administrators, or GitHub users who can push to the repository."""
+    application = load_application(application_id)
+    user = github_auth.current_user() if github_auth.enabled() else None
+    if user is not None and application.get("platform") == "Repository":
+        name = github_auth.repository_name(application).lower()
+        if (user.repositories.get(name) or {}).get("can_trigger"):
+            return True
+    return request_is_authorized()
 
 
 def _register_rules_route(app):
@@ -181,4 +251,5 @@ def register_routes(app):
     _register_application_list_routes(app)
     _register_application_detail_routes(app)
     _register_finding_routes(app)
+    _register_workflow_route(app)
     _register_rules_route(app)
