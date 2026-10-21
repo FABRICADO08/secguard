@@ -47,28 +47,25 @@ def scan_summary(application: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def application_report(name: str, application: dict[str, Any], objectives: dict[str, Any]) -> bytes:
+def _header(document: Document, name: str, application: dict[str, Any]) -> None:
     repository = application.get("repository") or {}
     meta = repository.get("repository") or {}
-    security = application.get("security") or {}
-    health = repository.get("health") or {}
-    counts = security.get("severity_counts") or {}
-    findings = sorted(
-        security.get("findings") or [],
-        key=lambda finding: -SEVERITY_RANK.get(str(finding.get("severity")), 0),
-    )
-
-    document = Document(f"{name} - SecGuard application report")
-    document.heading(f"{name}", 20)
+    document.heading(name, 20)
     details = [f"Generated {_now()}"]
     if meta.get("name"):
         details.append(f"GitHub {meta['name']}")
     if meta.get("commit"):
         details.append(f"commit {str(meta['commit'])[:12]}")
-    if repository.get("generated_at") or application.get("updated_at"):
-        details.append(f"scanned {str(repository.get('generated_at') or application.get('updated_at'))[:16].replace('T', ' ')}")
+    scanned = repository.get("generated_at") or application.get("updated_at")
+    if scanned:
+        details.append(f"scanned {str(scanned)[:16].replace('T', ' ')}")
     document.paragraph(" · ".join(details), 9)
 
+
+def _health(document: Document, application: dict[str, Any]) -> None:
+    repository = application.get("repository") or {}
+    health = repository.get("health") or {}
+    counts = (application.get("security") or {}).get("severity_counts") or {}
     document.heading("Health")
     document.tiles(
         [
@@ -80,19 +77,24 @@ def application_report(name: str, application: dict[str, Any], objectives: dict[
     )
     document.tiles([(severity.capitalize(), str(counts.get(severity, 0))) for severity in _SEVERITIES])
 
+
+def _objectives(document: Document, application: dict[str, Any], objectives: dict[str, Any]) -> None:
     status = evaluate(objectives, scan_summary(application))
     document.heading("Objectives")
-    if status["results"]:
-        document.paragraph(f"Overall: {_status(status['met'])}", 10)
-        document.gap(4)
-        document.table(
-            ["Objective", "Target", "Actual", "Status"],
-            [[result["label"], _value(result["target"]), _value(result["actual"]), _status(result["met"])] for result in status["results"]],
-            [0.46, 0.16, 0.16, 0.22],
-        )
-    else:
+    if not status["results"]:
         document.paragraph("No objectives are configured.", 10)
+        return
+    document.paragraph(f"Overall: {_status(status['met'])}", 10)
+    document.gap(4)
+    document.table(
+        ["Objective", "Target", "Actual", "Status"],
+        [[result["label"], _value(result["target"]), _value(result["actual"]), _status(result["met"])] for result in status["results"]],
+        [0.46, 0.16, 0.16, 0.22],
+    )
 
+
+def _open_source(document: Document, application: dict[str, Any]) -> None:
+    repository = application.get("repository") or {}
     dependencies = repository.get("dependencies") or []
     vulnerable = [dependency for dependency in dependencies if dependency.get("vulnerabilities")]
     document.heading("Open source")
@@ -102,31 +104,63 @@ def application_report(name: str, application: dict[str, Any], objectives: dict[
         10,
     )
 
+
+def _findings(document: Document, application: dict[str, Any]) -> None:
+    findings = sorted(
+        (application.get("security") or {}).get("findings") or [],
+        key=lambda finding: -SEVERITY_RANK.get(str(finding.get("severity")), 0),
+    )
     document.heading(f"Findings ({len(findings)})")
-    if findings:
-        document.table(
-            ["Severity", "Finding", "Location"],
-            [
-                [str(finding.get("severity", "")).capitalize(), str(finding.get("title", "")), str(finding.get("location") or "-")]
-                for finding in findings[:MAX_FINDINGS]
-            ],
-            [0.13, 0.52, 0.35],
-        )
-        if len(findings) > MAX_FINDINGS:
-            document.gap(4)
-            document.paragraph(f"...and {len(findings) - MAX_FINDINGS} more; see SecGuard for the full list.", 9)
-    else:
+    if not findings:
         document.paragraph("No findings.", 10)
+        return
+    document.table(
+        ["Severity", "Finding", "Location"],
+        [
+            [str(finding.get("severity", "")).capitalize(), str(finding.get("title", "")), str(finding.get("location") or "-")]
+            for finding in findings[:MAX_FINDINGS]
+        ],
+        [0.13, 0.52, 0.35],
+    )
+    if len(findings) > MAX_FINDINGS:
+        document.gap(4)
+        document.paragraph(f"...and {len(findings) - MAX_FINDINGS} more; see SecGuard for the full list.", 9)
+
+
+def application_report(name: str, application: dict[str, Any], objectives: dict[str, Any]) -> bytes:
+    document = Document(f"{name} - SecGuard application report")
+    _header(document, name, application)
+    _health(document, application)
+    _objectives(document, application, objectives)
+    _open_source(document, application)
+    _findings(document, application)
     return document.render()
+
+
+def _portfolio_row(row: dict[str, Any]) -> list[str]:
+    scan = row["scan"]
+    if scan is None:
+        return [row["name"], "Not scanned", "-", "-", "-", "-"]
+    counts = scan["severity_counts"] or {}
+    return [
+        row["name"],
+        _score((scan["health"] or {}).get("overall")),
+        _stars(scan["maintainability"]),
+        str(counts.get("critical", 0)),
+        str(counts.get("high", 0)),
+        _status(row["objectives"]["met"]),
+    ]
+
+
+def _total(rows: list[dict[str, Any]], severity: str) -> int:
+    return sum((row["scan"]["severity_counts"] or {}).get(severity, 0) for row in rows)
 
 
 def portfolio_report(rows: list[dict[str, Any]]) -> bytes:
     """``rows`` holds name, scan (an objective scan summary or None) and objectives status."""
     scanned = [row for row in rows if row["scan"] is not None]
-    meeting = [row for row in scanned if row["objectives"]["met"]]
     measured = [row for row in scanned if row["objectives"]["met"] is not None]
-    critical = sum((row["scan"]["severity_counts"] or {}).get("critical", 0) for row in scanned)
-    high = sum((row["scan"]["severity_counts"] or {}).get("high", 0) for row in scanned)
+    meeting = [row for row in measured if row["objectives"]["met"]]
 
     document = Document("SecGuard portfolio report")
     document.heading("Portfolio report", 20)
@@ -136,31 +170,14 @@ def portfolio_report(rows: list[dict[str, Any]]) -> bytes:
         [
             ("Applications", str(len(rows))),
             ("Meeting objectives", f"{len(meeting)} of {len(measured)}"),
-            ("Critical findings", str(critical)),
-            ("High findings", str(high)),
+            ("Critical findings", str(_total(scanned, "critical"))),
+            ("High findings", str(_total(scanned, "high"))),
         ]
     )
     document.heading("Applications")
-    table = []
-    for row in rows:
-        scan = row["scan"]
-        if scan is None:
-            table.append([row["name"], "Not scanned", "-", "-", "-", "-"])
-            continue
-        counts = scan["severity_counts"] or {}
-        table.append(
-            [
-                row["name"],
-                _score((scan["health"] or {}).get("overall")),
-                _stars(scan["maintainability"]),
-                str(counts.get("critical", 0)),
-                str(counts.get("high", 0)),
-                _status(row["objectives"]["met"]),
-            ]
-        )
     document.table(
         ["Application", "Health", "Maintainability", "Critical", "High", "Objectives"],
-        table,
+        [_portfolio_row(row) for row in rows],
         [0.32, 0.14, 0.17, 0.11, 0.09, 0.17],
     )
     return document.render()
