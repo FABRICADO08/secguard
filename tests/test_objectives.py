@@ -70,10 +70,20 @@ def test_moved_findings_are_not_new_but_extra_copies_are():
     assert new_findings(report([finding(severity="medium", rule="REPO-MNT-001")]), report()) == []
 
 
-def test_mendix_findings_are_skipped_when_the_base_has_no_model():
-    head = {**report([finding(rule="MXSEC-001", location="App.mpr")]), "mendix": {}}
+def test_a_replaced_occurrence_of_the_same_rule_is_new():
+    def occurrence(snippet, line):
+        return {**finding(location=f"app.py:{line}"), "evidence": {"snippet": snippet}}
+
+    base = report([occurrence('cursor.execute("SELECT " + name)', 10)])
+    assert new_findings(report([occurrence('cursor.execute("SELECT "  + name)', 30)]), base) == []
+    assert len(new_findings(report([occurrence('cursor.execute("DELETE " + key)', 90)]), base)) == 1
+
+
+def test_mendix_findings_are_skipped_unless_the_base_model_was_analysed():
+    head = {**report([finding(rule="MXSEC-001", location="App.mpr")]), "mendix": {"analyzed": True}}
     assert new_findings(head, report()) == []
-    assert len(new_findings(head, {**report(), "mendix": {}})) == 1
+    assert new_findings(head, {**report(), "mendix": {"analyzed": False, "projects": [{}]}}) == []
+    assert len(new_findings(head, {**report(), "mendix": {"analyzed": True}})) == 1
 
 
 def test_gate_fails_on_new_findings_and_rating_drops():
@@ -127,6 +137,7 @@ def test_only_administrators_change_objectives(client, monkeypatch):
 def test_github_admins_change_objectives_and_others_cannot(client, github, monkeypatch):
     monkeypatch.setattr(settings, "API_TOKEN", "token")
     assert client.get("/api/objectives").status_code == 401
+    assert client.get("/api/objectives", headers={"X-API-Key": "token"}).get_json()["can_edit"] is True
     auth_tests.sign_in(client)
     assert client.put("/api/objectives", json={"max_critical": 1}).status_code == 403
     monkeypatch.setattr(settings, "ADMINS", frozenset({"octo"}))

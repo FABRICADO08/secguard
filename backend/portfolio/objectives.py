@@ -110,13 +110,18 @@ def evaluate(objectives: dict[str, Any], scan: dict[str, Any]) -> dict[str, Any]
     return {"met": all(measured) if measured else None, "results": results}
 
 
-def _identity(finding: dict[str, Any]) -> tuple[str, str, str]:
-    """Rule, file and title: line numbers move whenever code above them changes."""
+_FINGERPRINT_EVIDENCE = ("snippet", "package", "advisory", "element")
+
+
+def _identity(finding: dict[str, Any]) -> tuple[str, ...]:
+    """Rule, file, title and the evidence naming the occurrence, without line numbers, which move."""
     location = str(finding.get("location") or "")
     path, _, line = location.rpartition(":")
     if not (path and line.isdigit()):
         path = location
-    return str(finding.get("rule_id") or ""), path, str(finding.get("title") or "")
+    evidence = finding.get("evidence") if isinstance(finding.get("evidence"), dict) else {}
+    marks = tuple(" ".join(str(evidence.get(key) or "").split()) for key in _FINGERPRINT_EVIDENCE)
+    return (str(finding.get("rule_id") or ""), path, str(finding.get("title") or ""), *marks)
 
 
 def _gated(findings: list[dict[str, Any]], threshold: int, skip_mendix: bool) -> list[dict[str, Any]]:
@@ -135,8 +140,8 @@ def new_findings(
 ) -> list[dict[str, Any]]:
     """Findings at or above ``severity`` the pull request adds to its base branch."""
     threshold = SEVERITY_RANK[severity]
-    # A base scan without a Mendix export cannot tell which model findings are new.
-    skip_mendix = "mendix" not in base
+    # Model findings are only comparable when the base scan analysed every Mendix project.
+    skip_mendix = not (base.get("mendix") or {}).get("analyzed")
     remaining = Counter(_identity(finding) for finding in _gated(base.get("findings") or [], threshold, skip_mendix))
     added = []
     for finding in _gated(head.get("findings") or [], threshold, skip_mendix):

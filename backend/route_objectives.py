@@ -35,7 +35,7 @@ def _payload():
 def register_routes(app):
     @app.get("/api/objectives")
     def get_objectives():
-        if _signed_out():
+        if _signed_out() and not can_edit():
             return jsonify({"success": False, "error": "Sign in with GitHub to see the objectives."}), 401
         return jsonify(_payload())
 
