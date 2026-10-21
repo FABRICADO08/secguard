@@ -3,12 +3,14 @@
 from flask import jsonify, request
 
 from backend.config import settings
+from backend.portfolio.objectives import evaluate
 from backend.repository.ingest import application_from_report
 from backend.repository.sbom import cyclonedx, spdx
 from backend.security import github_auth
 from backend.security.auth import request_is_authorized, require_api_token
 from backend.security.rate_limit import rate_limited
 from backend.storage import application_names
+from backend.storage import objectives as objective_store
 from backend.storage.findings import save_findings
 from backend.storage.scans import (
     application_exists,
@@ -247,6 +249,10 @@ def _register_repositories_route(app):
                 }
                 for key, repository in user.repositories.items()
             ]
+        objectives = objective_store.load()
+        for item in items:
+            if item["latest_scan"] is not None:
+                item["latest_scan"]["objectives"] = evaluate(objectives, item["latest_scan"])
         items.sort(
             key=lambda item: (
                 item["latest_scan"] is None,
@@ -257,6 +263,7 @@ def _register_repositories_route(app):
             {
                 "success": True,
                 "github_enabled": github_auth.enabled(),
+                "objectives": objectives,
                 "repositories": items,
             }
         )

@@ -106,6 +106,13 @@ GITHUB_URL = os.environ.get("SECGUARD_GITHUB_URL", "https://github.com").rstrip(
 
 GITHUB_API_URL = os.environ.get("SECGUARD_GITHUB_API_URL", "https://api.github.com").rstrip("/")
 
+# GitHub logins allowed to change portfolio-wide settings such as objectives.
+ADMINS = frozenset(
+    login.strip().lower()
+    for login in os.environ.get("SECGUARD_ADMINS", "").split(",")
+    if login.strip()
+)
+
 # Workflow file started by "Run scan".
 GITHUB_WORKFLOW = os.environ.get("SECGUARD_GITHUB_WORKFLOW", "secguard.yml")
 

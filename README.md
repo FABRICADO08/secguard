@@ -58,6 +58,8 @@ The schema (`applications`, `findings` and `application_names` tables) is create
 | `GET /api/applications/<id>/findings/<finding_id>` | A single finding. |
 | `GET /api/portfolio/summary` | Systems, severity deltas, new/existing/resolved activity and the monthly trend across all scans. |
 | `GET /api/rules` | Catalogue of the rules the engine evaluates. |
+| `GET /api/objectives` | Portfolio objectives and whether the caller may change them. |
+| `PUT /api/objectives` | Change the objectives. Administrators only. |
 | `POST /api/repository/scans` | Store a report from the repository scanner (GitHub Action or CLI). Authenticated, rate limited. |
 | `GET /api/applications/<id>/sbom?format=cyclonedx\|spdx` | SBOM of a scanned repository. |
 | `GET /api/applications/<id>/quality` | Maintainability metrics, hotspots, quality findings and the health score. |
@@ -205,6 +207,18 @@ Copy `integrations/github/secguard.yml` to `.github/workflows/secguard.yml` in e
 3. keeps the report and SBOMs as a run artifact,
 4. uploads the report to SecGuard when the `SECGUARD_URL` repository variable (and `SECGUARD_API_TOKEN` secret) are set.
 
+### Objectives and pull-request gates
+
+Objectives are targets every application should meet: at most N critical or high findings, a minimum maintainability rating in stars, and a minimum health score. SecGuard administrators set them under **My Applications > Objectives** (`PUT /api/objectives`); the table shows whether each application meets them. Administrators are the holder of `SECGUARD_API_TOKEN` and the GitHub logins listed in `SECGUARD_ADMINS`.
+
+On pull requests the action also scans the base commit and runs `python -m backend.repository gate`, which fails the check when the change
+
+- adds findings at or above `gate-new-severity` (default `high`; findings are matched by rule, file and title, so moved lines do not count as new),
+- lowers the maintainability rating by more than `gate-max-rating-drop` stars (default `0.2`), or
+- misses an objective the base commit met (`objective-max-critical`, default `0`; `objective-max-high`, `objective-min-maintainability`, `objective-min-health`, off when empty).
+
+Problems that already exist on the base branch never fail a pull request. Set `gate: false` to switch the gate off. The gate needs the base commit, so check out with `fetch-depth: 0`. Results are written to the job summary.
+
 ### Mendix applications on GitHub
 
 For every Mendix project (`*.mpr`, outside `node_modules`, `deployment`, `releases` and `.mendix-cache`; list them with `python -m backend.repository mendix-projects`), the action downloads the matching MxBuild from `https://cdn.mendix.com/runtime/mxbuild-<version>.tar.gz`, exports the model with `mx dump-mpr` (Mendix 10.4 and later) and runs the Mendix security rules on it. The findings (`MXSEC-*`) are part of the application's report, located at their `.mpr` file, and count towards its security health. A project whose export fails is shown as *Not analysed* with the reason on the Application Health page, instead of looking clean. The version is read from each `.mpr`; set the `mendix-version:` input if that fails, or `mendix: false` to skip the export. Locally, pass `--mendix-model` an export file (single project) or a directory holding `<project path>.json`, e.g. `exports/billing/Billing.mpr.json`.
@@ -240,6 +254,7 @@ GitHub answers "The redirect_uri is not associated with this application" when t
 | `SECGUARD_API_TOKEN` | empty | Shared secret for the scanning and delete endpoints, sent as `Authorization: Bearer <token>` or `X-API-Key`. When it is empty those endpoints only answer direct requests from the loopback interface — requests carrying `X-Forwarded-For`, `X-Real-IP` or `Forwarded` are refused, so a reverse proxy cannot make remote callers look local. Configure a token when serving SecGuard behind a proxy. Set it in the UI's *API token* field. |
 | `SECGUARD_ALLOW_PRIVATE_TARGETS` | `0` | Allow scanning targets that resolve to loopback, RFC1918, link-local or reserved addresses. Off by default, so the scanner cannot be pointed at internal services or cloud metadata endpoints. |
 | `SECGUARD_ALLOWED_TARGET_HOSTS` | empty | Comma-separated hostnames that may be scanned regardless of the address they resolve to, e.g. `127.0.0.1,localhost` for a local test target. |
+| `SECGUARD_ADMINS` | empty | Comma-separated GitHub logins that may change portfolio objectives. |
 | `SECGUARD_RATE_LIMIT_REQUESTS` | `10` | Scan requests allowed per client address per window. |
 | `SECGUARD_RATE_LIMIT_WINDOW` | `60` | Rate-limit window in seconds. |
 | `POSTGRES_URL` / `DATABASE_URL` | empty | Postgres connection string (e.g. from Neon) that moves storage from JSON files to the database. See **Database**. |

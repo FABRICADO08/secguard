@@ -10,6 +10,7 @@ data/findings/*
 data/applications/*
 data/sessions/
 data/application_names.json
+data/objectives.json
 data/finding_triage.json
 !data/scans/.gitkeep
 !data/findings/.gitkeep
