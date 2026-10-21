@@ -9,6 +9,151 @@
 let view = null;
 
 
+const OBJECTIVE_FIELDS = [
+    "max_critical",
+    "max_high",
+    "min_maintainability",
+    "min_health",
+];
+
+
+function objectiveValue(value) {
+    return value === null || value === undefined ? "" : String(value);
+}
+
+
+function objectivesCell(scan) {
+    const status = scan && scan.objectives;
+
+    if (!status || status.met === null) {
+        return '<span class="muted">-</span>';
+    }
+
+    if (status.met) {
+        return '<span class="pill pill--met">Met</span>';
+    }
+
+    const missed = status.results.filter(result => result.met === false);
+
+    const detail = missed
+        .map(result => `${result.label} ${result.target} (now ${result.actual})`)
+        .join("; ");
+
+    return `<span class="pill pill--missed" title="${escapeHtml(detail)}">
+        Missed ${missed.length}
+    </span>`;
+}
+
+
+function objectivesCard(settings, repositories) {
+    const scanned = repositories.filter(
+        item => item.latest_scan && item.latest_scan.objectives
+            && item.latest_scan.objectives.met !== null
+    );
+
+    const meeting = scanned.filter(item => item.latest_scan.objectives.met);
+
+    const active = OBJECTIVE_FIELDS.filter(
+        name => settings.objectives[name] !== null
+            && settings.objectives[name] !== undefined
+    );
+
+    const list = active.length
+        ? active.map(name => `
+            <span class="pill">
+                ${escapeHtml(settings.catalogue[name].label)}
+                ${escapeHtml(objectiveValue(settings.objectives[name]))}
+            </span>
+        `).join(" ")
+        : '<span class="muted">No objectives set.</span>';
+
+    const form = settings.can_edit
+        ? `
+            <form id="objectivesForm" class="objectives-form">
+                ${OBJECTIVE_FIELDS.map(name => {
+                    const entry = settings.catalogue[name];
+
+                    return `
+                        <div class="field">
+                            <label for="objective-${name}">${escapeHtml(entry.label)}</label>
+                            <input
+                                type="number"
+                                id="objective-${name}"
+                                name="${name}"
+                                min="${entry.min}"
+                                max="${entry.max}"
+                                step="${entry.kind === "stars" ? "0.1" : "1"}"
+                                placeholder="Off"
+                                value="${escapeHtml(objectiveValue(settings.objectives[name]))}"
+                            >
+                        </div>
+                    `;
+                }).join("")}
+                <div class="toolbar">
+                    <button class="button" type="submit">Save objectives</button>
+                </div>
+            </form>
+            <div id="objectivesNotice"></div>
+        `
+        : "";
+
+    return `
+        <section class="card">
+            <div class="card__head"><h2>Objectives</h2></div>
+            <p class="card__subtitle">
+                ${meeting.length} of ${scanned.length} scanned applications
+                meet every objective.
+            </p>
+            <div class="objective-list">${list}</div>
+            ${form}
+        </section>
+    `;
+}
+
+
+function bindObjectivesForm() {
+    const form = document.getElementById("objectivesForm");
+
+    if (!form) {
+        return;
+    }
+
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const notice = document.getElementById("objectivesNotice");
+
+        const payload = Object.fromEntries(
+            OBJECTIVE_FIELDS.map(name => {
+                const value = form.elements[name].value.trim();
+
+                return [name, value === "" ? null : Number(value)];
+            })
+        );
+
+        try {
+            const response = await apiFetch("/api/objectives", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify(payload),
+            });
+
+            const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.error || "Could not save the objectives.");
+            }
+
+            render(await getJson("/api/repositories"), data);
+        } catch (error) {
+            notice.innerHTML = `
+                <div class="notice notice--error">${escapeHtml(error.message)}</div>
+            `;
+        }
+    });
+}
+
+
 function applicationRow(repository) {
     const scan = repository.latest_scan;
 
@@ -53,6 +198,10 @@ function applicationRow(repository) {
                     : '<span class="muted">-</span>'}
             </td>
 
+            <td data-label="Objectives">
+                ${objectivesCell(scan)}
+            </td>
+
             <td data-label="Findings">
                 ${scan
                     ? severityChips(scan.severity_counts)
@@ -77,11 +226,13 @@ function applicationRow(repository) {
 }
 
 
-function render(data) {
+function render(data, settings) {
     const scanned = data.repositories.filter(item => item.latest_scan);
 
     view.innerHTML = `
         <div id="scanNotice"></div>
+
+        ${objectivesCard(settings, data.repositories)}
 
         <section class="card">
 
@@ -109,6 +260,7 @@ function render(data) {
                             <th>Application</th>
                             <th>Health</th>
                             <th>Maintainability</th>
+                            <th>Objectives</th>
                             <th>Findings</th>
                             <th>Last scan</th>
                             <th></th>
@@ -133,7 +285,7 @@ function render(data) {
 
         rows.innerHTML = matching.length
             ? matching.map(applicationRow).join("")
-            : `<tr><td colspan="5" class="empty">${
+            : `<tr><td colspan="7" class="empty">${
                 data.repositories.length
                     ? "No application matches this search."
                     : "No application scans yet."
@@ -176,6 +328,8 @@ function render(data) {
         }
     });
 
+    bindObjectivesForm();
+
     paint();
 }
 
@@ -215,7 +369,12 @@ async function load() {
     view.innerHTML = '<div class="card empty">Loading applications…</div>';
 
     try {
-        render(await getJson("/api/repositories"));
+        const [data, settings] = await Promise.all([
+            getJson("/api/repositories"),
+            getJson("/api/objectives"),
+        ]);
+
+        render(data, settings);
     } catch (error) {
         view.innerHTML = `
             <div class="notice notice--error">

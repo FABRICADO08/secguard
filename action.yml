@@ -33,6 +33,27 @@ inputs:
   fail-on:
     description: Fail the job on findings at or above this severity (none, informational, low, medium, high, critical).
     default: "none"
+  gate:
+    description: On pull requests, also scan the base commit and fail when the change adds findings, lowers maintainability or newly misses an objective (true/false).
+    default: "true"
+  gate-new-severity:
+    description: Pull-request gate - fail on new findings at or above this severity (none, informational, low, medium, high, critical).
+    default: "high"
+  gate-max-rating-drop:
+    description: Pull-request gate - largest allowed maintainability drop, in stars.
+    default: "0.2"
+  objective-max-critical:
+    description: Objective - critical findings at most. Empty switches it off.
+    default: "0"
+  objective-max-high:
+    description: Objective - high findings at most. Empty switches it off.
+    default: ""
+  objective-min-maintainability:
+    description: Objective - maintainability rating at least, in stars (0.5-5.5). Empty switches it off.
+    default: ""
+  objective-min-health:
+    description: Objective - health score at least (0-100). Empty switches it off.
+    default: ""
   github-token:
     description: Token for the pull-request review and upstream repository activity.
     default: ${{ github.token }}
@@ -146,6 +167,45 @@ runs:
       with:
         name: secguard-report
         path: ${{ runner.temp }}/secguard/
+
+    - name: Scan the pull request's base
+      id: base
+      if: ${{ always() && steps.scan.outputs.report != '' && github.event_name == 'pull_request' && inputs.gate == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.path }}
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+      run: |
+        tree="$RUNNER_TEMP/secguard-base"
+        prefix="$(git rev-parse --show-prefix)"
+        if ! git worktree add --detach "$tree" "$BASE_SHA" >/dev/null 2>&1; then
+          echo "::warning::SecGuard gate skipped: base commit $BASE_SHA is not available. Use actions/checkout with fetch-depth: 0."
+          exit 0
+        fi
+        python -m backend.repository scan "$tree/$prefix" --name "$GITHUB_REPOSITORY" --commit "$BASE_SHA" \
+          --output "$RUNNER_TEMP/secguard-base.json"
+        git worktree remove --force "$tree"
+        echo "report=$RUNNER_TEMP/secguard-base.json" >> "$GITHUB_OUTPUT"
+
+    - name: Pull-request gate
+      if: ${{ always() && steps.base.outputs.report != '' }}
+      shell: bash
+      env:
+        PYTHONPATH: ${{ github.action_path }}
+        BASELINE: ${{ steps.base.outputs.report }}
+        GATE_NEW_SEVERITY: ${{ inputs.gate-new-severity }}
+        GATE_MAX_RATING_DROP: ${{ inputs.gate-max-rating-drop }}
+        OBJECTIVE_MAX_CRITICAL: ${{ inputs.objective-max-critical }}
+        OBJECTIVE_MAX_HIGH: ${{ inputs.objective-max-high }}
+        OBJECTIVE_MIN_MAINTAINABILITY: ${{ inputs.objective-min-maintainability }}
+        OBJECTIVE_MIN_HEALTH: ${{ inputs.objective-min-health }}
+      run: |
+        python -m backend.repository gate --report "$RUNNER_TEMP/secguard/report.json" --baseline "$BASELINE" \
+          --new-severity "$GATE_NEW_SEVERITY" --max-rating-drop "$GATE_MAX_RATING_DROP" \
+          --max-critical "$OBJECTIVE_MAX_CRITICAL" --max-high "$OBJECTIVE_MAX_HIGH" \
+          --min-maintainability "$OBJECTIVE_MIN_MAINTAINABILITY" --min-health "$OBJECTIVE_MIN_HEALTH"
 
     - name: Apply fail-on threshold
       if: ${{ steps.scan.outputs.status != '0' }}

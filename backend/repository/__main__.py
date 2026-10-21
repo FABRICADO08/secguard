@@ -3,6 +3,7 @@ Command line entry point, used by the SecGuard GitHub Action:
 
     python -m backend.repository scan . --output report.json --sarif secguard.sarif
     python -m backend.repository review --report report.json --pull 12
+    python -m backend.repository gate --report head.json --baseline base.json
 """
 
 from __future__ import annotations
@@ -16,6 +17,7 @@ from typing import Any
 
 import requests
 
+from backend.portfolio.objectives import CATALOGUE, gate, gate_markdown
 from backend.repository.mendix import find_projects
 from backend.repository.registry import HttpFetcher, offline_fetcher
 from backend.repository.sarif import to_sarif
@@ -239,6 +241,36 @@ def command_mendix_projects(arguments: argparse.Namespace) -> int:
     return 0
 
 
+def command_gate(arguments: argparse.Namespace) -> int:
+    head = json.loads(Path(arguments.report).read_text(encoding="utf-8"))
+    base = json.loads(Path(arguments.baseline).read_text(encoding="utf-8"))
+    objectives = {name: getattr(arguments, name) for name in CATALOGUE}
+    result = gate(head, base, objectives, arguments.new_severity, arguments.max_rating_drop)
+    text = gate_markdown(result)
+    print(text)
+    summary = arguments.summary or os.environ.get("GITHUB_STEP_SUMMARY", "")
+    if summary:
+        with Path(summary).open("a", encoding="utf-8") as handle:
+            handle.write(text)
+    return 0 if result["passed"] else 1
+
+
+def _optional_number(value: str) -> float | None:
+    return float(value) if value.strip() else None
+
+
+def _add_gate_parser(commands: Any) -> None:
+    gate_parser = commands.add_parser("gate", help="Fail when a pull request makes the application worse than its base.")
+    gate_parser.add_argument("--report", default="secguard-report.json", help="Scan of the pull request.")
+    gate_parser.add_argument("--baseline", required=True, help="Scan of the pull request's base commit.")
+    gate_parser.add_argument("--new-severity", default="high", choices=["none", *SEVERITY_RANK], help="Fail on new findings at or above this severity.")
+    gate_parser.add_argument("--max-rating-drop", type=float, default=0.2, help="Largest allowed maintainability drop, in stars.")
+    for name in CATALOGUE:
+        gate_parser.add_argument(f"--{name.replace('_', '-')}", dest=name, type=_optional_number, default=None, help=f"Objective: {CATALOGUE[name][0].lower()}.")
+    gate_parser.add_argument("--summary", default="", help="Append the result to this file; defaults to $GITHUB_STEP_SUMMARY.")
+    gate_parser.set_defaults(handler=command_gate)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(prog="python -m backend.repository")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -274,6 +306,8 @@ def main(argv: list[str] | None = None) -> int:
     review.add_argument("--token-env", default="GITHUB_TOKEN")
     review.add_argument("--min-severity", default="low", choices=list(SEVERITY_RANK))
     review.set_defaults(handler=command_review)
+
+    _add_gate_parser(commands)
 
     arguments = parser.parse_args(argv)
 
