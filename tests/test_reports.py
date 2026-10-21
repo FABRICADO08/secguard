@@ -176,13 +176,19 @@ def test_alert_and_digest_endpoints_are_admin_only(client, tmp_path, monkeypatch
     data = client.get("/api/alerts").get_json()
     assert data["channels"] == {"slack": True, "teams": False, "email": False} and data["can_edit"] is True
     assert client.post("/api/alerts/test").get_json() == {"success": True, "results": {"slack": "sent"}}
-    ingest(client, tmp_path, "acme/api", VULNERABLE, "api")
-    assert client.post("/api/reports/digest").status_code == 200
-    assert sent[-1].title == "SecGuard weekly digest" and any(line.startswith("- api:") for line in sent[-1].lines)
     monkeypatch.setattr(settings, "API_TOKEN", "token")
     assert client.post("/api/alerts/test").status_code == 403
     assert client.post("/api/reports/digest").status_code == 403
     assert client.get("/api/alerts").get_json()["can_edit"] is False
+
+
+def test_admin_sends_the_digest(client, tmp_path, monkeypatch):
+    sent = []
+    monkeypatch.setattr("backend.route_reports.send", lambda message: sent.append(message) or {"slack": "sent"})
+    monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
+    ingest(client, tmp_path, "acme/api", VULNERABLE, "api")
+    assert client.post("/api/reports/digest").status_code == 200
+    assert sent[-1].title == "SecGuard weekly digest" and any(line.startswith("- api:") for line in sent[-1].lines)
 
 
 def test_digest_counts_findings_added_this_week(client, tmp_path):
