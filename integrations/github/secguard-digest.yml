@@ -1,0 +1,24 @@
+# Sends the SecGuard weekly digest every Monday at 07:00 UTC.
+# Repository secrets: SECGUARD_URL (e.g. https://secguard.example.com) and
+# SECGUARD_API_TOKEN (the server's API token).
+name: SecGuard weekly digest
+
+on:
+  schedule:
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  digest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send digest
+        env:
+          SECGUARD_URL: ${{ secrets.SECGUARD_URL }}
+          SECGUARD_API_TOKEN: ${{ secrets.SECGUARD_API_TOKEN }}
+        run: |
+          curl --fail-with-body --silent --show-error -X POST \
+            -H "X-API-Key: $SECGUARD_API_TOKEN" \
+            "$SECGUARD_URL/api/reports/digest"

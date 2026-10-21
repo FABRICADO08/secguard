@@ -219,6 +219,22 @@ On pull requests the action also scans the base commit and runs `python -m backe
 
 Problems that already exist on the base branch never fail a pull request. Set `gate: false` to switch the gate off. The gate needs the base commit, so check out with `fetch-depth: 0`. Results are written to the job summary.
 
+### Alerts, weekly digest and PDF reports
+
+When an uploaded scan adds findings at or above `SECGUARD_ALERT_MIN_SEVERITY` (default `critical`; `high`, `medium` and `low` also work) compared with that application's previous scan, SecGuard sends an alert to every configured channel. Findings are matched like the pull-request gate, so moved lines are not new. Configure the channels in the server environment; webhook URLs and SMTP passwords are credentials and are never shown in the UI.
+
+| Variable | Purpose |
+| --- | --- |
+| `SECGUARD_SLACK_WEBHOOK_URL` | Slack incoming-webhook URL (https only) |
+| `SECGUARD_TEAMS_WEBHOOK_URL` | Microsoft Teams Workflows webhook URL; receives an Adaptive Card (https only) |
+| `SECGUARD_SMTP_HOST`, `SECGUARD_SMTP_PORT` (587), `SECGUARD_SMTP_USERNAME`, `SECGUARD_SMTP_PASSWORD`, `SECGUARD_SMTP_FROM` | Email delivery; STARTTLS on 587, implicit TLS on 465 |
+| `SECGUARD_ALERT_EMAILS` | Comma-separated recipients |
+| `SECGUARD_PUBLIC_URL` | Base URL of this server, used for links in alerts and digests |
+
+**Settings > Alerts and digest** shows which channels are configured; administrators can send a test alert and the weekly digest from there (`POST /api/alerts/test`, `POST /api/reports/digest`). The digest lists every scanned application with its health, maintainability, open critical/high findings, objective status and the findings added in the last seven days. Schedule it with cron on the server (`python -m backend.reports digest`, `--dry-run` prints it) or from GitHub Actions with `integrations/github/secguard-digest.yml`.
+
+PDF management reports: **PDF report** on an application's health page (`GET /api/applications/<id>/report.pdf`) and **Portfolio PDF** on My Applications (`GET /api/reports/portfolio.pdf`, limited to the applications the signed-in user can read).
+
 ### Mendix applications on GitHub
 
 For every Mendix project (`*.mpr`, outside `node_modules`, `deployment`, `releases` and `.mendix-cache`; list them with `python -m backend.repository mendix-projects`), the action downloads the matching MxBuild from `https://cdn.mendix.com/runtime/mxbuild-<version>.tar.gz`, exports the model with `mx dump-mpr` (Mendix 10.4 and later) and runs the Mendix security rules on it. The findings (`MXSEC-*`) are part of the application's report, located at their `.mpr` file, and count towards its security health. A project whose export fails is shown as *Not analysed* with the reason on the Application Health page, instead of looking clean. The version is read from each `.mpr`; set the `mendix-version:` input if that fails, or `mendix: false` to skip the export. Locally, pass `--mendix-model` an export file (single project) or a directory holding `<project path>.json`, e.g. `exports/billing/Billing.mpr.json`.

@@ -310,6 +310,10 @@ function render(application, access) {
                     <a class="button button--ghost" href="${sbom("spdx")}">
                         SPDX SBOM
                     </a>
+                    <a class="button button--ghost"
+                        href="/api/applications/${encodeURIComponent(applicationId)}/report.pdf">
+                        PDF report
+                    </a>
                 </div>
             </div>
             <dl class="pairs">

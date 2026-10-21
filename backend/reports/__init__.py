@@ -1,1 +1,1 @@
-"""Module placeholder. Implement this component in the next development stage."""
+"""PDF management reports and the weekly portfolio digest."""

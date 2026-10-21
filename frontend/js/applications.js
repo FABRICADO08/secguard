@@ -245,6 +245,9 @@ function render(data, settings) {
                         placeholder="Search applications"
                         aria-label="Search applications"
                     >
+                    <a class="button button--ghost" href="/api/reports/portfolio.pdf">
+                        Portfolio PDF
+                    </a>
                 </div>
             </div>
 

@@ -45,6 +45,11 @@ view.innerHTML = `
 
     </section>
 
+    <section class="card" id="alertsCard">
+        <div class="card__head"><h2>Alerts and digest</h2></div>
+        <p class="muted">Loading…</p>
+    </section>
+
     <section class="card">
         <div class="card__head"><h2>Service</h2></div>
         <dl class="pairs" id="health">
@@ -90,5 +95,82 @@ getJson("/api/health")
         document.getElementById("health").innerHTML = `
             <dt>Status</dt>
             <dd>${escapeHtml(error.message || "Unreachable")}</dd>
+        `;
+    });
+
+
+const CHANNEL_LABELS = { slack: "Slack", teams: "Microsoft Teams", email: "Email" };
+
+
+async function postAlertAction(url, status) {
+    status.textContent = "Sending…";
+
+    try {
+        const response = await apiFetch(url, { method: "POST" });
+
+        const data = await response.json();
+
+        if (!response.ok && !data.results) {
+            throw new Error(data.error || "Request failed.");
+        }
+
+        status.textContent = Object.entries(data.results)
+            .map(([channel, result]) => `${CHANNEL_LABELS[channel] || channel}: ${result}`)
+            .join(" · ");
+    } catch (error) {
+        status.textContent = error.message;
+    }
+}
+
+
+function renderAlerts(settings) {
+    const card = document.getElementById("alertsCard");
+
+    const channels = Object.entries(settings.channels)
+        .map(([channel, enabled]) => `
+            <dt>${escapeHtml(CHANNEL_LABELS[channel] || channel)}</dt>
+            <dd>${enabled
+                ? '<span class="pill pill--met">Configured</span>'
+                : '<span class="muted">Not configured</span>'}</dd>
+        `)
+        .join("");
+
+    const anyChannel = Object.values(settings.channels).some(Boolean);
+
+    card.innerHTML = `
+        <div class="card__head"><h2>Alerts and digest</h2></div>
+        <p class="muted">
+            A scan that adds a ${escapeHtml(settings.min_severity)} finding
+            ${settings.min_severity === "critical" ? "" : "or worse "}sends an alert
+            to every configured channel. Channels are set on the server with
+            <span class="mono">SECGUARD_SLACK_WEBHOOK_URL</span>,
+            <span class="mono">SECGUARD_TEAMS_WEBHOOK_URL</span> and the
+            <span class="mono">SECGUARD_SMTP_*</span> settings.
+        </p>
+        <dl class="pairs">${channels}</dl>
+        ${settings.can_edit && anyChannel ? `
+            <div class="toolbar">
+                <button class="button button--ghost" id="testAlert" type="button">Send test alert</button>
+                <button class="button button--ghost" id="sendDigest" type="button">Send weekly digest now</button>
+                <span id="alertStatus" class="muted" role="status"></span>
+            </div>` : ""}
+    `;
+
+    const status = document.getElementById("alertStatus");
+
+    document.getElementById("testAlert")?.addEventListener("click", () =>
+        postAlertAction("/api/alerts/test", status));
+
+    document.getElementById("sendDigest")?.addEventListener("click", () =>
+        postAlertAction("/api/reports/digest", status));
+}
+
+
+getJson("/api/alerts")
+    .then(renderAlerts)
+    .catch(error => {
+        document.getElementById("alertsCard").innerHTML = `
+            <div class="card__head"><h2>Alerts and digest</h2></div>
+            <p class="muted">${escapeHtml(error.message)}</p>
         `;
     });

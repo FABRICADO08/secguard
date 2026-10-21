@@ -129,3 +129,31 @@ if not SECRET_KEY and GITHUB_CLIENT_SECRET:
 SESSION_COOKIE_SECURE = _bool_env("SECGUARD_SECURE_COOKIES")
 
 SESSION_HOURS = _int_env("SECGUARD_SESSION_HOURS", 8)
+
+# Alerts and the weekly digest. Webhook URLs and SMTP credentials are
+# secrets: configure them in the server environment, never in the UI.
+SLACK_WEBHOOK_URL = os.environ.get("SECGUARD_SLACK_WEBHOOK_URL", "").strip()
+
+TEAMS_WEBHOOK_URL = os.environ.get("SECGUARD_TEAMS_WEBHOOK_URL", "").strip()
+
+SMTP_HOST = os.environ.get("SECGUARD_SMTP_HOST", "").strip()
+
+SMTP_PORT = _int_env("SECGUARD_SMTP_PORT", 587)
+
+SMTP_USERNAME = os.environ.get("SECGUARD_SMTP_USERNAME", "").strip()
+
+SMTP_PASSWORD = os.environ.get("SECGUARD_SMTP_PASSWORD", "")
+
+SMTP_FROM = os.environ.get("SECGUARD_SMTP_FROM", "").strip() or SMTP_USERNAME
+
+ALERT_EMAILS = tuple(
+    address.strip()
+    for address in os.environ.get("SECGUARD_ALERT_EMAILS", "").split(",")
+    if address.strip()
+)
+
+# Lowest severity of a newly introduced finding that triggers an alert.
+ALERT_MIN_SEVERITY = os.environ.get("SECGUARD_ALERT_MIN_SEVERITY", "critical").strip().lower()
+
+# Base URL of this server, used for links in alerts and digests.
+PUBLIC_URL = os.environ.get("SECGUARD_PUBLIC_URL", "").strip().rstrip("/")

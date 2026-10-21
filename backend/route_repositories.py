@@ -3,6 +3,11 @@
 from flask import jsonify, request
 
 from backend.config import settings
+from backend.notifications import alerts
+from backend.portfolio.applications import application_name as _application_name
+from backend.portfolio.applications import (
+    latest_repository_scans as _latest_repository_scans,
+)
 from backend.portfolio.objectives import evaluate
 from backend.repository.ingest import application_from_report
 from backend.repository.sbom import cyclonedx, spdx
@@ -19,6 +24,7 @@ from backend.storage.scans import (
     save_application,
 )
 
+
 def _repository_report(application_id: str) -> dict | None:
     """Load a repository report and its stored findings, if available."""
     if not application_exists(application_id):
@@ -31,32 +37,6 @@ def _repository_report(application_id: str) -> dict | None:
         **report,
         "findings": application.get("security", {}).get("findings", []),
     }
-
-
-def _latest_repository_scans() -> dict[str, dict]:
-    """Return the most recently updated repository scan per repository."""
-    latest = {}
-    for application in list_applications():
-        if application.get("platform") != "Repository":
-            continue
-        key = github_auth.repository_name(application).lower()
-        if key and str(application.get("updated_at") or "") >= str(
-            (latest.get(key) or {}).get("updated_at") or ""
-        ):
-            latest[key] = application
-    return latest
-
-
-def _application_name(repository: str, application: dict | None) -> str:
-    """Resolve the display name configured for a repository application."""
-    stored = str((application or {}).get("name") or "")
-    if stored.lower() == repository.lower():
-        stored = ""
-    return (
-        application_names.name_for(repository)
-        or stored
-        or repository.rsplit("/", 1)[-1]
-    )
 
 
 def _scan_summary(application: dict | None) -> dict | None:
@@ -130,6 +110,14 @@ def _rename_stored_applications(full_name, label):
             save_application(record)
 
 
+def _previous_findings(key: str) -> list[dict] | None:
+    """Findings of the application's latest stored scan, or None before its first scan."""
+    previous = _latest_repository_scans().get(key)
+    if previous is None:
+        return None
+    return (load_application(previous["id"]).get("security") or {}).get("findings") or []
+
+
 def _register_ingest_route(app, compatibility):
     @app.post("/api/repository/scans")
     @require_api_token
@@ -155,8 +143,14 @@ def _register_ingest_route(app, compatibility):
                 }
             ), 400
         application.update_timestamp()
+        key = github_auth.repository_name(application.to_dict()).lower()
+        previous = _previous_findings(key) if alerts.enabled() else None
         save_application(application.to_dict())
         save_findings(application.id, findings)
+        if alerts.enabled():
+            alerts.notify_new_findings(
+                _application_name(key, application.to_dict()), application.id, previous, findings
+            )
         return jsonify(
             {
                 "success": True,
