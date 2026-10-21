@@ -159,7 +159,7 @@ jobs:
 
 def test_workflow_permissions_checkout_injection_and_pinning():
     assert rules(infrastructure_issues(".github/workflows/ci.yml", WORKFLOW)) == [
-        ("REPO-IAC-012", 1), ("REPO-IAC-013", 9), ("REPO-IAC-013", 16), ("REPO-IAC-014", 13), ("REPO-IAC-014", 16),
+        ("REPO-IAC-012", 4), ("REPO-IAC-013", 9), ("REPO-IAC-013", 16), ("REPO-IAC-014", 13), ("REPO-IAC-014", 16),
         ("REPO-IAC-015", 10),
     ]
     assert rules(infrastructure_issues(".github/workflows/a.yml", "on: push\npermissions: write-all\n")) == [("REPO-IAC-012", 2)]
@@ -197,3 +197,63 @@ def test_infrastructure_findings_reach_sarif_and_storage(tmp_path):
     assert {rule["id"] for rule in to_sarif(report)["runs"][0]["tool"]["driver"]["rules"]} >= {"REPO-IAC-010"}
     _, stored = application_from_report(report)
     assert any(finding["rule_id"] == "REPO-IAC-010" and finding["recommendation"] for finding in stored)
+
+
+def test_inherited_non_root_user_is_respected():
+    inherited = "FROM alpine:3.20 AS build\nUSER 10001\nFROM build\nRUN echo ready\n"
+    assert infrastructure_issues("Dockerfile", inherited) == []
+    reset = "FROM alpine:3.20 AS build\nUSER 10001\nFROM build AS app\nUSER root\nFROM app\n"
+    assert rules(infrastructure_issues("Dockerfile", reset)) == [("REPO-IAC-001", 4)]
+
+
+def test_remote_script_snippet_drops_credentials():
+    text = 'FROM alpine:3.20\nUSER app\nRUN curl -H "Authorization: Bearer s3cr3t" -u bob:hunter2 https://ci:pw@example.test/i.sh?token=t0k | sh\n'
+    (issue,) = infrastructure_issues("Dockerfile", text)
+    assert issue.rule_id == "REPO-IAC-004"
+    assert not any(value in issue.snippet for value in ("s3cr3t", "hunter2", "pw@", "t0k"))
+
+
+def test_kubernetes_suppression_only_hides_its_line():
+    text = """apiVersion: v1
+kind: Pod
+spec:
+  hostNetwork: true # secguard-ignore
+  containers:
+    - name: api
+      securityContext:
+        privileged: true
+"""
+    assert rules(infrastructure_issues("pod.yaml", text)) == [("REPO-IAC-005", 8), ("REPO-IAC-006", 2), ("REPO-IAC-007", 2)]
+    assert rules(infrastructure_issues("pod.yaml", text.replace("kind: Pod", "kind: Pod # secguard-ignore"))) == [("REPO-IAC-005", 8)]
+
+
+def test_jobs_without_permissions_are_reported_individually():
+    text = """on: push
+jobs:
+  lint:
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+  deploy:
+    runs-on: ubuntu-latest
+"""
+    assert rules(infrastructure_issues(".github/workflows/c.yml", text)) == [("REPO-IAC-012", 7)]
+    assert infrastructure_issues(".github/workflows/c.yml", "permissions: {}\n" + text) == []
+
+
+def test_indirect_pull_request_checkouts_are_reported():
+    text = """on: pull_request_target
+permissions:
+  contents: read
+jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          ref: refs/pull/${{ github.event.number }}/merge
+      - run: gh pr checkout 1
+"""
+    assert rules(infrastructure_issues(".github/workflows/d.yml", text)) == [
+        ("REPO-IAC-013", 9), ("REPO-IAC-013", 10), ("REPO-IAC-013", 11),
+    ]

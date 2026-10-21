@@ -6,9 +6,14 @@ import re
 
 from backend.repository.code_issues import SecurityIssue, snippet, suppressed
 
-_PERMISSIONS = re.compile(r"^\s*permissions\s*:")
+_TOP_PERMISSIONS = re.compile(r"^permissions\s*:")
+_PERMISSIONS = re.compile(r"^\s+permissions\s*:")
 _WRITE_ALL = re.compile(r"^\s*permissions\s*:\s*write-all\b")
-_HEAD_CHECKOUT = re.compile(r"\$\{\{\s*github\.(?:event\.pull_request\.head\.(?:sha|ref)|head_ref)\s*\}\}")
+_HEAD_CHECKOUT = re.compile(
+    r"\$\{\{\s*github\.(?:event\.pull_request\.head\.(?:sha|ref|repo\.full_name)|head_ref)\s*\}\}"
+    r"|refs/pull/\$\{\{\s*github\.event\.(?:pull_request\.)?number\s*\}\}/(?:merge|head)"
+    r"|\bgh\s+pr\s+checkout\b"
+)
 _UNTRUSTED = re.compile(
     r"\$\{\{\s*(github\.head_ref|github\.event\.(?!repository\.|inputs\.|sender\.)[\w.*\[\]-]*\."
     r"(?:title|body|message|label|name|email|ref|head_ref|default_branch|page_name))\s*\}\}"
@@ -34,15 +39,60 @@ def _run_lines(lines: list[str]) -> list[int]:
     return result
 
 
+def _indent(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+def _jobs_body(lines: list[str]) -> list[tuple[int, str]]:
+    """Non-blank, non-comment (index, line) pairs nested under the top-level `jobs:` key."""
+    start = next((index for index, line in enumerate(lines) if re.match(r"^jobs\s*:\s*(?:#.*)?$", line)), len(lines))
+    body = []
+    for index in range(start + 1, len(lines)):
+        line = lines[index]
+        if line.strip() and not line.lstrip().startswith("#"):
+            if _indent(line) == 0:
+                break
+            body.append((index, line))
+    return body
+
+
+def _jobs(lines: list[str]) -> list[tuple[int, list[str]]]:
+    """(line number, block lines) for each job under the top-level `jobs:` key."""
+    body = _jobs_body(lines)
+    depth = _indent(body[0][1]) if body else 0
+    headers = [position for position, (_, line) in enumerate(body) if _indent(line) == depth]
+    return [(body[first][0] + 1, [line for _, line in body[first:last]])
+            for first, last in zip(headers, [*headers[1:], len(body)])]
+
+
+def _write_all(path: str, lines: list[str]) -> list[SecurityIssue]:
+    return [
+        SecurityIssue("REPO-IAC-012", path, number,
+                      "`permissions: write-all` gives every step a token that can write to the repository.", snippet(line))
+        for number, line in enumerate(lines, start=1)
+        if _WRITE_ALL.match(line) and not suppressed(line)
+    ][:1]
+
+
+def _unrestricted_jobs(path: str, lines: list[str]) -> list[SecurityIssue]:
+    jobs = _jobs(lines)
+    if not jobs:
+        return [SecurityIssue("REPO-IAC-012", path, 1,
+                              "The workflow sets no `permissions`, so its token gets the repository's default (often write) access.")]
+    return [
+        SecurityIssue("REPO-IAC-012", path, number,
+                      f"Job `{block[0].strip().rstrip(':')}` sets no `permissions` and the workflow has no top-level default, "
+                      "so its token gets the repository's default (often write) access.", snippet(block[0]))
+        for number, block in jobs
+        if not suppressed(block[0]) and not any(_PERMISSIONS.match(line) for line in block[1:])
+    ]
+
+
 def _permission_issues(path: str, lines: list[str]) -> list[SecurityIssue]:
-    for number, line in enumerate(lines, start=1):
-        if _WRITE_ALL.match(line) and not suppressed(line):
-            return [SecurityIssue("REPO-IAC-012", path, number,
-                                  "`permissions: write-all` gives every step a token that can write to the repository.", snippet(line))]
-    if any(_PERMISSIONS.match(line) for line in lines):
-        return []
-    return [SecurityIssue("REPO-IAC-012", path, 1,
-                          "The workflow sets no `permissions`, so its token gets the repository's default (often write) access.")]
+    write_all = _write_all(path, lines)
+    if write_all or any(_TOP_PERMISSIONS.match(line) for line in lines):
+        return write_all
+    return _unrestricted_jobs(path, lines)
 
 
 def _checkout_issues(path: str, text: str, lines: list[str]) -> list[SecurityIssue]:

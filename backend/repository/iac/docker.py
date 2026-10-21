@@ -9,6 +9,11 @@ from backend.repository.code_issues import SecurityIssue, snippet, suppressed
 _SECRET_NAME = re.compile(r"(?:password|passwd|secret|token|api[_-]?key|private[_-]?key|access[_-]?key)", re.IGNORECASE)
 _PIPE_TO_SHELL = re.compile(r"\b(?:curl|wget)\b[^|;&]*\|\s*(?:sudo\s+)?(?:sh|bash|zsh|ash|dash)\b")
 _ROOT_USERS = frozenset({"root", "0", "root:root", "0:0"})
+_CREDENTIAL_ARGUMENTS = (
+    (re.compile(r"(\s(?:-u|--user|-H|--header|--password|--http-password|--header=)\s*)(\"[^\"]*\"|'[^']*'|\S+)"), r"\1[REDACTED]"),
+    (re.compile(r"(://)[^/\s@]+@"), r"\1[REDACTED]@"),
+    (re.compile(r"(https?://[^\s?#]+)\?\S+"), r"\1?[REDACTED]"),
+)
 
 
 def _instructions(text: str) -> list[tuple[int, str, str]]:
@@ -61,26 +66,40 @@ def _base_image_issues(path: str, steps: list[tuple[int, str, str]]) -> list[Sec
     return issues
 
 
-def _runs_as_root(image: str, users: list[tuple[int, str, str]]) -> bool:
-    if not users:
-        return "nonroot" not in image.lower()
-    return users[-1][2].strip().lower() in _ROOT_USERS
+def _stages(steps: list[tuple[int, str, str]]) -> list[list[tuple[int, str, str]]]:
+    starts = [index for index, step in enumerate(steps) if step[1] == "FROM"]
+    return [steps[start:end] for start, end in zip(starts, [*starts[1:], len(steps)])]
+
+
+def _effective_user(stage: list[tuple[int, str, str]], users: dict[str, tuple[int, str] | None]) -> tuple[int, str] | None:
+    """Last `USER` (line, name) in effect at the end of a stage, inheriting from a parent stage alias."""
+    image, _ = _image(stage[0][2])
+    own = [(line, arguments.strip()) for line, instruction, arguments in stage if instruction == "USER"]
+    if own:
+        return own[-1]
+    return users.get(image.lower())
 
 
 def _root_issue(path: str, steps: list[tuple[int, str, str]]) -> list[SecurityIssue]:
-    stages = [index for index, step in enumerate(steps) if step[1] == "FROM"]
+    stages = _stages(steps)
     if not stages:
         return []
-    final = steps[stages[-1]:]
+    users: dict[str, tuple[int, str] | None] = {}
+    for stage in stages:
+        _, alias = _image(stage[0][2])
+        if alias:
+            users[alias] = _effective_user(stage, users)
+    final = stages[-1]
     image, _ = _image(final[0][2])
-    users = [step for step in final if step[1] == "USER"]
-    if not _runs_as_root(image, users):
+    user = _effective_user(final, users)
+    if user is None:
+        if "nonroot" in image.lower():
+            return []
+        return [SecurityIssue("REPO-IAC-001", path, final[0][0],
+                              "The final image stage has no `USER` instruction, so the container runs as root.", f"FROM {image}")]
+    if user[1].lower() not in _ROOT_USERS:
         return []
-    if users:
-        return [SecurityIssue("REPO-IAC-001", path, users[-1][0], "The final stage switches back to the root user.",
-                              f"USER {users[-1][2]}")]
-    return [SecurityIssue("REPO-IAC-001", path, final[0][0],
-                          "The final image stage has no `USER` instruction, so the container runs as root.", f"FROM {image}")]
+    return [SecurityIssue("REPO-IAC-001", path, user[0], "The final stage runs as the root user.", f"USER {user[1]}")]
 
 
 def _secret_issues(path: str, line: int, instruction: str, arguments: str) -> list[SecurityIssue]:
@@ -104,7 +123,13 @@ def _remote_issues(path: str, line: int, instruction: str, arguments: str) -> li
         message = "`ADD` downloads a remote file without a `--checksum`, so its contents are not verified."
     else:
         return []
-    return [SecurityIssue("REPO-IAC-004", path, line, message, snippet(f"{instruction} {arguments}"))]
+    return [SecurityIssue("REPO-IAC-004", path, line, message, snippet(_without_credentials(f"{instruction} {arguments}")))]
+
+
+def _without_credentials(command: str) -> str:
+    for pattern, replacement in _CREDENTIAL_ARGUMENTS:
+        command = pattern.sub(replacement, command)
+    return command
 
 
 def dockerfile_issues(path: str, text: str) -> list[SecurityIssue]:
