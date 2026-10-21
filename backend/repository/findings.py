@@ -26,6 +26,8 @@ A08 = "A08:2021 Software and Data Integrity Failures"
 A03 = "A03:2021 Injection"
 A05 = "A05:2021 Security Misconfiguration"
 A07 = "A07:2021 Identification and Authentication Failures"
+A02 = "A02:2021 Cryptographic Failures"
+A01 = "A01:2021 Broken Access Control"
 
 RULE_CATALOGUE: dict[str, dict[str, str]] = {
     "REPO-DEP-001": {"title": "Dependency has a known vulnerability", "category": SUPPLY_CHAIN, "cwe": "CWE-1395", "owasp": A06},
@@ -51,6 +53,21 @@ RULE_CATALOGUE: dict[str, dict[str, str]] = {
     "REPO-SEC-006": {"title": "Secret in git history", "category": INFORMATION_DISCLOSURE, "cwe": "CWE-798", "owasp": A07},
     "REPO-SEC-007": {"title": "TLS certificate validation disabled", "category": TRANSPORT, "cwe": "CWE-295", "owasp": A07},
     "REPO-SEC-008": {"title": "Debug mode enabled", "category": CONFIGURATION, "cwe": "CWE-489", "owasp": A05},
+    "REPO-IAC-001": {"title": "Container runs as root", "category": CONFIGURATION, "cwe": "CWE-250", "owasp": A05},
+    "REPO-IAC-002": {"title": "Container base image is not pinned", "category": SUPPLY_CHAIN, "cwe": "CWE-1357", "owasp": A08},
+    "REPO-IAC-003": {"title": "Secret baked into container image", "category": INFORMATION_DISCLOSURE, "cwe": "CWE-798", "owasp": A07},
+    "REPO-IAC-004": {"title": "Remote file used without integrity check", "category": SUPPLY_CHAIN, "cwe": "CWE-494", "owasp": A08},
+    "REPO-IAC-005": {"title": "Workload has host-level privileges", "category": CONFIGURATION, "cwe": "CWE-250", "owasp": A05},
+    "REPO-IAC-006": {"title": "Workload may run as root", "category": CONFIGURATION, "cwe": "CWE-250", "owasp": A05},
+    "REPO-IAC-007": {"title": "Workload has no resource limits", "category": CONFIGURATION, "cwe": "CWE-770", "owasp": A05},
+    "REPO-IAC-008": {"title": "Storage is publicly accessible", "category": CONFIGURATION, "cwe": "CWE-732", "owasp": A01},
+    "REPO-IAC-009": {"title": "Admin port open to the internet", "category": CONFIGURATION, "cwe": "CWE-284", "owasp": A05},
+    "REPO-IAC-010": {"title": "Database is publicly accessible", "category": CONFIGURATION, "cwe": "CWE-284", "owasp": A05},
+    "REPO-IAC-011": {"title": "Encryption at rest disabled", "category": CONFIGURATION, "cwe": "CWE-311", "owasp": A02},
+    "REPO-IAC-012": {"title": "Workflow token permissions are not restricted", "category": CONFIGURATION, "cwe": "CWE-272", "owasp": A05},
+    "REPO-IAC-013": {"title": "Workflow runs untrusted pull-request code with secrets", "category": CONFIGURATION, "cwe": "CWE-829", "owasp": A08},
+    "REPO-IAC-014": {"title": "Script injection in workflow", "category": INPUT_VALIDATION, "cwe": "CWE-78", "owasp": A03},
+    "REPO-IAC-015": {"title": "Third-party action is not pinned to a commit", "category": SUPPLY_CHAIN, "cwe": "CWE-829", "owasp": A08},
     "REPO-MNT-001": {"title": "Function is too complex", "category": MAINTAINABILITY, "cwe": "CWE-1121", "owasp": ""},
     "REPO-MNT-002": {"title": "Function is too long", "category": MAINTAINABILITY, "cwe": "CWE-1080", "owasp": ""},
     "REPO-MNT-003": {"title": "Function has too many parameters", "category": MAINTAINABILITY, "cwe": "CWE-1064", "owasp": ""},
@@ -81,6 +98,21 @@ QUALITY_RECOMMENDATIONS = {
 }
 
 CODE_SECURITY_RECOMMENDATIONS = {
+    "REPO-IAC-001": "Create an unprivileged user in the image and switch to it with `USER` in the final stage.",
+    "REPO-IAC-002": "Pin the base image to a specific version tag, ideally with its `@sha256:` digest, and update it deliberately.",
+    "REPO-IAC-003": "Remove the value from the Dockerfile, rotate it, and pass it at runtime or with a BuildKit `--secret` mount.",
+    "REPO-IAC-004": "Download to a file, verify a published checksum or signature, then run it; give `ADD` a `--checksum`.",
+    "REPO-IAC-005": "Remove privileged mode, host namespaces and hostPath volumes, and set `allowPrivilegeEscalation: false`.",
+    "REPO-IAC-006": "Set `runAsNonRoot: true` and a non-zero `runAsUser` in the pod or container `securityContext`.",
+    "REPO-IAC-007": "Set CPU and memory `resources.limits` (and requests) for every container.",
+    "REPO-IAC-008": "Keep storage private, enable every public access block setting, and share data through signed URLs or identities.",
+    "REPO-IAC-009": "Restrict SSH/RDP to known address ranges or a bastion/VPN, or use a managed session service instead.",
+    "REPO-IAC-010": "Set `publicly_accessible = false` and reach the database from private networks only.",
+    "REPO-IAC-011": "Turn encryption at rest on, preferably with a customer-managed key.",
+    "REPO-IAC-012": "Add a top-level `permissions:` block granting only what the jobs need, e.g. `contents: read`.",
+    "REPO-IAC-013": "Use `pull_request` for untrusted code, or keep `pull_request_target` jobs from checking out and running the PR's code.",
+    "REPO-IAC-014": "Pass the value through an `env:` variable and quote it in the script (`\"$TITLE\"`) instead of `${{ }}` interpolation.",
+    "REPO-IAC-015": "Pin the action to a full commit SHA (with the version in a comment) and let Dependabot update it.",
     "REPO-SEC-001": "Use parameterized queries or the ORM's query builder; never put untrusted values into the SQL text.",
     "REPO-SEC-002": "Pass the command as an argument list without a shell, and validate any user-controlled argument against an allow-list.",
     "REPO-SEC-003": "Remove dynamic code evaluation; parse data with a safe parser such as JSON, or dispatch through a fixed lookup table.",
@@ -92,6 +124,10 @@ CODE_SECURITY_RECOMMENDATIONS = {
 }
 
 CODE_SECURITY_SEVERITY = {
+    "REPO-IAC-001": "medium", "REPO-IAC-002": "low", "REPO-IAC-003": "high", "REPO-IAC-004": "medium",
+    "REPO-IAC-005": "high", "REPO-IAC-006": "medium", "REPO-IAC-007": "low", "REPO-IAC-008": "high",
+    "REPO-IAC-009": "high", "REPO-IAC-010": "high", "REPO-IAC-011": "medium", "REPO-IAC-012": "medium",
+    "REPO-IAC-013": "high", "REPO-IAC-014": "high", "REPO-IAC-015": "low",
     "REPO-SEC-001": "high", "REPO-SEC-002": "high", "REPO-SEC-003": "high", "REPO-SEC-004": "high",
     "REPO-SEC-005": "high", "REPO-SEC-006": "high", "REPO-SEC-007": "medium", "REPO-SEC-008": "medium",
 }
