@@ -233,6 +233,8 @@ When an uploaded scan adds findings at or above `SECGUARD_ALERT_MIN_SEVERITY` (d
 
 **Settings > Alerts and digest** shows which channels are configured; administrators can send a test alert and the weekly digest from there (`POST /api/alerts/test`, `POST /api/reports/digest`). The digest lists every scanned application with its health, maintainability, open critical/high findings, objective status and the findings added in the last seven days. Schedule it with cron on the server (`python -m backend.reports digest`, `--dry-run` prints it) or from GitHub Actions with `integrations/github/secguard-digest.yml`.
 
+Alerts and the digest cover every GitHub-connected application on the server regardless of who can read its repository, so send them only to channels and addresses whose members may see the whole portfolio.
+
 PDF management reports: **PDF report** on an application's health page (`GET /api/applications/<id>/report.pdf`) and **Portfolio PDF** on My Applications (`GET /api/reports/portfolio.pdf`, limited to the applications the signed-in user can read).
 
 ### Mendix applications on GitHub

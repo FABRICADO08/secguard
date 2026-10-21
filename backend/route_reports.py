@@ -11,7 +11,7 @@ from backend.notifications.channels import Message, configured, send
 from backend.portfolio.applications import application_name, latest_repository_scans
 from backend.portfolio.objectives import evaluate
 from backend.reports.digest import digest_message, digest_rows
-from backend.reports.documents import application_report, portfolio_report, scan_summary
+from backend.reports.documents import application_report, portfolio_report
 from backend.route_objectives import _signed_out, can_edit
 from backend.security import github_auth
 from backend.storage import objectives as objective_store
@@ -31,13 +31,18 @@ def _pdf(content: bytes, name: str) -> Response:
     )
 
 
+def _summary_scan(summary: dict) -> dict:
+    return {key: summary.get(key) for key in ("severity_counts", "maintainability", "health")}
+
+
 def _deliver(message: Message):
     if not can_edit():
         return jsonify({"success": False, "error": _ADMIN_ONLY}), 403
     if not any(configured().values()):
         return jsonify({"success": False, "error": _NO_CHANNEL}), 409
     results = send(message)
-    return jsonify({"success": all(result == "sent" for result in results.values()), "results": results})
+    success = all(result == "sent" for result in results.values())
+    return jsonify({"success": success, "results": results}), 200 if success else 502
 
 
 def _register_alert_routes(app):
@@ -94,7 +99,7 @@ def _register_pdf_routes(app):
         rows = []
         for key in keys:
             summary = latest.get(key)
-            scan = scan_summary(load_application(summary["id"])) if summary else None
+            scan = _summary_scan(summary) if summary else None
             rows.append(
                 {
                     "name": application_name(key, summary),

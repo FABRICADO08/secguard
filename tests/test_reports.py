@@ -194,9 +194,9 @@ def test_digest_counts_findings_added_this_week(client, tmp_path):
     ingest(client, tmp_path, "acme/web", VULNERABLE, "web")
     rows = {row["name"]: row for row in digest_rows()}
     assert rows["api"]["new_high"] == 1 and rows["api"]["new_critical"] == 0
-    assert rows["web"]["new_high"] is None
+    assert rows["web"]["new_high"] == 1
     message = digest_message(list(rows.values()))
-    assert "new this week: 0 critical, 1 high" in message.lines[1]
+    assert "new this week: 0 critical, 2 high" in message.lines[1]
     assert digest_message([]).lines[-1] == "No applications have been scanned yet."
 
 
@@ -204,3 +204,18 @@ def test_digest_cli_dry_run_and_unconfigured(client, capsys):
     assert reports_main(["digest", "--dry-run"]) == 0
     assert "SecGuard weekly digest" in capsys.readouterr().out
     assert reports_main(["digest"]) == 2
+
+
+def test_digest_without_a_scan_inside_or_before_the_week(client, tmp_path):
+    application_id = ingest(client, tmp_path, "acme/api", VULNERABLE, "api")
+    record = load_application(application_id)
+    record["updated_at"] = (datetime.now(timezone.utc) - timedelta(days=9)).isoformat()
+    save_application(record)
+    assert digest_rows()[0]["new_high"] == 0
+
+
+def test_failed_delivery_returns_502(client, monkeypatch):
+    monkeypatch.setattr(settings, "SLACK_WEBHOOK_URL", "https://hooks.slack.test/x")
+    monkeypatch.setattr("backend.route_reports.send", lambda message: {"slack": "failed (ConnectionError)"})
+    response = client.post("/api/reports/digest")
+    assert response.status_code == 502 and response.get_json()["success"] is False
