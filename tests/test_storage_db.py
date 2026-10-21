@@ -54,6 +54,19 @@ def _select_pairs(table):
     return lambda tables, params: list(tables[table].items())
 
 
+def _upsert_triage(tables, params):
+    tables["triage"][(params[0], params[1])] = params[2]
+
+
+def _select_triage_row(tables, params):
+    data = tables["triage"].get((params[0], params[1]))
+    return [] if data is None else [(data,)]
+
+
+def _select_triage(tables, params):
+    return [(finding, data) for (system, finding), data in tables["triage"].items() if system == params[0]]
+
+
 # Sessions are keyed by (kind, id) and carry their expiry next to the data.
 
 
@@ -117,6 +130,10 @@ HANDLERS = {
     "DELETE FROM findings": _delete("findings"),
     "INSERT INTO application_names": _upsert("names"),
     "SELECT repository, name FROM application_names": _select_pairs("names"),
+    "INSERT INTO finding_triage": _upsert_triage,
+    "SELECT finding, data FROM finding_triage": _select_triage,
+    "SELECT data FROM finding_triage": _select_triage_row,
+    "SELECT pg_advisory_xact_lock": lambda tables, params: [],
     "INSERT INTO sessions": _upsert_session,
     "SELECT data, expires FROM sessions WHERE kind": _select_session,
     "DELETE FROM sessions WHERE expires": _delete_expired_sessions,
@@ -167,7 +184,7 @@ class FakeCursor:
 
 class FakeConnection:
     def __init__(self):
-        self.tables = {"applications": {}, "findings": {}, "names": {}, "sessions": {}}
+        self.tables = {"applications": {}, "findings": {}, "names": {}, "sessions": {}, "triage": {}}
         self.commits = 0
 
     def cursor(self):
@@ -405,3 +422,17 @@ def test_sessions_fall_back_to_files(fake_db, monkeypatch, tmp_path):
     # Unsafe characters never become a path.
     session_store.put("pending", "../x/../../etc", {"expires": time.time() + 60})
     assert [path.name for path in tmp_path.iterdir()] == ["pending-xetc.json"]
+
+
+def test_finding_triage_round_trip(fake_db):
+    from backend.storage import triage as triage_store
+
+    assert triage_store.load_system("github:octo/demo") == {}
+
+    triage_store.update_record("github:octo/demo", "R|a.py|T", lambda old: ({"status": "in_progress"}, ""))
+    triage_store.update_record("github:octo/other", "R|a.py|T", lambda old: ({"status": "open"}, ""))
+    seen = []
+    triage_store.update_record("github:octo/demo", "R|a.py|T", lambda old: (seen.append(old), (None, "no"))[1])
+
+    assert seen == [{"status": "in_progress"}]
+    assert triage_store.load_system("github:octo/demo") == {"R|a.py|T": {"status": "in_progress"}}

@@ -353,5 +353,5 @@ What to measure on each page (dashboard, portfolio-security, system-security, fi
 - Repos are fetched at sign-in and stored in the session. To switch the fake user's permissions, change the fake's response, then clear cookies and reload (the sign-in happens again).
 - A read-only switch is handy. Copy the fake and add a file flag (e.g. `/tmp/fakegh_readonly`) that sets `push:false` on every repo in `/user/repos`.
 - Dispatches are logged to `/tmp/fakegh.log` as `{"dispatch": "/repos/<o>/<r>/actions/workflows/secguard.yml/dispatches", "auth_ok": true, "body": {"ref": "<default_branch>"}}`.
-- When wiping `data/`, keep the tracked `data/applications/.gitkeep` and `data/findings/.gitkeep`. Delete only the subdirectories and `application_names.json`.
+- When wiping `data/`, keep the tracked `data/applications/.gitkeep` and `data/findings/.gitkeep`. Delete only the subdirectories, `application_names.json` and `finding_triage.json` (finding workflow decisions, which otherwise carry over to a rescan of the same target).
 - To restart Flask without OAuth, pass empty `SECGUARD_GITHUB_CLIENT_ID`/`SECRET`. `/api/auth/me` should then report `github_enabled:false`.
