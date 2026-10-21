@@ -42,8 +42,9 @@ def digest_rows(now: datetime | None = None) -> list[dict[str, Any]]:
         latest = history[-1]
         earlier = [summary for summary in history if str(summary.get("updated_at") or "") <= cutoff]
         added = None
-        if earlier:
-            base = {"findings": _findings(earlier[-1]["id"]), "mendix": {"analyzed": True}}
+        if earlier or str(history[0].get("updated_at") or "") > cutoff:
+            # An application first scanned this week is compared with an empty baseline.
+            base = {"findings": _findings(earlier[-1]["id"]) if earlier else [], "mendix": {"analyzed": True}}
             added = new_findings({"findings": _findings(latest["id"])}, base, "high")
         rows.append(
             {
