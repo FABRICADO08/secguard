@@ -1,4 +1,4 @@
-"""First-party code security: injection, unsafe deserialization, weak transport and hard-coded secrets."""
+"""First-party code security: injection, unsafe deserialization, weak transport, hard-coded secrets and IaC misconfiguration."""
 
 from __future__ import annotations
 
@@ -12,6 +12,7 @@ from backend.repository.code_secrets import (
     scans_for_secrets,
     tree_secrets,
 )
+from backend.repository.iac import infrastructure_issues, is_infrastructure_file
 from backend.repository.manifests import iter_files
 from backend.repository.quality import MAX_SOURCE_BYTES, SOURCE_SUFFIXES
 
@@ -27,10 +28,13 @@ def _code_issues(relative: str, text: str, language: str) -> list[SecurityIssue]
 def _scan_file(path: Path, relative: str, current: set[str], searched: set[str]) -> list[SecurityIssue]:
     language = SOURCE_SUFFIXES.get(path.suffix.lower(), "")
     secrets = scans_for_secrets(relative, SUFFIXES)
-    if not (language or secrets) or path.stat().st_size > MAX_SOURCE_BYTES:
+    infrastructure = is_infrastructure_file(relative)
+    if not (language or secrets or infrastructure) or path.stat().st_size > MAX_SOURCE_BYTES:
         return []
     text = path.read_text(encoding="utf-8", errors="replace")
     issues = _code_issues(relative, text, language) if language else []
+    if infrastructure:
+        issues += infrastructure_issues(relative, text)
     if secrets:
         searched.add(relative)
         found, values = tree_secrets(relative, text)
