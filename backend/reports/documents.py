@@ -156,14 +156,14 @@ def _total(rows: list[dict[str, Any]], severity: str) -> int:
     return sum((row["scan"]["severity_counts"] or {}).get(severity, 0) for row in rows)
 
 
-def portfolio_report(rows: list[dict[str, Any]]) -> bytes:
+def portfolio_report(rows: list[dict[str, Any]], title: str = "Portfolio report") -> bytes:
     """``rows`` holds name, scan (an objective scan summary or None) and objectives status."""
     scanned = [row for row in rows if row["scan"] is not None]
     measured = [row for row in scanned if row["objectives"]["met"] is not None]
     meeting = [row for row in measured if row["objectives"]["met"]]
 
-    document = Document("SecGuard portfolio report")
-    document.heading("Portfolio report", 20)
+    document = Document(f"SecGuard {title[:1].lower()}{title[1:]}")
+    document.heading(title, 20)
     document.paragraph(f"Generated {_now()} · {len(scanned)} of {len(rows)} applications scanned", 9)
     document.heading("Summary")
     document.tiles(

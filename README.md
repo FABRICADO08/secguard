@@ -237,6 +237,12 @@ Alerts and the digest cover every GitHub-connected application on the server reg
 
 PDF management reports: **PDF report** on an application's health page (`GET /api/applications/<id>/report.pdf`) and **Portfolio PDF** on My Applications (`GET /api/reports/portfolio.pdf`, limited to the applications the signed-in user can read).
 
+### Teams and business units
+
+Administrators (the API token or a login in `SECGUARD_ADMINS`) define teams under **Settings > Teams and business units** (`PUT /api/teams`): a name, an optional business unit, the applications the team owns and its GitHub members. **My Applications** then shows a rollup per team and business unit, a filter for both, the team next to each application, and a team **Portfolio PDF** (`GET /api/reports/portfolio.pdf?team=<team id>`).
+
+Team members can read the team's applications even without access to the GitHub repository. That access is read-only: running a scan, renaming and changing finding status still need write access on GitHub. Only administrators see team members.
+
 ### Mendix applications on GitHub
 
 For every Mendix project (`*.mpr`, outside `node_modules`, `deployment`, `releases` and `.mendix-cache`; list them with `python -m backend.repository mendix-projects`), the action downloads the matching MxBuild from `https://cdn.mendix.com/runtime/mxbuild-<version>.tar.gz`, exports the model with `mx dump-mpr` (Mendix 10.4 and later) and runs the Mendix security rules on it. The findings (`MXSEC-*`) are part of the application's report, located at their `.mpr` file, and count towards its security health. A project whose export fails is shown as *Not analysed* with the reason on the Application Health page, instead of looking clean. The version is read from each `.mpr`; set the `mendix-version:` input if that fails, or `mendix: false` to skip the export. Locally, pass `--mendix-model` an export file (single project) or a directory holding `<project path>.json`, e.g. `exports/billing/Billing.mpr.json`.

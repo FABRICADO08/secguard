@@ -45,6 +45,11 @@ view.innerHTML = `
 
     </section>
 
+    <section class="card" id="teamsCard">
+        <div class="card__head"><h2>Teams and business units</h2></div>
+        <p class="muted">Loading…</p>
+    </section>
+
     <section class="card" id="alertsCard">
         <div class="card__head"><h2>Alerts and digest</h2></div>
         <p class="muted">Loading…</p>
@@ -171,6 +176,139 @@ getJson("/api/alerts")
     .catch(error => {
         document.getElementById("alertsCard").innerHTML = `
             <div class="card__head"><h2>Alerts and digest</h2></div>
+            <p class="muted">${escapeHtml(error.message)}</p>
+        `;
+    });
+
+
+function teamFieldset(team, applications, index) {
+    const chosen = new Set(team.applications || []);
+
+    return `
+        <fieldset class="team-editor" data-team="${index}">
+            <div class="objectives-form">
+                <div class="field">
+                    <label for="teamName${index}">Team</label>
+                    <input id="teamName${index}" name="name" maxlength="80" value="${escapeHtml(team.name || "")}">
+                </div>
+                <div class="field">
+                    <label for="teamUnit${index}">Business unit</label>
+                    <input id="teamUnit${index}" name="business_unit" maxlength="80" value="${escapeHtml(team.business_unit || "")}">
+                </div>
+                <div class="field">
+                    <label for="teamMembers${index}">Members (GitHub logins, comma separated)</label>
+                    <input id="teamMembers${index}" name="members" value="${escapeHtml((team.members || []).join(", "))}">
+                </div>
+            </div>
+            <div class="team-editor__apps">
+                ${applications.length ? applications.map(application => `
+                    <label>
+                        <input type="checkbox" name="applications" value="${escapeHtml(application.key)}"
+                            ${chosen.has(application.key) ? "checked" : ""}>
+                        ${escapeHtml(application.name)}
+                    </label>
+                `).join("") : '<span class="muted">No scanned applications yet.</span>'}
+            </div>
+            <button class="button button--ghost" type="button" data-remove-team="${index}">Remove team</button>
+        </fieldset>
+    `;
+}
+
+
+function readTeams(form) {
+    return [...form.querySelectorAll("[data-team]")].map(fieldset => ({
+        name: fieldset.querySelector("[name=name]").value,
+        business_unit: fieldset.querySelector("[name=business_unit]").value,
+        members: fieldset.querySelector("[name=members]").value.split(",").map(login => login.trim()).filter(Boolean),
+        applications: [...fieldset.querySelectorAll("[name=applications]:checked")].map(box => box.value),
+    }));
+}
+
+
+function renderTeams(data) {
+    const card = document.getElementById("teamsCard");
+
+    const intro = `
+        <div class="card__head"><h2>Teams and business units</h2></div>
+        <p class="muted">
+            Group applications by team and business unit. Members can read the
+            results of their team's applications even without access to the
+            GitHub repository; running scans and changing findings still need
+            write access on GitHub.
+        </p>
+    `;
+
+    if (!data.can_edit) {
+        card.innerHTML = `${intro}${data.teams.length ? `
+            <dl class="pairs">${data.teams.map(team => `
+                <dt>${escapeHtml(team.name)}</dt>
+                <dd>${escapeHtml(team.business_unit || "No business unit")} ·
+                    ${team.applications.length} application${team.applications.length === 1 ? "" : "s"}</dd>
+            `).join("")}</dl>` : '<p class="muted">No teams yet. An administrator can add them here.</p>'}`;
+        return;
+    }
+
+    card.innerHTML = `
+        ${intro}
+        <form id="teamsForm">
+            ${data.teams.map((team, index) => teamFieldset(team, data.applications, index)).join("")}
+            <div class="toolbar">
+                <button class="button button--ghost" type="button" id="addTeam">Add team</button>
+                <button class="button" type="submit">Save teams</button>
+                <span id="teamsStatus" class="muted" role="status"></span>
+            </div>
+        </form>
+    `;
+
+    const form = document.getElementById("teamsForm");
+
+    document.getElementById("addTeam").addEventListener("click", () =>
+        renderTeams({ ...data, teams: [...readTeams(form), { name: "", applications: [], members: [] }] }));
+
+    form.addEventListener("click", event => {
+        const button = event.target.closest("[data-remove-team]");
+
+        if (button) {
+            const teams = readTeams(form);
+            teams.splice(Number(button.dataset.removeTeam), 1);
+            renderTeams({ ...data, teams });
+        }
+    });
+
+    form.addEventListener("submit", async event => {
+        event.preventDefault();
+
+        const status = document.getElementById("teamsStatus");
+
+        status.textContent = "Saving…";
+
+        try {
+            const response = await apiFetch("/api/teams", {
+                method: "PUT",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ teams: readTeams(form) }),
+            });
+
+            const saved = await response.json();
+
+            if (!response.ok) {
+                throw new Error(saved.error || "Could not save the teams.");
+            }
+
+            renderTeams(saved);
+            document.getElementById("teamsStatus").textContent = "Saved.";
+        } catch (error) {
+            status.textContent = error.message;
+        }
+    });
+}
+
+
+getJson("/api/teams")
+    .then(renderTeams)
+    .catch(error => {
+        document.getElementById("teamsCard").innerHTML = `
+            <div class="card__head"><h2>Teams and business units</h2></div>
             <p class="muted">${escapeHtml(error.message)}</p>
         `;
     });

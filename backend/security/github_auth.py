@@ -29,7 +29,9 @@ from flask import (
 )
 
 from backend.config import settings
+from backend.portfolio.teams import granted
 from backend.storage import sessions as session_store
+from backend.storage import teams as team_store
 
 TIMEOUT = 15
 
@@ -175,11 +177,16 @@ def repository_name(application: dict[str, Any]) -> str:
     return str(value or "")
 
 
+def readable_keys(user: GitHubUser) -> set[str]:
+    """Repositories the user can read on GitHub plus applications granted through team membership."""
+    return set(user.repositories) | granted(user.login, team_store.load())
+
+
 def _user_can_view(user: GitHubUser | None, application: dict[str, Any]) -> bool:
     if user is None:
         return False
 
-    return application.get("platform") != "Repository" or repository_name(application).lower() in user.repositories
+    return application.get("platform") != "Repository" or repository_name(application).lower() in readable_keys(user)
 
 
 def can_view(application: dict[str, Any]) -> bool:

@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import re
 
-from flask import Response, jsonify
+from flask import Response, jsonify, request
 
 from backend.notifications import alerts
 from backend.notifications.channels import Message, configured, send
@@ -15,6 +15,7 @@ from backend.reports.documents import application_report, portfolio_report
 from backend.route_objectives import _signed_out, can_edit
 from backend.security import github_auth
 from backend.storage import objectives as objective_store
+from backend.storage import teams as team_store
 from backend.storage.scans import application_exists, load_application
 
 _SIGN_IN = "Sign in with GitHub to continue."
@@ -92,23 +93,34 @@ def _register_pdf_routes(app):
             user = github_auth.current_user()
             if user is None:
                 return jsonify({"success": False, "error": _SIGN_IN}), 401
-            keys = list(user.repositories)
+            keys = sorted(github_auth.readable_keys(user))
         else:
             keys = list(latest)
-        objectives = objective_store.load()
-        rows = []
-        for key in keys:
-            summary = latest.get(key)
-            scan = _summary_scan(summary) if summary else None
-            rows.append(
-                {
-                    "name": application_name(key, summary),
-                    "scan": scan,
-                    "objectives": evaluate(objectives, scan) if scan else {"met": None, "results": []},
-                }
-            )
-        rows.sort(key=lambda row: (row["scan"] is None, row["name"].lower()))
-        return _pdf(portfolio_report(rows), "secguard-portfolio-report")
+        requested = request.args.get("team")
+        if not requested:
+            return _pdf(portfolio_report(_portfolio_rows(keys, latest)), "secguard-portfolio-report")
+        team = next((team for team in team_store.load() if team["id"] == requested), None)
+        if team is None:
+            return jsonify({"success": False, "error": "Team not found."}), 404
+        rows = _portfolio_rows([key for key in keys if key in team["applications"]], latest)
+        return _pdf(portfolio_report(rows, f"{team['name']} portfolio report"), "secguard-portfolio-report")
+
+
+def _portfolio_rows(keys: list[str], latest: dict[str, dict]) -> list[dict]:
+    objectives = objective_store.load()
+    rows = []
+    for key in keys:
+        summary = latest.get(key)
+        scan = _summary_scan(summary) if summary else None
+        rows.append(
+            {
+                "name": application_name(key, summary),
+                "scan": scan,
+                "objectives": evaluate(objectives, scan) if scan else {"met": None, "results": []},
+            }
+        )
+    rows.sort(key=lambda row: (row["scan"] is None, row["name"].lower()))
+    return rows
 
 
 def register_report_routes(app):

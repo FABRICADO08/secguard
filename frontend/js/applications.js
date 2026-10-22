@@ -154,6 +154,82 @@ function bindObjectivesForm() {
 }
 
 
+let teamsData = { teams: [] };
+
+
+function teamOptions() {
+    const units = [...new Set(teamsData.teams.map(team => team.business_unit).filter(Boolean))].sort();
+
+    return `
+        <option value="">All teams</option>
+        ${teamsData.teams.map(team => `
+            <option value="team:${escapeHtml(team.id)}">${escapeHtml(team.name)}</option>
+        `).join("")}
+        ${units.map(unit => `
+            <option value="unit:${escapeHtml(unit)}">Business unit: ${escapeHtml(unit)}</option>
+        `).join("")}
+    `;
+}
+
+
+function inGroup(repository, group) {
+    if (!group) {
+        return true;
+    }
+
+    const [kind, value] = [group.slice(0, group.indexOf(":")), group.slice(group.indexOf(":") + 1)];
+
+    return (repository.teams || []).some(
+        team => kind === "team" ? team.id === value : team.business_unit === value
+    );
+}
+
+
+function teamRollup(team, repositories) {
+    const members = repositories.filter(item => inGroup(item, `team:${team.id}`));
+    const scanned = members.filter(item => item.latest_scan);
+    const measured = scanned.filter(item => item.latest_scan.objectives && item.latest_scan.objectives.met !== null);
+    const meeting = measured.filter(item => item.latest_scan.objectives.met);
+    const total = severity => scanned.reduce(
+        (sum, item) => sum + Number((item.latest_scan.severity_counts || {})[severity] || 0), 0
+    );
+
+    return `
+        <tr>
+            <td data-label="Team">
+                <span class="row-title">${escapeHtml(team.name)}</span>
+                <div class="row-meta">${escapeHtml(team.business_unit || "No business unit")}</div>
+            </td>
+            <td data-label="Applications">${scanned.length} of ${members.length} scanned</td>
+            <td data-label="Meeting objectives">${meeting.length} of ${measured.length}</td>
+            <td data-label="Critical">${total("critical")}</td>
+            <td data-label="High">${total("high")}</td>
+        </tr>
+    `;
+}
+
+
+function teamsCard(repositories) {
+    if (!teamsData.teams.length) {
+        return "";
+    }
+
+    return `
+        <section class="card">
+            <div class="card__head"><h2>Teams and business units</h2></div>
+            <div class="table-wrap">
+                <table class="data">
+                    <thead>
+                        <tr><th>Team</th><th>Applications</th><th>Meeting objectives</th><th>Critical</th><th>High</th></tr>
+                    </thead>
+                    <tbody>${teamsData.teams.map(team => teamRollup(team, repositories)).join("")}</tbody>
+                </table>
+            </div>
+        </section>
+    `;
+}
+
+
 function applicationRow(repository) {
     const scan = repository.latest_scan;
 
@@ -181,6 +257,12 @@ function applicationRow(repository) {
                             : ""}
                     </div>
                 </div>
+            </td>
+
+            <td data-label="Team">
+                ${(repository.teams || []).length
+                    ? repository.teams.map(team => escapeHtml(team.name)).join(", ")
+                    : '<span class="muted">-</span>'}
             </td>
 
             <td data-label="Health">
@@ -234,6 +316,8 @@ function render(data, settings) {
 
         ${objectivesCard(settings, data.repositories)}
 
+        ${teamsCard(data.repositories)}
+
         <section class="card">
 
             <div class="card__head">
@@ -245,7 +329,11 @@ function render(data, settings) {
                         placeholder="Search applications"
                         aria-label="Search applications"
                     >
-                    <a class="button button--ghost" href="/api/reports/portfolio.pdf">
+                    ${teamsData.teams.length ? `
+                        <select id="teamFilter" aria-label="Filter by team or business unit">
+                            ${teamOptions()}
+                        </select>` : ""}
+                    <a class="button button--ghost" id="portfolioPdf" href="/api/reports/portfolio.pdf">
                         Portfolio PDF
                     </a>
                 </div>
@@ -261,6 +349,7 @@ function render(data, settings) {
                     <thead>
                         <tr>
                             <th>Application</th>
+                            <th>Team</th>
                             <th>Health</th>
                             <th>Maintainability</th>
                             <th>Objectives</th>
@@ -278,17 +367,25 @@ function render(data, settings) {
 
     const rows = document.getElementById("applicationRows");
     const search = document.getElementById("applicationSearch");
+    const filter = document.getElementById("teamFilter");
+    const pdf = document.getElementById("portfolioPdf");
 
     const paint = () => {
         const term = search.value.trim().toLowerCase();
+        const group = filter ? filter.value : "";
 
         const matching = data.repositories.filter(
-            item => !term || String(item.name).toLowerCase().includes(term)
+            item => (!term || `${item.name} ${item.display_name || ""}`.toLowerCase().includes(term))
+                && inGroup(item, group)
         );
+
+        pdf.href = group.startsWith("team:")
+            ? `/api/reports/portfolio.pdf?team=${encodeURIComponent(group.slice(5))}`
+            : "/api/reports/portfolio.pdf";
 
         rows.innerHTML = matching.length
             ? matching.map(applicationRow).join("")
-            : `<tr><td colspan="7" class="empty">${
+            : `<tr><td colspan="8" class="empty">${
                 data.repositories.length
                     ? "No application matches this search."
                     : "No application scans yet."
@@ -296,6 +393,7 @@ function render(data, settings) {
     };
 
     search.addEventListener("input", paint);
+    filter?.addEventListener("change", paint);
 
     rows.addEventListener("click", async event => {
         const button = event.target.closest("[data-scan]");
@@ -372,10 +470,13 @@ async function load() {
     view.innerHTML = '<div class="card empty">Loading applications…</div>';
 
     try {
-        const [data, settings] = await Promise.all([
+        const [data, settings, teams] = await Promise.all([
             getJson("/api/repositories"),
             getJson("/api/objectives"),
+            getJson("/api/teams").catch(() => ({ teams: [] })),
         ]);
+
+        teamsData = teams;
 
         render(data, settings);
     } catch (error) {
