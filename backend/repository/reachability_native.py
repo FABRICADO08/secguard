@@ -42,6 +42,12 @@ MAVEN_PACKAGES = {
     "com.squareup.okhttp3:okhttp": ["okhttp3"],
     "com.squareup.retrofit2:retrofit": ["retrofit2"],
     "org.jetbrains.kotlinx:kotlinx-coroutines-core": ["kotlinx.coroutines"],
+    # Artifacts whose classes live directly in their group package.
+    "org.slf4j:slf4j-api": ["org.slf4j"],
+    "org.mockito:mockito-core": ["org.mockito"],
+    "org.hibernate:hibernate-core": ["org.hibernate"],
+    "org.apache.logging.log4j:log4j-api": ["org.apache.logging.log4j"],
+    "org.junit.jupiter:junit-jupiter-api": ["org.junit.jupiter.api"],
 }
 
 # NuGet ID prefixes whose namespaces are named differently.
@@ -102,7 +108,7 @@ def apple_modules(root: Path) -> set[str]:
 def _nuget_namespace(package: str) -> str:
     """The root namespace a package is expected to provide (``AWSSDK.S3`` -> ``amazon.s3``)."""
     package = package.lower()
-    for prefix, namespace in NUGET_NAMESPACES.items():
+    for prefix, namespace in sorted(NUGET_NAMESPACES.items(), key=lambda item: -len(item[0])):
         if package == prefix or package.startswith(prefix + "."):
             return namespace + package[len(prefix):]
     return package

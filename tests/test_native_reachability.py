@@ -11,8 +11,8 @@ from backend.repository.typosquat import typosquat_target
 from backend.repository.versions import CARGO, COCOAPODS, MAVEN, NUGET, PUB, SWIFT
 
 SOURCES = {
-    "src/Api/Program.cs": "global using System.Text;\nusing Newtonsoft.Json.Linq;\nusing Serilog;\nusing Amazon.S3.Model;\n",
-    "src/main/java/App.java": "import com.fasterxml.jackson.databind.ObjectMapper;\nimport com.google.common.collect.Lists;\nimport org.apache.commons.lang3.StringUtils;\n",
+    "src/Api/Program.cs": "global using System.Text;\nusing Newtonsoft.Json.Linq;\nusing Serilog;\nusing Amazon.S3.Model;\nusing Amazon.Runtime;\n",
+    "src/main/java/App.java": "import com.fasterxml.jackson.databind.ObjectMapper;\nimport com.google.common.collect.Lists;\nimport org.apache.commons.lang3.StringUtils;\nimport org.slf4j.Logger;\nimport org.mockito.Mockito;\n",
     "app/build.gradle.kts": "plugins { id(\"application\") }\n",
     "src/main.rs": "use serde_json::Value;\n\n#[tokio::main]\nasync fn main() { let _ = anyhow::anyhow!(\"x\"); }\n",
     "lib/main.dart": "import 'package:http/http.dart' as http;\nimport 'package:flutter_bloc/flutter_bloc.dart';\n",
@@ -34,6 +34,7 @@ def index(tmp_path):
     ("Newtonsoft.Json", NUGET, IMPORTED),
     ("Serilog.Sinks.Console", NUGET, UNKNOWN),
     ("AWSSDK.S3", NUGET, IMPORTED),
+    ("AWSSDK.Core", NUGET, IMPORTED),
     ("Swashbuckle.AspNetCore", NUGET, UNKNOWN),
     ("Serilog", NUGET, IMPORTED),
     ("Dapper", NUGET, NOT_IMPORTED),
@@ -42,6 +43,9 @@ def index(tmp_path):
     ("org.yaml:snakeyaml", MAVEN, NOT_IMPORTED),
     ("org.apache.commons:commons-lang3", MAVEN, IMPORTED),
     ("org.apache.commons:commons-text", MAVEN, UNKNOWN),
+    ("org.slf4j:slf4j-api", MAVEN, IMPORTED),
+    ("org.mockito:mockito-core", MAVEN, IMPORTED),
+    ("org.apache.logging.log4j:log4j-api", MAVEN, NOT_IMPORTED),
     ("org.apache.logging.log4j:log4j-core", MAVEN, NOT_IMPORTED),
     ("org.springframework.boot:spring-boot-starter-web", MAVEN, UNKNOWN),
     ("serde-json", CARGO, IMPORTED),
