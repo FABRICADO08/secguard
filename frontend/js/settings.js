@@ -237,9 +237,9 @@ function renderTeams(data) {
         <div class="card__head"><h2>Teams and business units</h2></div>
         <p class="muted">
             Group applications by team and business unit. Members can read the
-            results of their team's applications even without access to the
-            GitHub repository; running scans and changing findings still need
-            write access on GitHub.
+            results of their team's applications even without GitHub access to
+            them; running scans and changing findings still need write access
+            on GitHub.
         </p>
     `;
 
