@@ -379,8 +379,8 @@ function render(data, settings) {
                 && inGroup(item, group)
         );
 
-        pdf.href = group.startsWith("team:")
-            ? `/api/reports/portfolio.pdf?team=${encodeURIComponent(group.slice(5))}`
+        pdf.href = group
+            ? `/api/reports/portfolio.pdf?${group.startsWith("team:") ? "team" : "unit"}=${encodeURIComponent(group.slice(5))}`
             : "/api/reports/portfolio.pdf";
 
         rows.innerHTML = matching.length

@@ -182,11 +182,12 @@ def readable_keys(user: GitHubUser) -> set[str]:
     return set(user.repositories) | granted(user.login, team_store.load())
 
 
-def _user_can_view(user: GitHubUser | None, application: dict[str, Any]) -> bool:
+def _user_can_view(user: GitHubUser | None, application: dict[str, Any], keys: set[str] | None = None) -> bool:
     if user is None:
         return False
-
-    return application.get("platform") != "Repository" or repository_name(application).lower() in readable_keys(user)
+    if application.get("platform") != "Repository":
+        return True
+    return repository_name(application).lower() in (readable_keys(user) if keys is None else keys)
 
 
 def can_view(application: dict[str, Any]) -> bool:
@@ -205,8 +206,9 @@ def visible(applications: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return applications
 
     user = current_user()
+    keys = readable_keys(user) if user else set()
 
-    return [application for application in applications if _user_can_view(user, application)]
+    return [application for application in applications if _user_can_view(user, application, keys)]
 
 
 def _callback_url() -> str:

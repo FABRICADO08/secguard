@@ -240,7 +240,7 @@ PDF management reports: **PDF report** on an application's health page (`GET /ap
 
 ### Teams and business units
 
-Administrators (the API token or a login in `SECGUARD_ADMINS`) define teams under **Settings > Teams and business units** (`PUT /api/teams`): a name, an optional business unit, the applications the team owns and its GitHub members. **My Applications** then shows a rollup per team and business unit, a filter for both, the team next to each application, and a team **Portfolio PDF** (`GET /api/reports/portfolio.pdf?team=<team id>`).
+Administrators (the API token or a login in `SECGUARD_ADMINS`) define teams under **Settings > Teams and business units** (`PUT /api/teams`): a name, an optional business unit, the applications the team owns and its GitHub members. **My Applications** then shows a rollup per team and business unit, a filter for both, the team next to each application, and a **Portfolio PDF** for the selected team or business unit (`GET /api/reports/portfolio.pdf?team=<team id>` or `?unit=<business unit>`).
 
 Team members can read the team's applications even without access to the GitHub repository. That access is read-only: running a scan, renaming and changing finding status still need write access on GitHub. Only administrators see team members.
 

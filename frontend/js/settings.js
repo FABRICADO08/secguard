@@ -181,8 +181,13 @@ getJson("/api/alerts")
     });
 
 
-function teamFieldset(team, applications, index) {
+function teamFieldset(team, scanned, index) {
     const chosen = new Set(team.applications || []);
+    const known = new Set(scanned.map(application => application.key));
+    const applications = [
+        ...scanned,
+        ...[...chosen].filter(key => !known.has(key)).map(key => ({ key, name: `${key} (no scan yet)` })),
+    ];
 
     return `
         <fieldset class="team-editor" data-team="${index}">

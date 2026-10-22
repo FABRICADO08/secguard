@@ -34,6 +34,7 @@ def test_membership_grants_and_team_lookup():
     teams, _ = clean(TEAMS)
     assert granted("OCTO", teams) == {"acme/api", "acme/billing"}
     assert granted("other", teams) == set()
+    assert clean({"teams": [{"name": "A", "members": ["x"]}]})[0][0]["members"] == ["x"]
     assert [team["name"] for team in teams_for("ACME/API", teams)] == ["Payments"]
 
 
@@ -84,3 +85,5 @@ def test_portfolio_pdf_filters_by_team(client, tmp_path, monkeypatch):
     response = client.get("/api/reports/portfolio.pdf?team=payments")
     assert response.status_code == 200 and response.data.startswith(b"%PDF")
     assert client.get("/api/reports/portfolio.pdf?team=missing").status_code == 404
+    assert client.get("/api/reports/portfolio.pdf?unit=Retail").data.startswith(b"%PDF")
+    assert client.get("/api/reports/portfolio.pdf?unit=Missing").status_code == 404

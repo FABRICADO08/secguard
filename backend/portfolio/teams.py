@@ -8,7 +8,7 @@ from typing import Any
 MAX_TEAMS = 200
 MAX_ITEMS = 500
 MAX_LABEL = 80
-_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})$")
+_LOGIN = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,38})?$")
 _APPLICATION = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 

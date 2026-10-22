@@ -96,14 +96,23 @@ def _register_pdf_routes(app):
             keys = sorted(github_auth.readable_keys(user))
         else:
             keys = list(latest)
-        requested = request.args.get("team")
-        if not requested:
-            return _pdf(portfolio_report(_portfolio_rows(keys, latest)), "secguard-portfolio-report")
-        team = next((team for team in team_store.load() if team["id"] == requested), None)
-        if team is None:
-            return jsonify({"success": False, "error": "Team not found."}), 404
-        rows = _portfolio_rows([key for key in keys if key in team["applications"]], latest)
-        return _pdf(portfolio_report(rows, f"{team['name']} portfolio report"), "secguard-portfolio-report")
+        group, title = _report_group(request.args.get("team"), request.args.get("unit"))
+        if group is None:
+            return jsonify({"success": False, "error": "Team or business unit not found."}), 404
+        rows = _portfolio_rows([key for key in keys if group == {"*"} or key in group], latest)
+        return _pdf(portfolio_report(rows, title), "secguard-portfolio-report")
+
+
+def _report_group(team_id: str | None, unit: str | None) -> tuple[set[str] | None, str]:
+    """Application keys of the requested team or business unit ({"*"} for all) and the report title."""
+    if not team_id and not unit:
+        return {"*"}, "Portfolio report"
+    field, value = ("id", team_id) if team_id else ("business_unit", unit)
+    teams = [team for team in team_store.load() if team.get(field) == value]
+    if not teams:
+        return None, ""
+    label = teams[0]["name"] if team_id else unit
+    return {key for team in teams for key in team["applications"]}, f"{label} portfolio report"
 
 
 def _portfolio_rows(keys: list[str], latest: dict[str, dict]) -> list[dict]:
