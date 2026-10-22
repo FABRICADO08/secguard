@@ -15,8 +15,19 @@ import ast
 import re
 from pathlib import Path
 
+from backend.repository import reachability_native as native
 from backend.repository.manifests import Dependency, iter_files, normalize_package
-from backend.repository.versions import GO, NPM, PYPI
+from backend.repository.versions import (
+    CARGO,
+    COCOAPODS,
+    GO,
+    MAVEN,
+    NPM,
+    NUGET,
+    PUB,
+    PYPI,
+    SWIFT,
+)
 
 IMPORTED = "imported"
 NOT_IMPORTED = "not-imported"
@@ -116,12 +127,31 @@ def _go_imports(root: Path) -> set[str]:
     return imports
 
 
+NATIVE_COLLECTORS = {
+    "dotnet": native.dotnet_namespaces,
+    "jvm": native.jvm_imports,
+    "rust": native.rust_crates,
+    "dart": native.dart_packages,
+    "apple": native.apple_modules,
+}
+
+NATIVE_MATCHERS = {
+    NUGET: ("dotnet", native.nuget_reachable),
+    MAVEN: ("jvm", native.maven_reachable),
+    CARGO: ("rust", native.cargo_reachable),
+    PUB: ("dart", native.pub_reachable),
+    SWIFT: ("apple", native.swift_reachable),
+    COCOAPODS: ("apple", native.pod_reachable),
+}
+
+
 class ReachabilityIndex:
     def __init__(self, root: Path) -> None:
         self.root = root
         self._python: set[str] | None = None
         self._js: set[str] | None = None
         self._go: set[str] | None = None
+        self._native: dict[str, set[str]] = {}
 
     @property
     def python(self) -> set[str]:
@@ -141,23 +171,29 @@ class ReachabilityIndex:
             self._go = _go_imports(self.root)
         return self._go
 
+    def _imports(self, kind: str) -> set[str]:
+        if kind not in self._native:
+            self._native[kind] = NATIVE_COLLECTORS[kind](self.root)
+        return self._native[kind]
+
+    def _found(self, dependency: Dependency, name: str) -> bool | None:
+        if dependency.ecosystem == PYPI:
+            return self._python_reachable(name)
+        if dependency.ecosystem == NPM:
+            return None if name.startswith("@types/") else self._javascript_reachable(name)
+        if dependency.ecosystem == GO:
+            return self._go_reachable(dependency.name)
+        if dependency.ecosystem in NATIVE_MATCHERS:
+            kind, matcher = NATIVE_MATCHERS[dependency.ecosystem]
+            return matcher(dependency.name, self._imports(kind))
+        return None
+
     def status(self, dependency: Dependency) -> str:
         name = normalize_package(dependency.ecosystem, dependency.name)
 
-        if name in TOOLING:
+        found = None if name in TOOLING else self._found(dependency, name)
+        if found is None:
             return UNKNOWN
-
-        if dependency.ecosystem == PYPI:
-            found = self._python_reachable(name)
-        elif dependency.ecosystem == NPM:
-            if name.startswith("@types/"):
-                return UNKNOWN
-            found = self._javascript_reachable(name)
-        elif dependency.ecosystem == GO:
-            found = self._go_reachable(dependency.name)
-        else:
-            return UNKNOWN
-
         if found:
             return IMPORTED
 
