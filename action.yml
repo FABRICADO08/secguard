@@ -103,6 +103,11 @@ runs:
             echo "::warning::Could not read the Mendix version of $project; set the mendix-version input."
             continue
           fi
+          IFS=. read -r major minor _ <<< "$version"
+          if (( major < 10 || (major == 10 && minor < 4) )); then
+            echo "::warning::$project uses Mendix $version; mx dump-mpr needs Mendix 10.4 or later, so it was not analysed."
+            continue
+          fi
           tools="$RUNNER_TEMP/mxbuild-$version"
           if [ ! -x "$tools/modeler/mx" ]; then
             mkdir -p "$tools"

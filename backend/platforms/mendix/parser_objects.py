@@ -22,7 +22,6 @@ class ParserObjectsMixin:
         microflow = self._construct(Microflow, {
             "name": name, "qualified_name": qualified_name, "module": module,
             "apply_entity_access": apply_access, "allowed_module_roles": roles,
-            "bypasses_entity_access": not apply_access,
         })
         self._store_module_resource(
             self.microflows_by_name, "microflows", qualified_name, microflow, module
@@ -56,7 +55,7 @@ class ParserObjectsMixin:
         roles = self._find_string_list(node, ["moduleRoles", "allowedRoles"])
         page = self._construct(Page, {
             "name": name, "qualified_name": qualified_name,
-            "module": module, "allowed_roles": roles,
+            "module": module, "allowed_module_roles": roles,
         })
         self._store_module_resource(
             self.pages_by_name, "pages", qualified_name, page, module

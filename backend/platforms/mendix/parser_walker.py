@@ -36,9 +36,11 @@ class ParserWalkerMixin:
         self,
     ) -> None:
 
-        nodes = self._find_nodes_by_exact_type(
-            "Modules$Module"
-        )
+        nodes = [
+            node
+            for node_type in ("Projects$Module", "Modules$Module")
+            for node in self._find_nodes_by_exact_type(node_type)
+        ]
 
         for node in nodes:
 

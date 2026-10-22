@@ -10,6 +10,7 @@ from backend.platforms.mendix.service import analyze_model
 
 SKIPPED_DIRECTORIES = {".git", "node_modules", "deployment", "releases", ".mendix-cache"}
 EXPORT_SUFFIX = ".json"
+PLATFORM_MODULE = "System"
 
 
 def find_projects(root: Path) -> list[str]:
@@ -31,6 +32,12 @@ def _export_for(model: Path, project: str, projects: list[str]) -> tuple[Path | 
         return model, ""
 
     return None, "One export was supplied for several projects; pass a directory of <project>.mpr.json exports."
+
+
+def _platform_owned(finding: dict[str, Any]) -> bool:
+    """Findings on the System module, which belongs to the Mendix platform and cannot be changed in the app."""
+    module = (finding.get("evidence") or {}).get("module")
+    return module == PLATFORM_MODULE or str(finding.get("location") or "").startswith(f"{PLATFORM_MODULE}.")
 
 
 def _repository_finding(finding: dict[str, Any], project: str) -> dict[str, Any]:
@@ -57,7 +64,11 @@ def _analyse_project(project: str, export: Path | None, reason: str) -> tuple[di
         entry["reason"] = f"Could not analyse the Mendix export: {exc}"
         return entry, []
 
-    findings = [_repository_finding(finding, project) for finding in result["findings"]]
+    findings = [
+        _repository_finding(finding, project)
+        for finding in result["findings"]
+        if not _platform_owned(finding)
+    ]
     entry.update(
         analyzed=True,
         modules=len(result["model"]["modules"]),
