@@ -185,7 +185,8 @@ class ReachabilityIndex:
             return self._go_reachable(dependency.name)
         if dependency.ecosystem in NATIVE_MATCHERS:
             kind, matcher = NATIVE_MATCHERS[dependency.ecosystem]
-            return matcher(dependency.name, self._imports(kind))
+            name = dependency.alias if dependency.ecosystem == CARGO and dependency.alias else dependency.name
+            return matcher(name, self._imports(kind))
         return None
 
     def status(self, dependency: Dependency) -> str:
