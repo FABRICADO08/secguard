@@ -9,6 +9,7 @@ from backend.portfolio.applications import (
     latest_repository_scans as _latest_repository_scans,
 )
 from backend.portfolio.objectives import evaluate
+from backend.portfolio.teams import teams_for
 from backend.repository.ingest import application_from_report
 from backend.repository.sbom import cyclonedx, spdx
 from backend.security import github_auth
@@ -16,6 +17,7 @@ from backend.security.auth import request_is_authorized, require_api_token
 from backend.security.rate_limit import rate_limited
 from backend.storage import application_names
 from backend.storage import objectives as objective_store
+from backend.storage import teams as team_store
 from backend.storage.findings import save_findings
 from backend.storage.scans import (
     application_exists,
@@ -206,6 +208,25 @@ def _register_quality_route(app):
         )
 
 
+def _team_granted_items(user, latest: dict[str, dict]) -> list[dict]:
+    """Read-only entries for scanned applications the user reaches only through team membership."""
+    return [
+        {
+            "name": github_auth.repository_name(latest[key]) or key,
+            "private": None,
+            "html_url": "",
+            "default_branch": "",
+            "description": "",
+            "can_trigger": False,
+            "can_rename": False,
+            "display_name": _application_name(key, latest[key]),
+            "latest_scan": _scan_summary(latest[key]),
+        }
+        for key in sorted(github_auth.readable_keys(user) - set(user.repositories))
+        if key in latest
+    ]
+
+
 def _register_repositories_route(app):
     @app.get("/api/repositories")
     def repositories():
@@ -242,9 +263,11 @@ def _register_repositories_route(app):
                     "latest_scan": _scan_summary(latest.get(key)),
                 }
                 for key, repository in user.repositories.items()
-            ]
+            ] + _team_granted_items(user, latest)
         objectives = objective_store.load()
+        teams = team_store.load()
         for item in items:
+            item["teams"] = teams_for(str(item["name"]), teams)
             if item["latest_scan"] is not None:
                 item["latest_scan"]["objectives"] = evaluate(objectives, item["latest_scan"])
         items.sort(

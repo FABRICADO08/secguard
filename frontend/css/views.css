@@ -861,3 +861,25 @@ pre.evidence {
     padding: 8px 0;
     border-top: 1px solid var(--border);
 }
+
+.team-editor {
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 0 0 12px;
+    padding: 12px;
+    min-width: 0;
+}
+
+.team-editor__apps {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 16px;
+    margin: 8px 0 12px;
+}
+
+.team-editor__apps label {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    overflow-wrap: anywhere;
+}
