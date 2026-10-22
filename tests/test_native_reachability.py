@@ -11,12 +11,12 @@ from backend.repository.typosquat import typosquat_target
 from backend.repository.versions import CARGO, COCOAPODS, MAVEN, NUGET, PUB, SWIFT
 
 SOURCES = {
-    "src/Api/Program.cs": "global using System.Text;\nusing Newtonsoft.Json.Linq;\nusing Serilog;\n",
-    "src/main/java/App.java": "import com.fasterxml.jackson.databind.ObjectMapper;\nimport com.google.common.collect.Lists;\n",
+    "src/Api/Program.cs": "global using System.Text;\nusing Newtonsoft.Json.Linq;\nusing Serilog;\nusing Amazon.S3.Model;\n",
+    "src/main/java/App.java": "import com.fasterxml.jackson.databind.ObjectMapper;\nimport com.google.common.collect.Lists;\nimport org.apache.commons.lang3.StringUtils;\n",
     "app/build.gradle.kts": "plugins { id(\"application\") }\n",
     "src/main.rs": "use serde_json::Value;\n\n#[tokio::main]\nasync fn main() { let _ = anyhow::anyhow!(\"x\"); }\n",
     "lib/main.dart": "import 'package:http/http.dart' as http;\nimport 'package:flutter_bloc/flutter_bloc.dart';\n",
-    "Sources/App/main.swift": "import Alamofire\n@testable import NIOCore\nimport class Kingfisher.ImageCache\n",
+    "Sources/App/main.swift": "import Alamofire\n@testable import NIOCore\nimport class Kingfisher.ImageCache\nimport FirebaseAnalytics\nimport OrderedCollections\n",
     "ios/App/AppDelegate.m": "#import <AFNetworking/AFNetworking.h>\n@import FirebaseAnalytics;\n",
 }
 
@@ -32,12 +32,17 @@ def index(tmp_path):
 
 @pytest.mark.parametrize(("name", "ecosystem", "expected"), [
     ("Newtonsoft.Json", NUGET, IMPORTED),
-    ("Serilog.Sinks.Console", NUGET, NOT_IMPORTED),
+    ("Serilog.Sinks.Console", NUGET, UNKNOWN),
+    ("AWSSDK.S3", NUGET, IMPORTED),
+    ("Swashbuckle.AspNetCore", NUGET, UNKNOWN),
     ("Serilog", NUGET, IMPORTED),
     ("Dapper", NUGET, NOT_IMPORTED),
     ("com.fasterxml.jackson.core:jackson-databind", MAVEN, IMPORTED),
     ("com.google.guava:guava", MAVEN, IMPORTED),
     ("org.yaml:snakeyaml", MAVEN, NOT_IMPORTED),
+    ("org.apache.commons:commons-lang3", MAVEN, IMPORTED),
+    ("org.apache.commons:commons-text", MAVEN, UNKNOWN),
+    ("org.apache.logging.log4j:log4j-core", MAVEN, NOT_IMPORTED),
     ("org.springframework.boot:spring-boot-starter-web", MAVEN, UNKNOWN),
     ("serde-json", CARGO, IMPORTED),
     ("tokio", CARGO, IMPORTED),
@@ -51,12 +56,22 @@ def index(tmp_path):
     ("github.com/apple/swift-nio", SWIFT, IMPORTED),
     ("github.com/onevcat/kingfisher", SWIFT, IMPORTED),
     ("github.com/apple/swift-log", SWIFT, NOT_IMPORTED),
+    ("github.com/firebase/firebase-ios-sdk", SWIFT, IMPORTED),
+    ("github.com/apple/swift-collections", SWIFT, IMPORTED),
+    ("github.com/example/charts-kit", SWIFT, UNKNOWN),
     ("AFNetworking", COCOAPODS, IMPORTED),
     ("Firebase/Analytics", COCOAPODS, IMPORTED),
     ("SnapKit", COCOAPODS, NOT_IMPORTED),
 ])
 def test_native_reachability(index, name, ecosystem, expected):
     assert index.status(Dependency(name, ecosystem, "1.0.0")) == expected
+
+
+def test_renamed_cargo_dependency_matches_its_import_alias(index):
+    renamed = Dependency("serde_json", CARGO, "1.0.0", alias="json")
+    assert index.status(renamed) == NOT_IMPORTED
+    (index.root / "src" / "lib.rs").write_text("use json::Value;\n", encoding="utf-8")
+    assert ReachabilityIndex(index.root).status(renamed) == IMPORTED
 
 
 def test_unimported_transitive_dependency_is_transitive(index):
