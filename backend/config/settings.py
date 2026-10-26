@@ -182,6 +182,9 @@ JIRA_API_TOKEN = os.environ.get("SECGUARD_JIRA_API_TOKEN", "").strip()
 JIRA_PROJECT = os.environ.get("SECGUARD_JIRA_PROJECT", "").strip()
 
 JIRA_ISSUE_TYPE = os.environ.get("SECGUARD_JIRA_ISSUE_TYPE", "Bug").strip()
+JIRA_WONT_FIX_RESOLUTION = os.environ.get(
+    "SECGUARD_JIRA_WONT_FIX_RESOLUTION", "Won't Do"
+).strip()
 
 # e.g. https://dev.azure.com/contoso
 AZURE_DEVOPS_URL = os.environ.get("SECGUARD_AZURE_DEVOPS_URL", "").strip().rstrip("/")

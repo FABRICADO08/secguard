@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from backend.config import settings
@@ -23,6 +23,12 @@ from backend.tickets.providers import (
     TicketError,
     active,
 )
+
+RESERVATION = timedelta(minutes=5)
+
+
+class TicketPending(TicketError):
+    """Another request is opening this finding's ticket right now."""
 
 LOG = logging.getLogger(__name__)
 
@@ -80,26 +86,47 @@ def draft(application: dict[str, Any], finding: dict[str, Any]) -> Draft:
     )
 
 
+def _reserve(previous: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    if previous.get("ticket"):
+        return None, "exists"
+    pending = str(previous.get("ticket_pending") or "")
+    if pending and datetime.now(timezone.utc) - datetime.fromisoformat(pending) < RESERVATION:
+        return None, "pending"
+    return {**previous, "ticket_pending": _now()}, ""
+
+
+def _release(previous: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
+    return {key: value for key, value in previous.items() if key != "ticket_pending"}, ""
+
+
 def _with_ticket(ticket: dict[str, Any]):
     def change(previous: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
-        if previous.get("ticket"):
-            return previous, ""
-        return {**previous, "ticket": ticket}, ""
+        record = {key: value for key, value in previous.items() if key != "ticket_pending"}
+        return {**record, "ticket": previous.get("ticket") or ticket}, ""
 
     return change
 
 
 def open_ticket(application: dict[str, Any], finding: dict[str, Any]) -> dict[str, Any]:
-    """The finding's ticket, opened in the configured tracker unless it already has one."""
+    """The finding's ticket, opened in the configured tracker unless it already has one.
+
+    The record is reserved first, so concurrent scans or clicks never open two tickets for one finding.
+    """
     provider = active()
     if provider is None:
         raise TicketError("Ticket sync is not configured on this server.")
     system = triage.system_key(application)
     key = finding_key(finding)
-    existing = triage_store.load_system(system).get(key, {}).get("ticket")
-    if existing:
-        return existing
-    created = provider.create(draft(application, finding))
+    _, problem = triage_store.update_record(system, key, _reserve)
+    if problem == "exists":
+        return triage_store.load_system(system)[key]["ticket"]
+    if problem == "pending":
+        raise TicketPending("A ticket for this finding is already being opened.")
+    try:
+        created = provider.create(draft(application, finding))
+    except Exception:
+        triage_store.update_record(system, key, _release)
+        raise
     ticket = {"provider": provider.name, "id": created.id, "url": created.url, "state": OPEN, "synced_at": _now()}
     record, _ = triage_store.update_record(system, key, _with_ticket(ticket))
     return (record or {}).get("ticket") or ticket
@@ -107,6 +134,12 @@ def open_ticket(application: dict[str, Any], finding: dict[str, Any]) -> dict[st
 
 def desired_state(status: str) -> str:
     return WONT_FIX if status in triage.NEEDS_REASON else OPEN
+
+
+def needs_push(status: str, state: str) -> bool:
+    """Whether the ticket lags the workflow; a ticket closed as done stays closed until a scan disagrees."""
+    target = desired_state(status)
+    return target != state and not (target == OPEN and state == DONE)
 
 
 def _store_state(system: str, key: str, state: str, update: dict[str, str] | None = None, by: str = "") -> None:
@@ -127,9 +160,9 @@ def push(system: str, key: str, record: dict[str, Any], by: str) -> str:
     if not ticket or provider is None or ticket.get("provider") != provider.name:
         return ""
     status = str(record.get("status") or triage.OPEN)
-    target = desired_state(status)
-    if target == ticket.get("state"):
+    if not needs_push(status, str(ticket.get("state"))):
         return ""
+    target = desired_state(status)
     label = status.replace("_", " ")
     comment = f"SecGuard: {by} set this finding to {label}."
     if record.get("reason"):
@@ -189,19 +222,36 @@ def _pull(system: str, records: dict[str, dict[str, Any]], provider: Provider, r
         result["updated"] += apply_remote(system, key, record, state, provider)
 
 
+def _retry_pushes(system: str, records: dict[str, dict[str, Any]], provider: Provider, result) -> None:
+    """Push workflow changes whose ticket update failed earlier."""
+    for key, record in records.items():
+        ticket = record.get("ticket") or {}
+        status = str(record.get("status") or triage.OPEN)
+        if ticket.get("provider") != provider.name or not needs_push(status, str(ticket.get("state"))):
+            continue
+        if push(system, key, record, str(record.get("updated_by") or "SecGuard")):
+            result["errors"] += 1
+        else:
+            result["updated"] += 1
+
+
+def _wants_ticket(finding: dict[str, Any], records: dict[str, dict[str, Any]], minimum: int) -> bool:
+    record = records.get(finding_key(finding)) or {}
+    if record.get("ticket") or (record.get("status") or triage.OPEN) not in triage.ACTIVE:
+        return False
+    return SEVERITY_RANK.get(str(finding.get("severity")), 0) >= minimum
+
+
 def _open_missing(application: dict[str, Any], findings: list[dict[str, Any]], records, result) -> None:
     minimum = auto_threshold()
     if minimum is None:
         return
-    for finding in findings:
-        record = records.get(finding_key(finding)) or {}
-        if record.get("ticket") or (record.get("status") or triage.OPEN) not in triage.ACTIVE:
-            continue
-        if SEVERITY_RANK.get(str(finding.get("severity")), 0) < minimum:
-            continue
+    for finding in (item for item in findings if _wants_ticket(item, records, minimum)):
         try:
             open_ticket(application, finding)
             result["opened"] += 1
+        except TicketPending:
+            continue
         except TicketError:
             LOG.warning("Could not open a ticket for %s", finding_key(finding), exc_info=True)
             result["errors"] += 1
@@ -242,6 +292,7 @@ def sync_application(application: dict[str, Any], findings: list[dict[str, Any]]
         return result
     system = triage.system_key(application)
     _pull(system, triage_store.load_system(system), provider, result)
+    _retry_pushes(system, triage_store.load_system(system), provider, result)
     if latest_application_id(system) != application.get("id"):
         return result
     _open_missing(application, findings, triage_store.load_system(system), result)
