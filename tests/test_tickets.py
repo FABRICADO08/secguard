@@ -181,6 +181,12 @@ def test_tracker_failure_does_not_lose_the_workflow_change(client, tracker):
     assert payload["workflow"]["ticket"]["state"] == "open"
     assert "could not be updated" in payload["ticket_error"]
 
+    tracker.fail = False
+    application = scans.load_application("scan-1")
+    assert sync.sync_application(application, [FINDING])["updated"] == 1
+    assert tracker.issues[1]["state_reason"] == "not_planned"
+    assert record()["ticket"]["state"] == "wont_fix"
+
 
 def test_closing_the_issue_as_not_planned_accepts_the_risk(client, tracker):
     application = store("scan-1", [FINDING])
@@ -259,7 +265,7 @@ def test_jira_states_and_transitions(monkeypatch):
 
     def fake(method, url, **kwargs):
         calls.append((method, url, kwargs.get("json")))
-        return Response(200, transitions if url.endswith("/transitions") else issue)
+        return Response(200, transitions if "/transitions?" in url else issue)
 
     monkeypatch.setattr(providers.requests, "request", fake)
     monkeypatch.setattr(settings, "JIRA_URL", "https://acme.atlassian.net")
@@ -294,3 +300,78 @@ def test_azure_states(monkeypatch):
     azure.set_state("42", providers.DONE, "Fixed")
     assert calls[-1][2] == [{"op": "add", "path": "/fields/System.State", "value": "Closed"},
                             {"op": "add", "path": "/fields/System.History", "value": "Fixed"}]
+
+
+def test_concurrent_requests_open_one_ticket(client, tracker):
+    application = store("scan-1", [FINDING])
+    triage_store.update_record(SYSTEM, KEY, lambda previous: ({**previous, "ticket_pending": sync._now()}, ""))
+
+    with pytest.raises(sync.TicketPending):
+        sync.open_ticket(application, FINDING)
+    assert client.post("/api/applications/scan-1/findings/scan-1-f1/ticket").status_code == 409
+    assert sync.sync_application(application, [FINDING])["opened"] == 0
+    assert tracker.issues == {}
+
+    stale = (sync.datetime.now(sync.timezone.utc) - sync.RESERVATION * 2).isoformat()
+    triage_store.update_record(SYSTEM, KEY, lambda previous: ({**previous, "ticket_pending": stale}, ""))
+    assert sync.open_ticket(application, FINDING)["id"] == "acme/api#1"
+    assert "ticket_pending" not in record()
+
+
+def test_failed_creation_releases_the_reservation(client, tracker):
+    application = store("scan-1", [FINDING])
+    tracker.fail = True
+    with pytest.raises(providers.TicketError):
+        sync.open_ticket(application, FINDING)
+    assert "ticket_pending" not in record()
+
+    tracker.fail = False
+    assert sync.open_ticket(application, FINDING)["id"] == "acme/api#1"
+
+
+def test_jira_not_planned_uses_a_rejection_transition(monkeypatch):
+    calls = []
+    transitions = {"transitions": [
+        {"id": "31", "name": "Done", "to": {"name": "Done", "statusCategory": {"key": "done"}}},
+        {"id": "41", "name": "Reject", "to": {"name": "Rejected", "statusCategory": {"key": "done"}},
+         "fields": {"resolution": {"required": False}}},
+    ]}
+
+    def fake(method, url, **kwargs):
+        calls.append((method, url, kwargs.get("json")))
+        return Response(200, transitions)
+
+    monkeypatch.setattr(providers.requests, "request", fake)
+    monkeypatch.setattr(settings, "JIRA_URL", "https://acme.atlassian.net")
+    jira = providers.JiraIssues()
+
+    jira.set_state("SEC-4", providers.WONT_FIX, "")
+    assert calls[-1][2] == {"transition": {"id": "41"}, "fields": {"resolution": {"name": "Won't Do"}}}
+    jira.set_state("SEC-4", providers.DONE, "")
+    assert calls[-1][2] == {"transition": {"id": "31"}}
+
+
+def test_azure_description_is_escaped(monkeypatch):
+    calls = []
+
+    def fake(method, url, **kwargs):
+        calls.append(kwargs.get("json"))
+        return Response(200, {"id": 7})
+
+    monkeypatch.setattr(providers.requests, "request", fake)
+    monkeypatch.setattr(settings, "AZURE_DEVOPS_URL", "https://dev.azure.com/acme")
+    providers.AzureWorkItems().create(providers.Draft("t", "<img src=x onerror=alert(1)>\nnext", ""))
+
+    description = next(op["value"] for op in calls[0] if op["path"] == "/fields/System.Description")
+    assert description == "&lt;img src=x onerror=alert(1)&gt;<br>next"
+
+
+def test_tracker_urls_must_use_https(monkeypatch):
+    monkeypatch.setattr(settings, "TICKET_PROVIDER", "jira")
+    monkeypatch.setattr(settings, "JIRA_URL", "http://jira.internal")
+    monkeypatch.setattr(settings, "JIRA_EMAIL", "bot@acme.test")
+    monkeypatch.setattr(settings, "JIRA_API_TOKEN", "token")
+    monkeypatch.setattr(settings, "JIRA_PROJECT", "SEC")
+
+    assert providers.missing_settings("jira") == ["SECGUARD_JIRA_URL (must start with https://)"]
+    assert providers.active() is None

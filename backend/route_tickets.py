@@ -85,6 +85,8 @@ def _register_application_routes(app):
         application = load_application(application_id)
         try:
             sync.open_ticket(application, finding)
+        except sync.TicketPending as error:
+            return jsonify({"success": False, "error": str(error)}), 409
         except TicketError:
             sync.LOG.warning("Could not open a ticket for %s", finding_key(finding), exc_info=True)
             return jsonify({"success": False, "error": "The ticket could not be opened. The server log has the details."}), 502

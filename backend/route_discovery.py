@@ -20,7 +20,7 @@ from backend.security.rate_limit import rate_limited
 from backend.security.targets import BlockedTargetError, assert_target_allowed
 from backend.storage.findings import save_findings
 from backend.storage.scans import save_application
-
+from backend.tickets import sync as ticket_sync
 
 BLOCKED_TARGET_MESSAGE = (
     "The target, or a page it redirects to, is not allowed: only public "
@@ -65,6 +65,7 @@ def _analyze_and_save(application, response, technologies, status, observed=True
     application.update_timestamp()
     save_application(application.to_dict())
     save_findings(application.id, findings)
+    ticket_sync.sync_in_background(application.to_dict(), findings)
 
 
 def _certificate_response(requested_url, final_url):

@@ -13,13 +13,16 @@ from backend.platforms.outsystems.findings import (
     RULE_CATALOGUE as OUTSYSTEMS_RULE_CATALOGUE,
 )
 from backend.platforms.outsystems.service import EMPTY_MODEL as OUTSYSTEMS_EMPTY_MODEL
-from backend.platforms.outsystems.service import analyze_model as analyze_outsystems_model
+from backend.platforms.outsystems.service import (
+    analyze_model as analyze_outsystems_model,
+)
 from backend.recommendations import build_recommendations
 from backend.risk.scoring import summarize
 from backend.security.auth import require_api_token
 from backend.security.rate_limit import rate_limited
 from backend.storage.findings import save_findings
 from backend.storage.scans import save_application
+from backend.tickets import sync as ticket_sync
 
 
 def _model_name(value: str, fallback: str = "model.json") -> str:
@@ -119,6 +122,7 @@ def _analyze_platform_model(app, compatibility, platform, analyzer, empty_model,
     application.update_timestamp()
     save_application(application.to_dict())
     save_findings(application.id, findings)
+    ticket_sync.sync_in_background(application.to_dict(), findings)
     return jsonify(
         {
             "success": True,

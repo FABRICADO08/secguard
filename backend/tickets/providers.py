@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import html
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -17,6 +18,7 @@ DONE = "done"
 WONT_FIX = "wont_fix"
 
 JIRA_WONT_FIX = frozenset({"won't do", "won't fix", "declined", "duplicate", "cannot reproduce", "not a bug"})
+JIRA_REJECTION_WORDS = ("won't", "wont", "reject", "declin", "not planned", "cancel")
 
 
 class TicketError(RuntimeError):
@@ -115,6 +117,15 @@ def _adf(text: str) -> dict[str, object]:
     }
 
 
+def _category(transition: dict) -> str:
+    return str(((transition.get("to") or {}).get("statusCategory") or {}).get("key") or "")
+
+
+def _rejecting(transition: dict) -> bool:
+    names = f"{transition.get('name', '')} {(transition.get('to') or {}).get('name', '')}".lower()
+    return any(word in names for word in JIRA_REJECTION_WORDS)
+
+
 class JiraIssues:
     name = "jira"
     label = "Jira issue"
@@ -143,29 +154,31 @@ class JiraIssues:
         if category != "done":
             return OPEN
         resolution = str((fields.get("resolution") or {}).get("name") or "").lower()
-        return WONT_FIX if resolution in JIRA_WONT_FIX else DONE
+        rejected = resolution in JIRA_WONT_FIX or resolution == settings.JIRA_WONT_FIX_RESOLUTION.lower()
+        return WONT_FIX if rejected else DONE
+
+    def _transition(self, ticket_id: str, state: str) -> dict:
+        """The workflow step to the state; a rejection-like step is preferred for not planned."""
+        target = "new" if state == OPEN else "done"
+        listed = _call(
+            "GET", self._api(f"/issue/{ticket_id}/transitions?expand=transitions.fields"), auth=self._auth()
+        ).json()
+        candidates = [item for item in listed.get("transitions") or [] if _category(item) == target]
+        if not candidates:
+            raise TicketError(f"The Jira workflow of {ticket_id} has no transition to a '{target}' status.")
+        if state == OPEN:
+            return candidates[0]
+        preferred = [item for item in candidates if _rejecting(item) == (state == WONT_FIX)]
+        return (preferred or candidates)[0]
 
     def set_state(self, ticket_id: str, state: str, comment: str) -> None:
-        target = "new" if state == OPEN else "done"
-        transitions = _call("GET", self._api(f"/issue/{ticket_id}/transitions"), auth=self._auth()).json()
-        transition = next(
-            (
-                item
-                for item in transitions.get("transitions") or []
-                if ((item.get("to") or {}).get("statusCategory") or {}).get("key") == target
-            ),
-            None,
-        )
-        if transition is None:
-            raise TicketError(f"The Jira workflow of {ticket_id} has no transition to a '{target}' status.")
+        transition = self._transition(ticket_id, state)
+        payload: dict[str, object] = {"transition": {"id": transition["id"]}}
+        if state == WONT_FIX and "resolution" in (transition.get("fields") or {}):
+            payload["fields"] = {"resolution": {"name": settings.JIRA_WONT_FIX_RESOLUTION}}
         if comment:
             _call("POST", self._api(f"/issue/{ticket_id}/comment"), auth=self._auth(), json={"body": _adf(comment)})
-        _call(
-            "POST",
-            self._api(f"/issue/{ticket_id}/transitions"),
-            auth=self._auth(),
-            json={"transition": {"id": transition["id"]}},
-        )
+        _call("POST", self._api(f"/issue/{ticket_id}/transitions"), auth=self._auth(), json=payload)
 
 
 class AzureWorkItems:
@@ -183,7 +196,7 @@ class AzureWorkItems:
         return f"{settings.AZURE_DEVOPS_URL}/{settings.AZURE_DEVOPS_PROJECT}/_apis/wit/workitems/{ticket_id}?api-version=7.1"
 
     def create(self, draft: Draft) -> Ticket:
-        body = "<br>".join(draft.body.splitlines())
+        body = "<br>".join(html.escape(line) for line in draft.body.splitlines())
         operations = [
             {"op": "add", "path": "/fields/System.Title", "value": draft.title[:250]},
             {"op": "add", "path": "/fields/System.Description", "value": body},
@@ -241,7 +254,12 @@ def missing_settings(name: str) -> list[str]:
     }.get(name)
     if required is None:
         return ["SECGUARD_TICKET_PROVIDER"]
-    return [key for key, value in required.items() if not value]
+    missing = [key for key, value in required.items() if not value]
+    for key in ("SECGUARD_JIRA_URL", "SECGUARD_AZURE_DEVOPS_URL"):
+        value = required.get(key)
+        if value and not value.lower().startswith("https://"):
+            missing.append(f"{key} (must start with https://)")
+    return missing
 
 
 def active() -> Provider | None:
