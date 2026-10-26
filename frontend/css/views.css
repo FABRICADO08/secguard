@@ -883,3 +883,11 @@ pre.evidence {
     gap: 6px;
     overflow-wrap: anywhere;
 }
+
+.ticket-line {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    overflow-wrap: anywhere;
+}

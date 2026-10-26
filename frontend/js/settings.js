@@ -55,6 +55,11 @@ view.innerHTML = `
         <p class="muted">Loading…</p>
     </section>
 
+    <section class="card" id="ticketsCard">
+        <div class="card__head"><h2>Ticket sync</h2></div>
+        <p class="muted">Loading…</p>
+    </section>
+
     <section class="card">
         <div class="card__head"><h2>Service</h2></div>
         <dl class="pairs" id="health">
@@ -314,6 +319,71 @@ getJson("/api/teams")
     .catch(error => {
         document.getElementById("teamsCard").innerHTML = `
             <div class="card__head"><h2>Teams and business units</h2></div>
+            <p class="muted">${escapeHtml(error.message)}</p>
+        `;
+    });
+
+
+function ticketSummary(settings) {
+    if (!settings.provider) {
+        return `Not configured. Set <span class="mono">SECGUARD_TICKET_PROVIDER</span> to
+            <span class="mono">github</span>, <span class="mono">jira</span> or
+            <span class="mono">azure</span> on the server.`;
+    }
+    if (!settings.configured) {
+        return `${escapeHtml(settings.label)}s need these server settings: ${settings.missing
+            .map(name => `<span class="mono">${escapeHtml(name)}</span>`).join(", ")}.`;
+    }
+    const automatic = settings.min_severity === "none"
+        ? "Tickets are opened from each finding's page."
+        : `Every scan opens a ${escapeHtml(settings.label)} for each new ${
+            escapeHtml(settings.min_severity)} or worse finding.`;
+    return `${automatic} Accepting a risk or marking a false positive closes the ticket as not planned,
+        and closing a ticket as not planned accepts the risk. A ticket closes when a scan no longer
+        detects its finding and reopens if the finding is still there.
+        ${settings.webhook ? "GitHub reports issue changes instantly through the webhook." : ""}`;
+}
+
+
+function renderTickets(settings) {
+    const card = document.getElementById("ticketsCard");
+
+    card.innerHTML = `
+        <div class="card__head"><h2>Ticket sync</h2>${settings.configured
+            ? '<span class="pill pill--met">Configured</span>' : ""}</div>
+        <p class="muted">${ticketSummary(settings)}</p>
+        ${settings.can_edit && settings.configured ? `
+            <div class="toolbar">
+                <button class="button button--ghost" id="syncTickets" type="button">Sync all applications now</button>
+                <span id="ticketStatus" class="muted" role="status"></span>
+            </div>` : ""}
+    `;
+
+    document.getElementById("syncTickets")?.addEventListener("click", async () => {
+        const status = document.getElementById("ticketStatus");
+        status.textContent = "Syncing…";
+        try {
+            const response = await apiFetch("/api/tickets/sync", { method: "POST" });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Sync failed.");
+            }
+            const result = data.result || {};
+            status.textContent = `${result.opened || 0} opened · ${result.closed || 0} closed · ${
+                result.reopened || 0} reopened · ${result.updated || 0} findings updated${
+                result.errors ? ` · ${result.errors} failed` : ""}`;
+        } catch (error) {
+            status.textContent = error.message;
+        }
+    });
+}
+
+
+getJson("/api/tickets")
+    .then(renderTickets)
+    .catch(error => {
+        document.getElementById("ticketsCard").innerHTML = `
+            <div class="card__head"><h2>Ticket sync</h2></div>
             <p class="muted">${escapeHtml(error.message)}</p>
         `;
     });

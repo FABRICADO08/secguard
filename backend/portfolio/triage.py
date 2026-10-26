@@ -64,6 +64,7 @@ def workflow(finding: dict[str, Any], record: dict[str, Any] | None, today: date
         "sla_due_date": deadline,
         "overdue": _overdue(due, status, today),
         "history": record.get("history") or [],
+        "ticket": record.get("ticket"),
         **{field: record.get(field) or "" for field in ("owner", "reason", "updated_at", "updated_by")},
     }
 
@@ -145,4 +146,4 @@ def apply_update(
         return previous
     history = list(previous.get("history") or [])
     history = (history + [{"at": moment, "by": actor, "changes": changes}])[-MAX_HISTORY:]
-    return {**update, "updated_at": moment, "updated_by": actor, "history": history}
+    return {**previous, **update, "updated_at": moment, "updated_by": actor, "history": history}

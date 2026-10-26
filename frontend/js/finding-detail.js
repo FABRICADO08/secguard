@@ -71,6 +71,51 @@ function historyMarkup(history) {
 }
 
 
+const TICKET_LABELS = {
+    github: "GitHub issue",
+    jira: "Jira issue",
+    azure: "Azure DevOps work item",
+};
+
+const TICKET_STATES = { open: "Open", done: "Closed as done", wont_fix: "Closed as not planned" };
+
+let ticketSettings = null;
+
+
+function safeLink(url) {
+    return /^https:\/\//i.test(url || "") ? url : "";
+}
+
+
+function ticketMarkup(ticket, canEdit) {
+    if (ticket) {
+        const name = `${TICKET_LABELS[ticket.provider] || "Ticket"} ${ticket.id}`;
+        const link = safeLink(ticket.url);
+        return `
+            <p class="ticket-line">
+                Ticket: ${link
+                    ? `<a href="${escapeHtml(link)}" target="_blank" rel="noopener noreferrer">${escapeHtml(name)}</a>`
+                    : escapeHtml(name)}
+                · ${escapeHtml(TICKET_STATES[ticket.state] || ticket.state || "")}
+                ${canEdit && ticketSettings?.configured
+                    ? '<button class="button button--ghost" id="syncTicket" type="button">Sync now</button>'
+                    : ""}
+                <span id="ticketMessage" role="status"></span>
+            </p>`;
+    }
+    if (canEdit && ticketSettings?.configured) {
+        return `
+            <p class="ticket-line">
+                <button class="button button--ghost" id="openTicket" type="button">
+                    Open ${escapeHtml(ticketSettings.label)}
+                </button>
+                <span id="ticketMessage" role="status"></span>
+            </p>`;
+    }
+    return "";
+}
+
+
 function workflowCard(finding, canEdit) {
     const workflow = finding.workflow || {};
     const disabled = canEdit ? "" : "disabled";
@@ -111,6 +156,7 @@ function workflowCard(finding, canEdit) {
             </form>
             <p class="muted">Deadline by severity: ${
                 escapeHtml(formatDate(workflow.sla_due_date) || "none")}</p>
+            ${ticketMarkup(workflow.ticket, canEdit)}
             <div class="card__head"><h2>History</h2></div>
             ${historyMarkup(workflow.history || [])}
         </section>
@@ -151,7 +197,49 @@ function wireWorkflow(finding) {
         }
 
         render({ ...finding, workflow: data.workflow }, true);
-        document.getElementById("workflowMessage").textContent = "Saved.";
+        const saved = document.getElementById("workflowMessage");
+        if (data.ticket_error) {
+            saved.className = "notice notice--warning";
+            saved.textContent = `Saved, but ${data.ticket_error}`;
+        } else {
+            saved.textContent = "Saved.";
+        }
+    });
+}
+
+
+async function ticketAction(url, message) {
+    message.className = "muted";
+    message.textContent = "Working…";
+    const response = await apiFetch(url, { method: "POST" });
+    const data = await response.json();
+    if (!response.ok) {
+        message.className = "notice notice--error";
+        message.textContent = data.error || "The ticket could not be updated.";
+        return null;
+    }
+    return data;
+}
+
+
+function wireTicket(finding) {
+    const base = `/api/applications/${encodeURIComponent(applicationId)}`;
+
+    document.getElementById("openTicket")?.addEventListener("click", async () => {
+        const data = await ticketAction(
+            `${base}/findings/${encodeURIComponent(findingId)}/ticket`,
+            document.getElementById("ticketMessage")
+        );
+        if (data) {
+            render({ ...finding, workflow: data.workflow }, true);
+        }
+    });
+
+    document.getElementById("syncTicket")?.addEventListener("click", async () => {
+        const data = await ticketAction(`${base}/tickets/sync`, document.getElementById("ticketMessage"));
+        if (data) {
+            await load();
+        }
     });
 }
 
@@ -232,6 +320,7 @@ function render(finding, canEdit) {
 
     if (canEdit) {
         wireWorkflow(finding);
+        wireTicket(finding);
     }
 }
 
@@ -251,11 +340,15 @@ async function load() {
     view.innerHTML = '<div class="card empty">Loading finding…</div>';
 
     try {
-        const payload = await getJson(
-            `/api/applications/${encodeURIComponent(
-                applicationId
-            )}/findings/${encodeURIComponent(findingId)}`
-        );
+        const [payload, tickets] = await Promise.all([
+            getJson(
+                `/api/applications/${encodeURIComponent(
+                    applicationId
+                )}/findings/${encodeURIComponent(findingId)}`
+            ),
+            getJson("/api/tickets").catch(() => null),
+        ]);
+        ticketSettings = tickets;
 
         render(payload.finding, Boolean(payload.can_edit));
     } catch (error) {

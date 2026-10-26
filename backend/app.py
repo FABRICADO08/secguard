@@ -25,6 +25,7 @@ from backend.route_objectives import register_routes as register_objective_route
 from backend.route_reports import register_report_routes
 from backend.route_repositories import register_routes as register_repository_routes
 from backend.route_teams import register_routes as register_team_routes
+from backend.route_tickets import register_routes as register_ticket_routes
 from backend.scanners.configuration import scan_exposed_paths
 from backend.security import github_auth
 from backend.storage.scans import application_exists, load_application
@@ -132,6 +133,7 @@ register_repository_routes(app, compatibility)
 register_objective_routes(app)
 register_report_routes(app)
 register_team_routes(app)
+register_ticket_routes(app)
 
 
 if __name__ == "__main__":

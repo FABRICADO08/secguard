@@ -25,6 +25,7 @@ from backend.storage.scans import (
     load_application,
     save_application,
 )
+from backend.tickets import sync as ticket_sync
 
 
 def _repository_report(application_id: str) -> dict | None:
@@ -149,6 +150,7 @@ def _register_ingest_route(app, compatibility):
         previous = _previous_findings(key) if alerts.enabled() else None
         save_application(application.to_dict())
         save_findings(application.id, findings)
+        ticket_sync.sync_in_background(application.to_dict(), findings)
         if alerts.enabled():
             alerts.notify_new_findings(
                 _application_name(key, application.to_dict()), application.id, previous, findings
