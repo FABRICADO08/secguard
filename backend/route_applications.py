@@ -24,6 +24,7 @@ from backend.storage.scans import (
     list_applications,
     load_application,
 )
+from backend.tickets import sync as ticket_sync
 
 
 def _platform_rules(platform: str, catalogue: dict) -> list[dict]:
@@ -174,9 +175,15 @@ def _register_workflow_route(app):
         record, problem = triage_store.update_record(system, finding_key(finding), change)
         if record is None:
             return jsonify({"success": False, "error": problem}), 400
+        ticket_error = ticket_sync.push(system, finding_key(finding), record, actor)
+        record = triage_store.load_system(system).get(finding_key(finding), record)
         today = datetime.now(timezone.utc).date()
         return jsonify(
-            {"success": True, "workflow": triage.workflow(finding, record, today)}
+            {
+                "success": True,
+                "workflow": triage.workflow(finding, record, today),
+                "ticket_error": ticket_error,
+            }
         )
 
 

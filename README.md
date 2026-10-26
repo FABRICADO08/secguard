@@ -238,6 +238,26 @@ Alerts and the digest cover every GitHub-connected application on the server reg
 
 PDF management reports: **PDF report** on an application's health page (`GET /api/applications/<id>/report.pdf`) and **Portfolio PDF** on My Applications (`GET /api/reports/portfolio.pdf`, limited to the applications the signed-in user can read).
 
+### Ticket sync
+
+Findings can become GitHub issues, Jira issues or Azure DevOps work items, and their status stays in sync both ways. Choose one tracker with `SECGUARD_TICKET_PROVIDER` (`github`, `jira` or `azure`); its tokens live in the server environment and are never sent to the browser.
+
+| Variable | Purpose |
+| --- | --- |
+| `SECGUARD_TICKET_MIN_SEVERITY` | Severity (default `high`) at or above which each scan opens a ticket for every active finding without one; `none` opens tickets only from the finding page |
+| `SECGUARD_GITHUB_TICKET_TOKEN` | GitHub token with *Issues: read and write* on the applications' repositories; issues open in each application's own repository |
+| `SECGUARD_TICKET_WEBHOOK_SECRET` | Secret of a GitHub *Issues* webhook pointing at `/api/tickets/github/webhook`, so issue changes arrive instantly |
+| `SECGUARD_JIRA_URL`, `SECGUARD_JIRA_EMAIL`, `SECGUARD_JIRA_API_TOKEN`, `SECGUARD_JIRA_PROJECT`, `SECGUARD_JIRA_ISSUE_TYPE` (Bug) | Jira Cloud |
+| `SECGUARD_AZURE_DEVOPS_URL`, `SECGUARD_AZURE_DEVOPS_PROJECT`, `SECGUARD_AZURE_DEVOPS_TOKEN`, `SECGUARD_AZURE_DEVOPS_WORK_ITEM_TYPE` (Bug) | Azure DevOps Boards; `SECGUARD_AZURE_DEVOPS_OPEN_STATE` (Active), `_DONE_STATE` (Closed) and `_WONT_FIX_STATE` (Removed) match your process |
+
+How status flows:
+
+- Marking a finding as a false positive or an accepted risk closes its ticket as not planned (Jira: a transition to a Done status; Azure DevOps: the won't-fix state); setting it back to Open or In progress reopens it.
+- Closing a ticket as not planned (GitHub "not planned", Jira resolutions such as Won't Do, Azure DevOps won't-fix state) marks the finding as an accepted risk, and reopening the ticket reopens the finding. The change appears in the finding's history under the ticket's name, for example `GitHub issue acme/api#12`.
+- A ticket closed as done leaves the finding open until a scan confirms the fix: when the newest scan no longer detects the finding SecGuard closes the ticket, and when it still detects a finding whose ticket was closed, SecGuard reopens the ticket.
+
+Every uploaded scan syncs in the background. **Sync now** on a finding (`POST /api/applications/<id>/tickets/sync`) and **Settings > Ticket sync > Sync all applications now** (`POST /api/tickets/sync`, administrators) read Jira and Azure DevOps changes between scans. Opening and syncing tickets needs the same write access as changing a finding's status; read-only team members cannot.
+
 ### Teams and business units
 
 Administrators (the API token or a login in `SECGUARD_ADMINS`) define teams under **Settings > Teams and business units** (`PUT /api/teams`): a name, an optional business unit, the applications the team owns and its GitHub members. **My Applications** then shows a rollup per team and business unit, a filter for both, the team next to each application, and a **Portfolio PDF** for the selected team or business unit (`GET /api/reports/portfolio.pdf?team=<team id>` or `?unit=<business unit>`).

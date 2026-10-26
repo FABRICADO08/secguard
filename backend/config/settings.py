@@ -157,3 +157,44 @@ ALERT_MIN_SEVERITY = os.environ.get("SECGUARD_ALERT_MIN_SEVERITY", "critical").s
 
 # Base URL of this server, used for links in alerts and digests.
 PUBLIC_URL = os.environ.get("SECGUARD_PUBLIC_URL", "").strip().rstrip("/")
+
+# Ticket sync: each finding at or above TICKET_MIN_SEVERITY gets a ticket in
+# the chosen tracker ("github", "jira" or "azure"), and status changes flow
+# both ways. Tokens are secrets: set them in the server environment only.
+TICKET_PROVIDER = os.environ.get("SECGUARD_TICKET_PROVIDER", "").strip().lower()
+
+# Lowest severity that opens a ticket automatically after a scan; "none"
+# leaves ticket creation to the finding page.
+TICKET_MIN_SEVERITY = os.environ.get("SECGUARD_TICKET_MIN_SEVERITY", "high").strip().lower()
+
+# Token allowed to read and write issues in the applications' repositories.
+GITHUB_TICKET_TOKEN = os.environ.get("SECGUARD_GITHUB_TICKET_TOKEN", "").strip()
+
+# Shared secret of the GitHub "Issues" webhook that reports issue changes.
+TICKET_WEBHOOK_SECRET = os.environ.get("SECGUARD_TICKET_WEBHOOK_SECRET", "").strip()
+
+JIRA_URL = os.environ.get("SECGUARD_JIRA_URL", "").strip().rstrip("/")
+
+JIRA_EMAIL = os.environ.get("SECGUARD_JIRA_EMAIL", "").strip()
+
+JIRA_API_TOKEN = os.environ.get("SECGUARD_JIRA_API_TOKEN", "").strip()
+
+JIRA_PROJECT = os.environ.get("SECGUARD_JIRA_PROJECT", "").strip()
+
+JIRA_ISSUE_TYPE = os.environ.get("SECGUARD_JIRA_ISSUE_TYPE", "Bug").strip()
+
+# e.g. https://dev.azure.com/contoso
+AZURE_DEVOPS_URL = os.environ.get("SECGUARD_AZURE_DEVOPS_URL", "").strip().rstrip("/")
+
+AZURE_DEVOPS_PROJECT = os.environ.get("SECGUARD_AZURE_DEVOPS_PROJECT", "").strip()
+
+AZURE_DEVOPS_TOKEN = os.environ.get("SECGUARD_AZURE_DEVOPS_TOKEN", "").strip()
+
+AZURE_DEVOPS_WORK_ITEM_TYPE = os.environ.get("SECGUARD_AZURE_DEVOPS_WORK_ITEM_TYPE", "Bug").strip()
+
+# Work item states SecGuard moves to when closing and reopening.
+AZURE_DEVOPS_DONE_STATE = os.environ.get("SECGUARD_AZURE_DEVOPS_DONE_STATE", "Closed").strip()
+
+AZURE_DEVOPS_WONT_FIX_STATE = os.environ.get("SECGUARD_AZURE_DEVOPS_WONT_FIX_STATE", "Removed").strip()
+
+AZURE_DEVOPS_OPEN_STATE = os.environ.get("SECGUARD_AZURE_DEVOPS_OPEN_STATE", "Active").strip()
