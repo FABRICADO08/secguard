@@ -380,6 +380,15 @@ table.data tr.row-low td:first-child {
     word-break: break-all;
 }
 
+.mono.version {
+    white-space: nowrap;
+    word-break: normal;
+}
+
+.usage-list > div + div {
+    margin-top: 4px;
+}
+
 /* Tables turn into stacked cards where a row cannot fit a phone. */
 @media (max-width: 720px) {
     table.data thead {

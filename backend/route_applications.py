@@ -10,6 +10,7 @@ from backend.platforms.outsystems.findings import (
     RULE_CATALOGUE as OUTSYSTEMS_RULE_CATALOGUE,
 )
 from backend.portfolio import triage
+from backend.portfolio.open_source import open_source_overview
 from backend.portfolio.summary import finding_key, portfolio_summary
 from backend.repository.findings import RULE_CATALOGUE as REPOSITORY_RULE_CATALOGUE
 from backend.risk.scoring import summarize
@@ -65,6 +66,20 @@ def _register_application_list_routes(app):
                 "success": True,
                 **portfolio_summary(
                     github_auth.visible(list_applications()), load_findings
+                ),
+            }
+        )
+
+
+def _register_open_source_route(app):
+    @app.get("/api/portfolio/open-source")
+    def portfolio_open_source():
+        """Return the third-party library inventory of every visible system."""
+        return jsonify(
+            {
+                "success": True,
+                **open_source_overview(
+                    github_auth.visible(list_applications()), load_application
                 ),
             }
         )
@@ -256,6 +271,7 @@ def _register_rules_route(app):
 
 def register_routes(app):
     _register_application_list_routes(app)
+    _register_open_source_route(app)
     _register_application_detail_routes(app)
     _register_finding_routes(app)
     _register_workflow_route(app)
