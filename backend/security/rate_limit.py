@@ -159,6 +159,13 @@ class PostgresRateLimiter:
             cursor.execute(_COUNT_HIT, (key, window_start, limit))
             counted = cursor.fetchone() is not None
 
+            if not counted:
+                # A newer window may hold the full count; the caller waits for that one to end.
+                cursor.execute("SELECT window_start FROM rate_limits WHERE key = %s", (key,))
+                row = cursor.fetchone()
+                if row is not None:
+                    window_start = max(window_start, float(row[0]))
+
             if sweep:
                 cursor.execute("DELETE FROM rate_limits WHERE window_start < %s", (window_start,))
 
