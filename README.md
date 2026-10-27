@@ -310,6 +310,22 @@ The login uses the authorization-code flow with `state` and PKCE; the pending ha
 
 GitHub answers "The redirect_uri is not associated with this application" when the callback SecGuard sends differs from the one registered on the OAuth app. SecGuard always sends `<public-address>/auth/github/callback`; behind a proxy, set `SECGUARD_PROXY_DEPTH` so the public address comes from the proxy's `X-Forwarded-*` headers, or set `SECGUARD_GITHUB_CALLBACK_URL` to the registered URL.
 
+## API keys
+
+Besides the single `SECGUARD_API_TOKEN`, administrators can issue keys for each person or service. Each key has scopes and an expiry date.
+
+| Scope | Allows |
+| --- | --- |
+| `scan` | Starting web and model scans and uploading repository scans (`/api/discover`, `/api/mendix/analyze`, `/api/outsystems/analyze`, `/api/repository/scans`) |
+| `admin` | Everything `scan` allows, plus deleting applications, retention, objectives, teams, the audit log and managing keys |
+
+```bash
+curl -X POST -H "Authorization: Bearer $SECGUARD_API_TOKEN" -H "Content-Type: application/json" \
+  -d '{"name": "ci-uploader", "scopes": ["scan"], "expires_in_days": 90}' https://<host>/api/keys
+```
+
+The response contains the token (`sgk_<id>_<secret>`). It is shown only once; SecGuard keeps only a SHA-256 hash of it. Send it the same way as the master token: `Authorization: Bearer` or `X-API-Key`. Keys last from 1 to 365 days (default 90). `GET /api/keys` lists keys without their secrets, and `DELETE /api/keys/<id>` revokes one immediately. To rotate a key, create the replacement, switch the caller over, then revoke the old one. The audit log records a key's requests as `api-key:<id>`.
+
 ## Security configuration
 
 | Variable | Default | Purpose |

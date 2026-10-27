@@ -13,7 +13,7 @@ from backend.portfolio.teams import teams_for
 from backend.repository.ingest import application_from_report
 from backend.repository.sbom import cyclonedx, spdx
 from backend.security import github_auth
-from backend.security.auth import request_is_authorized, require_api_token
+from backend.security.auth import SCAN, request_is_authorized, require_scope
 from backend.security.rate_limit import rate_limited
 from backend.storage import application_names
 from backend.storage import objectives as objective_store
@@ -123,7 +123,7 @@ def _previous_findings(key: str) -> list[dict] | None:
 
 def _register_ingest_route(app, compatibility):
     @app.post("/api/repository/scans")
-    @require_api_token
+    @require_scope(SCAN)
     @rate_limited
     def ingest_repository_scan():
         if (request.content_length or 0) > compatibility.MAX_MODEL_BYTES:
