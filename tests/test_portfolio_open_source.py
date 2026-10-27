@@ -21,20 +21,21 @@ def _dependency(name, version, **extra):
 LODASH_ADVISORY = {"id": "GHSA-lodash", "severity": "CRITICAL", "summary": "Prototype pollution", "minimum_fix": "4.17.19"}
 
 
-def _ingest(client, tmp_path, name, dependencies):
+def _ingest(client, tmp_path, name, dependencies, advisories=()):
     root = tmp_path / name.replace("/", "_")
     root.mkdir(exist_ok=True)
     (root / "app.py").write_text("def main():\n    return 1\n")
     report = scan_repository(root, {"name": name, "provider": "github"})
     report["dependencies"] = dependencies
+    report["vulnerabilities"] = list(advisories)
     response = client.post("/api/repository/scans", json=report)
     assert response.status_code == 201, response.get_json()
     return response.get_json()["application_id"]
 
 
 def test_libraries_are_folded_across_systems(client, tmp_path):
-    vulnerable = _dependency("lodash", "4.17.15", vulnerabilities=[LODASH_ADVISORY])
-    api = _ingest(client, tmp_path, "acme/api", [vulnerable, _dependency("left-pad", "1.3.0")])
+    vulnerable = _dependency("lodash", "4.17.15", vulnerabilities=[LODASH_ADVISORY["id"]])
+    api = _ingest(client, tmp_path, "acme/api", [vulnerable, _dependency("left-pad", "1.3.0")], [LODASH_ADVISORY])
     web = _ingest(client, tmp_path, "acme/web", [_dependency("Lodash", "4.17.21"), _dependency(
         "gpl-lib", "1.0.0", license_spdx="GPL-3.0-only", license_category="strong-copyleft",
         freshness={"latest": "3.0.0", "behind": {"major": 2}},
@@ -53,7 +54,7 @@ def _assert_libraries(listed, api, web):
     lodash = libraries["lodash"]
     assert listed[0]["name"] == "lodash"
     assert lodash["systems"] == 2 and lodash["versions"] == ["4.17.15", "4.17.21"]
-    assert lodash["severity"] == "critical" and lodash["advisories"][0]["id"] == "GHSA-lodash"
+    assert lodash["severity"] == "critical" and lodash["advisories"][0]["summary"] == "Prototype pollution"
     assert {usage["system_id"]: usage["advisories"] for usage in lodash["usages"]} == {api: ["GHSA-lodash"], web: []}
     _assert_copyleft(libraries["gpl-lib"])
 
@@ -104,3 +105,15 @@ def test_open_source_view_is_empty_without_repository_scans(client):
     payload = client.get("/api/portfolio/open-source").get_json()
 
     assert payload["systems"] == [] and payload["libraries"] == [] and payload["totals"]["libraries"] == 0
+
+
+def test_pypi_spellings_fold_and_latest_release_follows_the_newest_scan(client, tmp_path):
+    older = _dependency("zope.interface", "5.0.0", ecosystem="PyPI", freshness={"latest": "5.0.0", "behind": {}})
+    newer = _dependency("zope_interface", "5.0.0", ecosystem="PyPI", freshness={"latest": "6.0.0", "behind": {"major": 1}})
+    _ingest(client, tmp_path, "acme/zeta", [older])
+    _ingest(client, tmp_path, "acme/alpha", [newer])
+
+    libraries = client.get("/api/portfolio/open-source").get_json()["libraries"]
+
+    assert len(libraries) == 1
+    assert libraries[0]["systems"] == 2 and libraries[0]["latest"] == "6.0.0"
