@@ -24,6 +24,8 @@ To serve it with a production WSGI server:
 
 Keep `--workers 1`: the rate limiter holds its counters in process, so additional workers would each enforce the limit separately.
 
+For a deployment, set `SECGUARD_PRODUCTION=1`. SecGuard then refuses to start, naming each missing setting, unless GitHub sign-in, `SECGUARD_SECRET_KEY`, `SECGUARD_SECURE_COOKIES=1`, `SECGUARD_API_TOKEN` and Postgres are configured and `SECGUARD_ALLOW_PRIVATE_TARGETS` is off. Point the load balancer health check (Azure: **App Service → Monitoring → Health check**) at `GET /api/health/ready`, which answers 503 when storage cannot be reached; `GET /api/health` only confirms the process is up.
+
 ## Database
 
 By default SecGuard stores scan results, findings and application names as JSON files under `data/` — no database is needed for local development.
@@ -39,9 +41,11 @@ The schema (`applications`, `findings` and `application_names` tables) is create
 ## Tests
 
 ```bash
-.venv/bin/pip install pytest
+.venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest tests
 ```
+
+The **CI** workflow runs the tests and the self-scan (`python -m backend.repository scan . --offline`, which must report no findings) on every pull request and push to main, and the Azure deploy workflow runs the tests before it deploys. Make **CI / test** a required status check on `main` (**Settings → Rules → Rulesets**) so a failing PR cannot merge.
 
 ## API
 
@@ -300,6 +304,8 @@ GitHub answers "The redirect_uri is not associated with this application" when t
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
+| `SECGUARD_PRODUCTION` | off | Refuse to start when sign-in, the session key, secure cookies, the API token or Postgres is missing, or private targets are allowed. |
+| `SECGUARD_ALLOW_FILE_STORAGE` | off | With `SECGUARD_PRODUCTION`, accept JSON-file storage instead of Postgres (only on a persistent volume). |
 | `SECGUARD_API_TOKEN` | empty | Shared secret for the scanning and delete endpoints, sent as `Authorization: Bearer <token>` or `X-API-Key`. When it is empty those endpoints only answer direct requests from the loopback interface — requests carrying `X-Forwarded-For`, `X-Real-IP` or `Forwarded` are refused, so a reverse proxy cannot make remote callers look local. Configure a token when serving SecGuard behind a proxy. Set it in the UI's *API token* field. |
 | `SECGUARD_ALLOW_PRIVATE_TARGETS` | `0` | Allow scanning targets that resolve to loopback, RFC1918, link-local or reserved addresses. Off by default, so the scanner cannot be pointed at internal services or cloud metadata endpoints. |
 | `SECGUARD_ALLOWED_TARGET_HOSTS` | empty | Comma-separated hostnames that may be scanned regardless of the address they resolve to, e.g. `127.0.0.1,localhost` for a local test target. |

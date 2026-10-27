@@ -201,3 +201,33 @@ AZURE_DEVOPS_DONE_STATE = os.environ.get("SECGUARD_AZURE_DEVOPS_DONE_STATE", "Cl
 AZURE_DEVOPS_WONT_FIX_STATE = os.environ.get("SECGUARD_AZURE_DEVOPS_WONT_FIX_STATE", "Removed").strip()
 
 AZURE_DEVOPS_OPEN_STATE = os.environ.get("SECGUARD_AZURE_DEVOPS_OPEN_STATE", "Active").strip()
+
+
+# Refuse to start with an unsafe configuration. Off by default so local
+# development and the tests need no setup; turn it on for every deployment.
+PRODUCTION = _bool_env("SECGUARD_PRODUCTION")
+
+# Production normally requires Postgres because App Service disks are
+# ephemeral; this opts back in to JSON files on a persistent volume.
+ALLOW_FILE_STORAGE = _bool_env("SECGUARD_ALLOW_FILE_STORAGE")
+
+
+def production_problems() -> list[str]:
+    """Settings a production deployment is missing or has set unsafely."""
+    checks = [
+        (GITHUB_CLIENT_ID and GITHUB_CLIENT_SECRET,
+         "SECGUARD_GITHUB_CLIENT_ID and SECGUARD_GITHUB_CLIENT_SECRET (without sign-in every application is public)"),
+        (SECRET_KEY, "SECGUARD_SECRET_KEY"),
+        (SESSION_COOKIE_SECURE, "SECGUARD_SECURE_COOKIES=1"),
+        (API_TOKEN, "SECGUARD_API_TOKEN"),
+        (DATABASE_URL or ALLOW_FILE_STORAGE, "POSTGRES_URL or DATABASE_URL (or SECGUARD_ALLOW_FILE_STORAGE=1)"),
+        (not ALLOW_PRIVATE_TARGETS, "SECGUARD_ALLOW_PRIVATE_TARGETS must be off"),
+    ]
+    return [problem for satisfied, problem in checks if not satisfied]
+
+
+def check_production() -> None:
+    """Raise at startup when SECGUARD_PRODUCTION is on and the configuration is unsafe."""
+    problems = production_problems() if PRODUCTION else []
+    if problems:
+        raise RuntimeError("SECGUARD_PRODUCTION is set but these settings are missing or unsafe: " + "; ".join(problems))

@@ -70,6 +70,8 @@ class _FirstForwardedValue:
         return self.app(environ, start_response)
 
 
+settings.check_production()
+
 app = Flask(__name__)
 app.secret_key = settings.SECRET_KEY or secrets.token_hex(32)
 

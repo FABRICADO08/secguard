@@ -74,6 +74,17 @@ def _connect():
     return pg8000.connect(**_connection_kwargs(settings.DATABASE_URL))
 
 
+def ping() -> None:
+    """Run a trivial query; raises when the database cannot be reached."""
+    connection = _connect()
+    try:
+        cursor = connection.cursor()
+        cursor.execute("SELECT 1")
+        cursor.fetchone()
+    finally:
+        connection.close()
+
+
 def _schema_ready(schema) -> bool:
     """The schema is created once per process per table group."""
 
