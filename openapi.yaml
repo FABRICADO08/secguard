@@ -6,6 +6,30 @@ info:
 servers:
   - url: /
 paths:
+  /api/audit:
+    get:
+      summary: Newest audit entries, newest first (administrators only)
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 200
+      responses:
+        "200":
+          description: Audit entries with time, actor, method, path, status and address.
+        "403":
+          description: The caller is not an administrator.
+  /api/audit.csv:
+    get:
+      summary: Download audit entries as CSV (administrators only)
+      responses:
+        "200":
+          description: CSV with time, actor, method, path, status and address columns.
+        "403":
+          description: The caller is not an administrator.
   /api/health/ready:
     get:
       summary: Check that storage is reachable, for load balancer health checks

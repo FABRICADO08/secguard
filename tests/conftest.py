@@ -41,6 +41,14 @@ def post_model_upload(client, endpoint, document, filename):
 
 
 @pytest.fixture(autouse=True)
+def isolated_audit_log(tmp_path, monkeypatch):
+    """Write audit entries to a per-test file instead of the repository's data folder."""
+    from backend.storage import audit
+
+    monkeypatch.setattr(audit, "AUDIT_FILE", tmp_path / "audit" / "audit.jsonl")
+
+
+@pytest.fixture(autouse=True)
 def reset_rate_limiter():
     """Keep the process-wide limiter from leaking between tests."""
 

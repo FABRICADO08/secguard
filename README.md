@@ -38,6 +38,10 @@ POSTGRES_URL=postgresql://<user>:<password>@<host>.neon.tech/<database>?sslmode=
 
 The schema (`applications`, `findings` and `application_names` tables) is created automatically on first use; no migration step is required. Switching between the file store and the database does not copy existing records — each store keeps its own data.
 
+## Audit log
+
+Every `POST`, `PUT`, `PATCH` and `DELETE` request, plus each GitHub sign-in, is recorded with the time, actor (`github:<login>`, `api-token`, `local` or `anonymous`), method, path (without the query string), response status and client address. Refused requests are recorded too. Request bodies are never stored. With Postgres the entries go to the `audit_log` table, where a trigger refuses `UPDATE` and `DELETE`. Without Postgres they are appended to `data/audit/audit.jsonl`. Administrators (the API token holder or a login in `SECGUARD_ADMINS`) can read the newest entries with `GET /api/audit?limit=200` or download them with `GET /api/audit.csv` (at most 5000 entries).
+
 ## Tests
 
 ```bash
