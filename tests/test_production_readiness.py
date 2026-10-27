@@ -60,7 +60,17 @@ def test_ready_with_file_storage(client):
     assert response.get_json() == {"status": "ready", "checks": {"storage": "ok"}}
 
 
-def test_an_unreachable_database_is_not_ready(client, monkeypatch):
+def test_an_unwritable_session_store_is_not_ready(client, monkeypatch, tmp_path):
+    from backend.storage import sessions
+
+    blocked = tmp_path / "file"
+    blocked.write_text("")
+    monkeypatch.setattr(sessions, "SESSIONS_DIR", blocked / "sessions")
+
+    assert client.get("/api/health/ready").status_code == 503
+
+
+def test_an_unreachable_database_is_not_ready(client, monkeypatch, caplog):
     def refuse():
         raise OSError("connection refused to db.internal:5432 password=hunter2")
 
@@ -72,6 +82,7 @@ def test_an_unreachable_database_is_not_ready(client, monkeypatch):
     assert response.status_code == 503
     assert response.get_json()["checks"] == {"storage": "unavailable"}
     assert "hunter2" not in response.get_data(as_text=True)
+    assert "hunter2" not in caplog.text and "OSError" in caplog.text
 
 
 def test_ping_runs_a_query(monkeypatch):
