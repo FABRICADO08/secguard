@@ -6,6 +6,14 @@ info:
 servers:
   - url: /
 paths:
+  /api/health/ready:
+    get:
+      summary: Check that storage is reachable, for load balancer health checks
+      responses:
+        "200":
+          description: Storage is reachable.
+        "503":
+          description: Storage cannot be reached.
   /api/health:
     get:
       summary: Check service health

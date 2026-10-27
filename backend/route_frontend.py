@@ -1,9 +1,14 @@
 """Frontend page-serving routes and sign-in redirects."""
 
-from flask import jsonify, redirect, request, send_from_directory
+import logging
+import os
 from urllib.parse import urlencode
 
+from flask import jsonify, redirect, request, send_from_directory
+
 from backend.security import github_auth
+
+LOG = logging.getLogger(__name__)
 
 
 def sign_in_gate(page: str):
@@ -45,6 +50,15 @@ def register_routes(app, frontend):
             return send_from_directory(frontend, path)
         return jsonify({"error": "Frontend resource not found."}), 404
 
+    @app.get("/api/health/ready")
+    def readiness():
+        """Report whether storage is reachable, for load balancer health checks."""
+        storage = "ok" if _storage_ready() else "unavailable"
+        ready = storage == "ok"
+        return jsonify({"status": "ready" if ready else "unavailable", "checks": {"storage": storage}}), (
+            200 if ready else 503
+        )
+
     @app.get("/api/health")
     def health():
         """Return the service health and version."""
@@ -55,3 +69,17 @@ def register_routes(app, frontend):
                 "version": "0.2.0",
             }
         )
+
+
+def _storage_ready() -> bool:
+    from backend.storage import db, scans
+
+    try:
+        if db.use_database():
+            db.ping()
+            return True
+        scans.ensure_storage()
+        return os.access(scans.APPLICATIONS_DIR, os.W_OK)
+    except Exception:
+        LOG.warning("Readiness check could not reach storage", exc_info=True)
+        return False

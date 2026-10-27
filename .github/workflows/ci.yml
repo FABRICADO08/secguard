@@ -1,0 +1,40 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Tests
+        run: python -m pytest -q
+
+      - name: Self-scan
+        run: |
+          python -m backend.repository scan . --offline --output "$RUNNER_TEMP/self.json"
+          python - "$RUNNER_TEMP/self.json" <<'EOF'
+          import json, sys
+          report = json.load(open(sys.argv[1]))
+          quality = report.get("quality", {}).get("findings", [])
+          findings = report.get("findings", [])
+          for item in quality + findings:
+              print(item.get("location", ""), item.get("title") or item.get("evidence", {}).get("message", ""))
+          sys.exit(1 if quality or findings else 0)
+          EOF
