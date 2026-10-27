@@ -35,6 +35,9 @@ class FakeDatabase:
                 self._result = None
                 return
             self._result = (self.rows[key][1],)
+        elif "SELECT window_start FROM rate_limits" in sql:
+            row = self.rows.get(params[0])
+            self._result = None if row is None else (row[0],)
         elif "DELETE FROM rate_limits" in sql:
             self.rows = {key: row for key, row in self.rows.items() if row[0] >= params[0]}
 
@@ -83,7 +86,7 @@ def test_a_request_from_an_older_window_does_not_reset_the_newer_count(database,
     assert limiter.check("scan:198.51.100.1", limit=1, window=60) is None
 
     clock[0] -= 41
-    assert rate_limit.PostgresRateLimiter().check("scan:198.51.100.1", limit=1, window=60) is not None
+    assert rate_limit.PostgresRateLimiter().check("scan:198.51.100.1", limit=1, window=60) == pytest.approx(61.0)
     assert database.rows["scan:198.51.100.1"] == (1_000_020.0, 1)
 
 
