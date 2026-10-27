@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from flask import jsonify
+from flask import jsonify, request
 
 from backend.repository.fix_pull_request import (
     MESSAGES,
@@ -35,7 +35,14 @@ def _writable(application: dict) -> tuple[github_auth.GitHubUser | None, dict | 
     return user, repository, None
 
 
+def _cross_site() -> bool:
+    origin = request.headers.get("Origin")
+    return bool(origin) and origin.rstrip("/") != request.host_url.rstrip("/")
+
+
 def _open(application_id: str, application: dict):
+    if _cross_site():
+        return jsonify({"success": False, "error": "Cross-site requests cannot open fix pull requests."}), 403
     user, repository, error = _writable(application)
     if error:
         return jsonify(error[0]), error[1]

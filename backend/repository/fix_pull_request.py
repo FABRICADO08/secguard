@@ -40,8 +40,10 @@ class FixRequest:
     branch: str
 
 
-def _call(fix: FixRequest, method: str, path: str, **kwargs) -> dict:
+def _call(fix: FixRequest, method: str, path: str, missing_ok: bool = False, **kwargs) -> dict | None:
     response = github_auth._api(method, f"/repos/{fix.repository}{path}", fix.token, **kwargs)
+    if missing_ok and response.status_code == 404:
+        return None
     if response.status_code == 422 and method == "POST" and path == "/git/refs":
         raise FixError("branch_exists")
     if response.status_code in (401, 403, 404):
@@ -57,7 +59,9 @@ def _edits(fix: FixRequest, upgrades: list[Upgrade]) -> list[tuple[str, str, str
         by_manifest.setdefault(upgrade.manifest, []).append(upgrade)
     edits = []
     for manifest, planned in by_manifest.items():
-        document = _call(fix, "GET", f"/contents/{quote(manifest)}", params={"ref": fix.base})
+        document = _call(fix, "GET", f"/contents/{quote(manifest)}", missing_ok=True, params={"ref": fix.base})
+        if document is None:
+            continue
         text = base64.b64decode(document.get("content") or "").decode("utf-8")
         changed, applied = apply_upgrades(text, planned)
         if applied:
@@ -82,14 +86,14 @@ def _body(applied: list[Upgrade]) -> str:
     )
 
 
-def open_fix_pull_request(fix: FixRequest, upgrades: list[Upgrade]) -> dict:
-    """Create the branch, commit each manifest and open the pull request."""
-    edits = _edits(fix, upgrades)
-    if not edits:
-        raise FixError("stale")
-    head = _call(fix, "GET", f"/git/ref/heads/{quote(fix.base)}")
-    _call(fix, "POST", "/git/refs", json={"ref": f"refs/heads/{fix.branch}", "sha": head["object"]["sha"]})
-    applied = [upgrade for _, _, _, items in edits for upgrade in items]
+def _delete_branch(fix: FixRequest) -> None:
+    try:
+        github_auth._api("DELETE", f"/repos/{fix.repository}/git/refs/heads/{quote(fix.branch)}", fix.token)
+    except github_auth.requests.RequestException:
+        pass
+
+
+def _commit(fix: FixRequest, edits: list[tuple[str, str, str, list[Upgrade]]]) -> None:
     for manifest, sha, text, items in edits:
         _call(fix, "PUT", f"/contents/{quote(manifest)}", json={
             "message": "Upgrade " + ", ".join(f"{item.name} to {item.target}" for item in items),
@@ -97,10 +101,30 @@ def open_fix_pull_request(fix: FixRequest, upgrades: list[Upgrade]) -> dict:
             "sha": sha,
             "branch": fix.branch,
         })
-    pull = _call(fix, "POST", "/pulls", json={
-        "title": f"Upgrade {len(applied)} vulnerable dependenc{'y' if len(applied) == 1 else 'ies'}",
-        "head": fix.branch,
-        "base": fix.base,
-        "body": _body(applied),
-    })
+
+
+def open_fix_pull_request(fix: FixRequest, upgrades: list[Upgrade]) -> dict:
+    """
+    Create the branch, commit each manifest and open the pull request.
+
+    A failure after the branch exists deletes it again, so a retry is not
+    refused as an existing fix branch.
+    """
+    edits = _edits(fix, upgrades)
+    if not edits:
+        raise FixError("stale")
+    head = _call(fix, "GET", f"/git/ref/heads/{quote(fix.base)}")
+    _call(fix, "POST", "/git/refs", json={"ref": f"refs/heads/{fix.branch}", "sha": head["object"]["sha"]})
+    applied = [upgrade for _, _, _, items in edits for upgrade in items]
+    try:
+        _commit(fix, edits)
+        pull = _call(fix, "POST", "/pulls", json={
+            "title": f"Upgrade {len(applied)} vulnerable dependenc{'y' if len(applied) == 1 else 'ies'}",
+            "head": fix.branch,
+            "base": fix.base,
+            "body": _body(applied),
+        })
+    except (FixError, github_auth.requests.RequestException):
+        _delete_branch(fix)
+        raise
     return {"url": pull.get("html_url", ""), "number": pull.get("number"), "upgrades": [item.to_dict() for item in applied]}
