@@ -102,7 +102,8 @@ def _start_request() -> None:
 def _finish_request(response):
     response.headers[REQUEST_ID_HEADER] = current_request_id()
     duration_ms = round((time.perf_counter() - g.get("request_started", time.perf_counter())) * 1000, 1)
-    level = logging.DEBUG if request.path in _QUIET_PATHS else logging.INFO
+    quiet = request.path in _QUIET_PATHS and response.status_code < 400
+    level = logging.DEBUG if quiet else logging.INFO
     LOG.log(
         level,
         "%s %s %s",

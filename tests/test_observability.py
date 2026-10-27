@@ -38,6 +38,18 @@ def test_health_checks_are_quiet(client, caplog):
     assert not [record for record in caplog.records if record.name == "secguard.request"]
 
 
+def test_a_failing_health_check_is_logged(client, monkeypatch, caplog):
+    from backend import route_frontend
+
+    monkeypatch.setattr(route_frontend, "_storage_ready", lambda: False)
+    caplog.set_level(logging.INFO, logger="secguard.request")
+
+    client.get("/api/health/ready")
+
+    (record,) = [record for record in caplog.records if record.name == "secguard.request"]
+    assert record.status == 503
+
+
 def test_json_lines_carry_the_request_id_and_exception(client):
     from backend.app import app
 
