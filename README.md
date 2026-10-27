@@ -36,7 +36,11 @@ Set `POSTGRES_URL` (or `DATABASE_URL`) to a Postgres connection string to persis
 POSTGRES_URL=postgresql://<user>:<password>@<host>.neon.tech/<database>?sslmode=require
 ```
 
-The schema (`applications`, `findings` and `application_names` tables) is created automatically on first use; no migration step is required. Switching between the file store and the database does not copy existing records — each store keeps its own data.
+The schema is created and upgraded automatically on first use. Core schema changes are numbered migrations in `backend/storage/db.py` (`MIGRATIONS`); applied versions are recorded in `schema_migrations`, and a Postgres advisory lock makes workers starting together migrate one at a time. A release refuses to use a database migrated by a newer release (`SchemaTooNew`), so roll back the database together with the code. Backup, restore and retention procedures are in [docs/operations.md](docs/operations.md). Switching between the file store and the database does not copy existing records — each store keeps its own data.
+
+### Scan retention
+
+Set `SECGUARD_SCAN_RETENTION_DAYS` to delete scans not updated for that many days. Each system (repository or URL) always keeps its newest scan, and deleting a scan also deletes its findings. The default, `0`, keeps everything. Pruning runs only when asked: `POST /api/retention/prune` (API token or admin; `?dry_run=1` lists without deleting) or `python -m backend.storage.retention [--days N] [--dry-run]`. Schedule either one daily.
 
 ## Logging and request IDs
 

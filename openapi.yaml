@@ -6,6 +6,20 @@ info:
 servers:
   - url: /
 paths:
+  /api/retention/prune:
+    post:
+      summary: Delete scans older than SECGUARD_SCAN_RETENTION_DAYS, keeping each system's newest scan
+      parameters:
+        - name: dry_run
+          in: query
+          schema:
+            type: string
+            enum: ["1"]
+      responses:
+        "200":
+          description: The retention window, cutoff and the IDs deleted (or that would be deleted).
+        "401":
+          description: Missing or invalid credentials.
   /api/audit:
     get:
       summary: Newest audit entries, newest first (administrators only)

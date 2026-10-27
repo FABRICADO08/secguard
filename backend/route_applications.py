@@ -17,6 +17,7 @@ from backend.risk.scoring import summarize
 from backend.rules.engine import default_rules
 from backend.security import github_auth
 from backend.security.auth import request_is_authorized, require_api_token
+from backend.storage import retention
 from backend.storage import triage as triage_store
 from backend.storage.findings import load_findings
 from backend.storage.scans import (
@@ -121,6 +122,12 @@ def _register_finding_routes(app):
                 {"success": False, "error": "Application not found."}
             ), 404
         return jsonify({"success": True, "application_id": application_id})
+
+    @app.post("/api/retention/prune")
+    @require_api_token
+    def prune_scans():
+        """Delete scans past the retention window; ``?dry_run=1`` only lists them."""
+        return jsonify({"success": True, **retention.prune(dry_run=request.args.get("dry_run") == "1")})
 
     @app.get("/api/applications/<application_id>/findings")
     def application_findings(application_id: str):
