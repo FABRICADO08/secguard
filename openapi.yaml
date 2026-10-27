@@ -131,6 +131,17 @@ paths:
       summary: Get the portfolio summary
       responses:
         "200": { $ref: "#/components/responses/Success" }
+  /api/applications/{application_id}/fix-pull-request:
+    parameters:
+      - { name: application_id, in: path, required: true, schema: { type: string } }
+    get:
+      summary: List the dependency upgrades a fix pull request would make
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
+    post:
+      summary: Open a GitHub pull request upgrading the application's vulnerable direct dependencies
+      responses:
+        "201": { $ref: "#/components/responses/Success" }
   /api/portfolio/open-source:
     get:
       summary: Get the third-party library inventory across the latest scan of every visible system
