@@ -9,6 +9,7 @@ data/scans/*
 data/findings/*
 data/applications/*
 data/sessions/
+data/audit/
 data/application_names.json
 data/objectives.json
 data/teams.json

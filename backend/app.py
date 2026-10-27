@@ -18,6 +18,7 @@ from backend.discovery.fingerprint import TargetUnreachableError, fetch_applicat
 from backend.discovery.technology import detect_technologies
 from backend.platforms.mendix.service import analyze_model
 from backend.route_applications import register_routes as register_application_routes
+from backend.route_audit import register_routes as register_audit_routes
 from backend.route_discovery import register_routes as register_discovery_routes
 from backend.route_fixes import register_routes as register_fix_routes
 from backend.route_frontend import register_routes as register_frontend_routes
@@ -138,6 +139,7 @@ register_report_routes(app)
 register_team_routes(app)
 register_ticket_routes(app)
 register_fix_routes(app)
+register_audit_routes(app)
 
 
 if __name__ == "__main__":
