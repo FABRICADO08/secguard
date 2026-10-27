@@ -12,6 +12,7 @@ from backend.storage import db
 class FakeDatabase:
     def __init__(self):
         self.rows = {}
+        self.statements = 0
 
     @contextmanager
     def connection(self, init=None):
@@ -22,12 +23,18 @@ class FakeDatabase:
         yield self
 
     def execute(self, sql, params=()):
+        self.statements += 1
         if "INSERT INTO rate_limits" in sql:
-            key, window_start = params
+            key, window_start, limit = params
             previous = self.rows.get(key)
-            hits = previous[1] + 1 if previous and previous[0] == window_start else 1
-            self.rows[key] = (window_start, hits)
-            self._result = (hits,)
+            if previous is None or window_start > previous[0]:
+                self.rows[key] = (window_start, 1)
+            elif previous[1] < limit:
+                self.rows[key] = (previous[0], previous[1] + 1)
+            else:
+                self._result = None
+                return
+            self._result = (self.rows[key][1],)
         elif "DELETE FROM rate_limits" in sql:
             self.rows = {key: row for key, row in self.rows.items() if row[0] >= params[0]}
 
@@ -68,6 +75,29 @@ def test_a_new_window_starts_a_new_count_and_sweeps_old_rows(database, clock):
 
     assert "scan:198.51.100.1" not in database.rows
     assert limiter.check("scan:198.51.100.1", limit=1, window=60) is None
+
+
+def test_a_request_from_an_older_window_does_not_reset_the_newer_count(database, clock):
+    limiter = rate_limit.PostgresRateLimiter()
+    clock[0] += 60
+    assert limiter.check("scan:198.51.100.1", limit=1, window=60) is None
+
+    clock[0] -= 41
+    assert rate_limit.PostgresRateLimiter().check("scan:198.51.100.1", limit=1, window=60) is not None
+    assert database.rows["scan:198.51.100.1"] == (1_000_020.0, 1)
+
+
+def test_refused_callers_stop_reaching_the_database(database, clock):
+    limiter = rate_limit.PostgresRateLimiter()
+    limiter.check("scan:198.51.100.1", limit=1, window=60)
+    assert limiter.check("scan:198.51.100.1", limit=1, window=60) is not None
+    statements = database.statements
+
+    for _ in range(5):
+        assert limiter.check("scan:198.51.100.1", limit=1, window=60) == pytest.approx(20.0)
+
+    assert database.statements == statements
+    assert database.rows["scan:198.51.100.1"] == (999_960.0, 1)
 
 
 def test_the_shared_limiter_is_used_with_postgres(database, clock, monkeypatch):

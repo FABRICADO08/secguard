@@ -109,12 +109,16 @@ def _init_schema(connection) -> None:
         )
 
 
+# A request from an older window (a skewed clock, or one that straddled the
+# boundary) counts against the newer window instead of resetting it, and a
+# request over the limit updates nothing, so it returns no row.
 _COUNT_HIT = """
     INSERT INTO rate_limits (key, window_start, hits) VALUES (%s, %s, 1)
     ON CONFLICT (key) DO UPDATE SET
-        hits = CASE WHEN rate_limits.window_start = EXCLUDED.window_start
-                    THEN rate_limits.hits + 1 ELSE 1 END,
-        window_start = EXCLUDED.window_start
+        hits = CASE WHEN EXCLUDED.window_start > rate_limits.window_start
+                    THEN 1 ELSE rate_limits.hits + 1 END,
+        window_start = GREATEST(rate_limits.window_start, EXCLUDED.window_start)
+    WHERE EXCLUDED.window_start > rate_limits.window_start OR rate_limits.hits < %s
     RETURNING hits
 """
 
@@ -124,11 +128,15 @@ class PostgresRateLimiter:
     Fixed-window counters in Postgres, shared by every worker and instance.
 
     The upsert counts the hit and reads the total in one statement, so
-    concurrent requests cannot both slip under the limit.
+    concurrent requests cannot both slip under the limit. Once a caller is
+    refused, this process refuses it from memory until the window ends, so
+    a flood of rejected requests does not reach the database.
     """
 
     def __init__(self) -> None:
         self._last_sweep = 0.0
+        self._blocked: dict[str, float] = {}
+        self._lock = threading.Lock()
 
     def check(self, key: str, limit: int, window: int) -> float | None:
         if limit <= 0 or window <= 0:
@@ -137,18 +145,30 @@ class PostgresRateLimiter:
         now = time.time()
         window_start = float(int(now // window) * window)
 
-        with db._connection(init=_init_schema) as connection, connection.cursor() as cursor:
-            cursor.execute(_COUNT_HIT, (key, window_start))
-            (hits,) = cursor.fetchone()
+        with self._lock:
+            blocked_until = self._blocked.get(key, 0.0)
+            if blocked_until > now:
+                return blocked_until - now
 
-            if now - self._last_sweep >= window:
+            sweep = now - self._last_sweep >= window
+            if sweep:
                 self._last_sweep = now
+                self._blocked = {name: until for name, until in self._blocked.items() if until > now}
+
+        with db._connection(init=_init_schema) as connection, connection.cursor() as cursor:
+            cursor.execute(_COUNT_HIT, (key, window_start, limit))
+            counted = cursor.fetchone() is not None
+
+            if sweep:
                 cursor.execute("DELETE FROM rate_limits WHERE window_start < %s", (window_start,))
 
-        if hits > limit:
-            return window_start + window - now
+        if counted:
+            return None
 
-        return None
+        with self._lock:
+            self._blocked[key] = window_start + window
+
+        return window_start + window - now
 
 
 shared_limiter = PostgresRateLimiter()
