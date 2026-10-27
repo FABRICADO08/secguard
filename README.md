@@ -57,6 +57,8 @@ The schema (`applications`, `findings` and `application_names` tables) is create
 | `GET /api/applications/<id>/findings` | Findings, filterable by `severity`, `category`, `platform` and `rule_id`. |
 | `GET /api/applications/<id>/findings/<finding_id>` | A single finding. |
 | `GET /api/portfolio/summary` | Systems, severity deltas, new/existing/resolved activity and the monthly trend across all scans. |
+| `GET /api/applications/<id>/fix-pull-request` | The upgrades a fix pull request would make: every vulnerable direct dependency pinned in a `requirements*.txt` file (`==`) or declared in `package.json` (exact, `^` or `~`), moved to the smallest release that clears every known advisory, preferring one within the current major version. |
+| `POST /api/applications/<id>/fix-pull-request` | Open that pull request on the application's GitHub repository as the signed-in user (needs write access): one branch `secguard/upgrade-vulnerable-<scan>`, one commit per manifest, edited as the manifest is on the default branch now. Declarations that changed since the scan are left alone. |
 | `GET /api/portfolio/open-source` | Third-party libraries across the latest scan of every visible GitHub-connected system: usages per system and version, advisories, version lag and the most restrictive licence, plus per-system open source totals. |
 | `GET /api/rules` | Catalogue of the rules the engine evaluates. |
 | `GET /api/objectives` | Portfolio objectives and whether the caller may change them. |

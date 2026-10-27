@@ -19,6 +19,7 @@ from backend.discovery.technology import detect_technologies
 from backend.platforms.mendix.service import analyze_model
 from backend.route_applications import register_routes as register_application_routes
 from backend.route_discovery import register_routes as register_discovery_routes
+from backend.route_fixes import register_routes as register_fix_routes
 from backend.route_frontend import register_routes as register_frontend_routes
 from backend.route_models import register_routes as register_model_routes
 from backend.route_objectives import register_routes as register_objective_routes
@@ -134,6 +135,7 @@ register_objective_routes(app)
 register_report_routes(app)
 register_team_routes(app)
 register_ticket_routes(app)
+register_fix_routes(app)
 
 
 if __name__ == "__main__":

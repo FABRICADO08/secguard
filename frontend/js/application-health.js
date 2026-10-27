@@ -345,10 +345,12 @@ function render(application, access) {
         <section class="card">
             <div class="card__head">
                 <h2>Vulnerable dependencies (${vulnerable.length})</h2>
+                <span id="fixPullRequestSlot"></span>
                 <a class="chip" href="/findings.html?application=${encodeURIComponent(applicationId)}">
                     All findings
                 </a>
             </div>
+            <div id="fixNotice"></div>
             ${severityLegend(security.severity_counts || {})}
             ${table(
                 ["Package", "Advisories", "Minimum fix", "Reachability"],
@@ -421,6 +423,7 @@ function render(application, access) {
     `;
 
     bindRename(meta.name);
+    bindFixPullRequest(access);
 
     const run = document.getElementById("runScan");
 
@@ -496,6 +499,68 @@ function bindRename(fullName) {
             `;
         }
     });
+}
+
+
+function fixUrl() {
+    return `/api/applications/${encodeURIComponent(applicationId)}/fix-pull-request`;
+}
+
+
+async function openFixPullRequest(button) {
+    const notice = document.getElementById("fixNotice");
+
+    button.disabled = true;
+
+    try {
+        const response = await apiFetch(fixUrl(), { method: "POST" });
+        const data = await response.json();
+
+        if (!response.ok) {
+            throw new Error(data.error || "Could not open the pull request.");
+        }
+
+        notice.innerHTML = `
+            <div class="notice notice--success">
+                Pull request opened with ${Number(data.upgrades.length)} upgrade(s).
+                <a href="${escapeHtml(data.url)}" target="_blank" rel="noopener">Review it on GitHub</a>
+            </div>
+        `;
+    } catch (error) {
+        button.disabled = false;
+        notice.innerHTML = `<div class="notice notice--error">${escapeHtml(error.message)}</div>`;
+    }
+}
+
+
+async function bindFixPullRequest(access) {
+    const slot = document.getElementById("fixPullRequestSlot");
+
+    if (!slot || !access || !access.can_trigger) {
+        return;
+    }
+
+    let plan;
+
+    try {
+        plan = await getJson(fixUrl());
+    } catch {
+        return;
+    }
+
+    if (!plan.upgrades.length) {
+        return;
+    }
+
+    slot.innerHTML = `
+        <button class="button" id="fixPullRequest" type="button"
+            title="Upgrade ${Number(plan.upgrades.length)} vulnerable direct dependency declaration(s) in a GitHub pull request">
+            Open fix pull request
+        </button>
+    `;
+
+    const button = document.getElementById("fixPullRequest");
+    button.addEventListener("click", () => openFixPullRequest(button));
 }
 
 
