@@ -1,7 +1,7 @@
 """Frontend page-serving routes and sign-in redirects."""
 
 import logging
-import os
+import tempfile
 from urllib.parse import urlencode
 
 from flask import jsonify, redirect, request, send_from_directory
@@ -71,15 +71,23 @@ def register_routes(app, frontend):
         )
 
 
+def _writable(directory) -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    with tempfile.TemporaryFile(dir=directory):
+        pass
+
+
 def _storage_ready() -> bool:
-    from backend.storage import db, scans
+    from backend.storage import db, scans, sessions
 
     try:
         if db.use_database():
             db.ping()
-            return True
-        scans.ensure_storage()
-        return os.access(scans.APPLICATIONS_DIR, os.W_OK)
-    except Exception:
-        LOG.warning("Readiness check could not reach storage", exc_info=True)
+        else:
+            for directory in (scans.APPLICATIONS_DIR, sessions.SESSIONS_DIR):
+                _writable(directory)
+        return True
+    except Exception as error:  # noqa: BLE001 - any storage failure means not ready
+        # The exception text can carry connection details, so only its type is logged.
+        LOG.warning("Readiness check could not reach storage (%s)", type(error).__name__)
         return False
