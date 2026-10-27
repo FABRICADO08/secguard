@@ -155,11 +155,25 @@ class PostgresRateLimiter:
                 self._last_sweep = now
                 self._blocked = {name: until for name, until in self._blocked.items() if until > now}
 
+        full_window = self._count(key, window_start, limit, sweep)
+        if full_window is None:
+            return None
+
+        window_start = full_window
+
+        with self._lock:
+            self._blocked[key] = window_start + window
+
+        return window_start + window - now
+
+    @staticmethod
+    def _count(key: str, window_start: float, limit: int, sweep: bool) -> float | None:
+        """Count the hit, or return the start of the full window that refused it."""
         with db._connection(init=_init_schema) as connection, connection.cursor() as cursor:
             cursor.execute(_COUNT_HIT, (key, window_start, limit))
-            counted = cursor.fetchone() is not None
+            refused = cursor.fetchone() is None
 
-            if not counted:
+            if refused:
                 # A newer window may hold the full count; the caller waits for that one to end.
                 cursor.execute("SELECT window_start FROM rate_limits WHERE key = %s", (key,))
                 row = cursor.fetchone()
@@ -169,13 +183,7 @@ class PostgresRateLimiter:
             if sweep:
                 cursor.execute("DELETE FROM rate_limits WHERE window_start < %s", (window_start,))
 
-        if counted:
-            return None
-
-        with self._lock:
-            self._blocked[key] = window_start + window
-
-        return window_start + window - now
+        return window_start if refused else None
 
 
 shared_limiter = PostgresRateLimiter()
