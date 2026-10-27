@@ -57,6 +57,7 @@ The schema (`applications`, `findings` and `application_names` tables) is create
 | `GET /api/applications/<id>/findings` | Findings, filterable by `severity`, `category`, `platform` and `rule_id`. |
 | `GET /api/applications/<id>/findings/<finding_id>` | A single finding. |
 | `GET /api/portfolio/summary` | Systems, severity deltas, new/existing/resolved activity and the monthly trend across all scans. |
+| `GET /api/portfolio/open-source` | Third-party libraries across the latest scan of every visible GitHub-connected system: usages per system and version, advisories, version lag and the most restrictive licence, plus per-system open source totals. |
 | `GET /api/rules` | Catalogue of the rules the engine evaluates. |
 | `GET /api/objectives` | Portfolio objectives and whether the caller may change them. |
 | `PUT /api/objectives` | Change the objectives. Administrators only. |
@@ -72,6 +73,7 @@ The frontend is a static application served from the Flask root. Every page rend
 | --- | --- |
 | `/dashboard.html` | Portfolio overview: system count, findings, critical+high and the average rating, plus the systems table. |
 | `/portfolio-security.html` | Findings per month (new, existing, resolved), the portfolio severity split and the systems ranking with CSV export. |
+| `/portfolio-open-source.html` | Open source health across the portfolio: every third-party library from the latest scan of each GitHub-connected system, the systems and versions that use it, its advisories, version lag and licence, filterable by vulnerable, outdated or licence-risk libraries, with CSV export; plus each system's open source rating, vulnerable and outdated library counts and libyears. |
 | `/index.html` | Start a scan of one of your GitHub-connected applications (Mendix projects in the repository are analysed by that scan), or upload an OutSystems model export. URL scans and Mendix uploads remain available through `POST /api/discover` and `POST /api/mendix/analyze`. |
 | `/application.html` | System overview: metadata, scan metrics, attack-surface counts, technologies and scan history. |
 | `/system-security.html` | System security: rating, severity split with deltas against the previous scan, activity, and findings grouped by OWASP Top 10, category, severity or platform. |

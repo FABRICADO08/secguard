@@ -131,6 +131,11 @@ paths:
       summary: Get the portfolio summary
       responses:
         "200": { $ref: "#/components/responses/Success" }
+  /api/portfolio/open-source:
+    get:
+      summary: Get the third-party library inventory across the latest scan of every visible system
+      responses:
+        "200": { $ref: "#/components/responses/Success" }
   /api/applications/{application_id}:
     parameters:
       - $ref: "#/components/parameters/ApplicationId"

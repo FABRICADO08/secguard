@@ -166,6 +166,12 @@ function navigationFor(scope, active, applicationId) {
                         text: "Security",
                         href: "/portfolio-security.html",
                     },
+                    {
+                        id: "opensource",
+                        icon: "repository",
+                        text: "Open Source Health",
+                        href: "/portfolio-open-source.html",
+                    },
                 ],
             },
             {
