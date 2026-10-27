@@ -119,6 +119,7 @@ def _new_library(dependency: dict[str, Any]) -> dict[str, Any]:
         "name": _text(dependency.get("name")).strip(),
         "latest": "",
         "_latest_at": "",
+        "_names": set(),
         "_licences": {},
         "_advisories": {},
         "usages": [],
@@ -134,15 +135,29 @@ def _add_usage(library: dict[str, Any], system: dict[str, Any], dependency: dict
     licence = _text(dependency.get("license_spdx")) or _text(dependency.get("license"))
     category = _text(dependency.get("license_category")) or UNKNOWN
     library["_licences"].setdefault(category, licence)
+    library["_names"].add(_text(dependency.get("name")).strip())
     for advisory in _advisories(dependency):
-        library["_advisories"].setdefault(advisory["id"], advisory)
+        _add_advisory(library["_advisories"], advisory)
+
+
+def _add_advisory(advisories: dict[str, dict[str, Any]], advisory: dict[str, Any]) -> None:
+    """One entry per advisory ID; each installed version may have its own fix."""
+    entry = advisories.setdefault(advisory["id"], {**advisory, "_fixes": set()})
+    if advisory["minimum_fix"]:
+        entry["_fixes"].add(advisory["minimum_fix"])
+
+
+def _with_fixes(advisory: dict[str, Any]) -> dict[str, Any]:
+    fixes = advisory.pop("_fixes")
+    return {**advisory, "minimum_fix": ", ".join(sorted(fixes))}
 
 
 def _finish_library(library: dict[str, Any]) -> dict[str, Any]:
     library.pop("_latest_at")
+    names = library.pop("_names")
     licences = library.pop("_licences")
     advisories = sorted(
-        library.pop("_advisories").values(),
+        map(_with_fixes, library.pop("_advisories").values()),
         key=lambda item: (-SEVERITY_ORDER.get(item["severity"], 0), item["id"]),
     )
     category = _most_restrictive(list(licences))
@@ -150,6 +165,7 @@ def _finish_library(library: dict[str, Any]) -> dict[str, Any]:
     return {
         **library,
         "usages": usages,
+        "aliases": sorted(names - {library["name"]}),
         "systems": len({usage["system_id"] for usage in usages}),
         "versions": sorted({usage["version"] for usage in usages if usage["version"]}),
         "license": licences.get(category, ""),
@@ -181,16 +197,37 @@ def _list(report: Any, key: str) -> list[dict[str, Any]]:
     return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
 
 
-def _resolved(dependency: dict[str, Any], index: dict[str, dict[str, Any]]) -> dict[str, Any]:
+def _advisory_key(advisory_id: str, item: dict[str, Any]) -> tuple[str, str, str]:
+    return advisory_id, _text(item.get("package")).lower(), _text(item.get("version"))
+
+
+def _advisory_index(report: Any) -> dict[Any, dict[str, Any]]:
+    """Advisory records by ID and by (ID, package, version); the report has one per affected version."""
+    index: dict[Any, dict[str, Any]] = {}
+    for item in _list(report, "vulnerabilities"):
+        advisory_id = _text(item.get("id"))
+        index.setdefault(advisory_id, item)
+        index[_advisory_key(advisory_id, item)] = item
+    return index
+
+
+def _resolved(dependency: dict[str, Any], index: dict[Any, dict[str, Any]]) -> dict[str, Any]:
     """Scanner dependencies name their advisories by ID; the details sit in the report."""
     raw = dependency.get("vulnerabilities")
     items = raw if isinstance(raw, list) else []
-    return {**dependency, "vulnerabilities": [index.get(item, {"id": item}) if isinstance(item, str) else item for item in items]}
+    target = {"package": dependency.get("name"), "version": dependency.get("version")}
+    return {
+        **dependency,
+        "vulnerabilities": [
+            index.get(_advisory_key(item, target)) or index.get(item, {"id": item}) if isinstance(item, str) else item
+            for item in items
+        ],
+    }
 
 
 def _dependencies(application: dict[str, Any]) -> list[dict[str, Any]]:
     report = application.get("repository")
-    index = {_text(item.get("id")): item for item in _list(report, "vulnerabilities")}
+    index = _advisory_index(report)
     return [_resolved(dependency, index) for dependency in _list(report, "dependencies")]
 
 

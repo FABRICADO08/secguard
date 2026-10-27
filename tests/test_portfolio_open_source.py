@@ -117,3 +117,20 @@ def test_pypi_spellings_fold_and_latest_release_follows_the_newest_scan(client, 
 
     assert len(libraries) == 1
     assert libraries[0]["systems"] == 2 and libraries[0]["latest"] == "6.0.0"
+    assert libraries[0]["name"] == "zope_interface" and libraries[0]["aliases"] == ["zope.interface"]
+
+
+def test_each_installed_version_keeps_its_own_fix(client, tmp_path):
+    advisories = [
+        {**LODASH_ADVISORY, "package": "demo", "version": "1.0.0", "minimum_fix": "1.2.0"},
+        {**LODASH_ADVISORY, "package": "demo", "version": "2.0.0", "minimum_fix": "2.2.0"},
+    ]
+    dependencies = [
+        _dependency("demo", "1.0.0", vulnerabilities=["GHSA-lodash"], manifest="a/package.json"),
+        _dependency("demo", "2.0.0", vulnerabilities=["GHSA-lodash"], manifest="b/package.json"),
+    ]
+    _ingest(client, tmp_path, "acme/mono", dependencies, advisories)
+
+    library = client.get("/api/portfolio/open-source").get_json()["libraries"][0]
+
+    assert [advisory["minimum_fix"] for advisory in library["advisories"]] == ["1.2.0, 2.2.0"]
