@@ -1,6 +1,7 @@
 """Frontend page-serving routes and sign-in redirects."""
 
 import logging
+import os
 import tempfile
 from urllib.parse import urlencode
 
@@ -73,8 +74,10 @@ def register_routes(app, frontend):
 
 def _writable(directory) -> None:
     directory.mkdir(parents=True, exist_ok=True)
-    with tempfile.TemporaryFile(dir=directory):
-        pass
+    with tempfile.TemporaryFile(dir=directory) as probe:
+        probe.write(b"readiness probe")
+        probe.flush()
+        os.fsync(probe.fileno())
 
 
 def _storage_ready() -> bool:
