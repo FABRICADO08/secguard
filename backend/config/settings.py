@@ -211,6 +211,9 @@ PRODUCTION = _bool_env("SECGUARD_PRODUCTION")
 # ephemeral; this opts back in to JSON files on a persistent volume.
 ALLOW_FILE_STORAGE = _bool_env("SECGUARD_ALLOW_FILE_STORAGE")
 
+# Scans older than this many days are pruned, except each system's newest; 0 keeps all.
+SCAN_RETENTION_DAYS = _int_env("SECGUARD_SCAN_RETENTION_DAYS", 0)
+
 # "json" emits one JSON object per line for log collectors; production defaults to it.
 LOG_FORMAT = os.environ.get("SECGUARD_LOG_FORMAT", "json" if PRODUCTION else "text").strip().lower()
 
