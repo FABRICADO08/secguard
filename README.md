@@ -38,6 +38,12 @@ POSTGRES_URL=postgresql://<user>:<password>@<host>.neon.tech/<database>?sslmode=
 
 The schema (`applications`, `findings` and `application_names` tables) is created automatically on first use; no migration step is required. Switching between the file store and the database does not copy existing records — each store keeps its own data.
 
+## Logging and request IDs
+
+Every response carries an `X-Request-ID` header. A caller's own ID is reused if it is 1–64 letters, digits, `.`, `_` or `-`; otherwise a new one is generated. Each request writes one access line (method, path, status, `duration_ms`); health checks are logged at `DEBUG` only. `SECGUARD_LOG_FORMAT=json` (the default with `SECGUARD_PRODUCTION=1`) writes one JSON object per line with `time`, `level`, `logger`, `message`, `request_id` and, for errors, `exception` and `stack`. Otherwise logs are plain text. Use `SECGUARD_LOG_LEVEL` to change the level (default `INFO`). Logs go to stderr, which App Service streams to **Log stream** and to Log Analytics.
+
+To send requests, dependencies and errors to Azure Application Insights, run `pip install azure-monitor-opentelemetry` and enable Application Insights on the App Service. Enabling it sets `APPLICATIONINSIGHTS_CONNECTION_STRING`, and SecGuard then calls `configure_azure_monitor` at startup. If the connection string is set but the package is missing, SecGuard logs a warning and keeps running.
+
 ## Audit log
 
 Every `POST`, `PUT`, `PATCH` and `DELETE` request, plus each GitHub sign-in, is recorded with the time, actor (`github:<login>`, `api-token`, `local` or `anonymous`), method, path (without the query string), response status and client address. Refused requests are recorded too. Request bodies are never stored. With Postgres the entries go to the `audit_log` table, where a trigger refuses `UPDATE` and `DELETE`. Without Postgres they are appended to `data/audit/audit.jsonl`. Administrators (the API token holder or a login in `SECGUARD_ADMINS`) can read the newest entries with `GET /api/audit?limit=200` or download them with `GET /api/audit.csv` (at most 5000 entries).
