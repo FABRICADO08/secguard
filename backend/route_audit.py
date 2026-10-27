@@ -23,6 +23,8 @@ AUDITED_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 # Signing in is a GET, but who signed in and when belongs in the trail.
 AUDITED_PATHS = frozenset({"/auth/github/callback"})
 
+UNROUTED_PATH = "(no matching route)"
+
 DEFAULT_LIMIT = 200
 
 MAX_LIMIT = 5000
@@ -67,7 +69,8 @@ def record_request(response):
                 "at": time.time(),
                 "actor": _actor(),
                 "method": request.method,
-                "path": request.path,
+                # Unrouted paths are free text a caller chose, so they are not stored.
+                "path": request.path if request.url_rule is not None else UNROUTED_PATH,
                 "status": response.status_code,
                 "address": request.remote_addr or "",
             }

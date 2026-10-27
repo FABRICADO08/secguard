@@ -81,13 +81,13 @@ def _writable(directory) -> None:
 
 
 def _storage_ready() -> bool:
-    from backend.storage import db, scans, sessions
+    from backend.storage import audit, db, scans, sessions
 
     try:
         if db.use_database():
             db.ping()
         else:
-            for directory in (scans.APPLICATIONS_DIR, sessions.SESSIONS_DIR):
+            for directory in (scans.APPLICATIONS_DIR, sessions.SESSIONS_DIR, audit.AUDIT_FILE.parent):
                 _writable(directory)
         return True
     except Exception as error:  # noqa: BLE001 - any storage failure means not ready

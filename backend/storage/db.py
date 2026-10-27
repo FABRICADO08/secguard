@@ -31,6 +31,9 @@ _lock = threading.Lock()
 # Schemas (setup functions) already created in this process.
 _ready: set = set()
 
+# Held while a schema is created, so concurrent first callers wait for the tables.
+_setup_lock = threading.RLock()
+
 # Tests override selection/connection through these two hooks.
 _override = None
 
@@ -89,12 +92,19 @@ def _schema_ready(schema) -> bool:
     """The schema is created once per process per table group."""
 
     with _lock:
-        if schema in _ready:
-            return False
+        return schema in _ready
 
-        _ready.add(schema)
 
-    return True
+def _run_setup(setup, connection) -> None:
+    with _setup_lock:
+        if _schema_ready(setup):
+            return
+
+        setup(connection)
+        connection.commit()
+
+        with _lock:
+            _ready.add(setup)
 
 
 @contextmanager
@@ -103,25 +113,20 @@ def _connection(init=None):
 
     ``init`` defaults to the core schema; modules with their own tables
     pass a setup function so their schema exists without forcing the core
-    one. A failed setup clears the process flag so the next call retries.
+    one. Concurrent first callers wait for the setup; a failed setup is
+    not marked done, so the next call retries.
     """
 
     setup = init or init_schema
 
-    if _schema_ready(setup):
-        connection = _connect()
-    else:
-        connection = _connect()
+    connection = _connect()
 
-        try:
-            setup(connection)
-            connection.commit()
-        except BaseException:
-            with _lock:
-                _ready.discard(setup)
-
-            connection.close()
-            raise
+    try:
+        if not _schema_ready(setup):
+            _run_setup(setup, connection)
+    except BaseException:
+        connection.close()
+        raise
 
     try:
         yield connection
@@ -168,19 +173,13 @@ def init_schema(connection=None) -> None:
     """
 
     if connection is None:
-        if not _schema_ready(init_schema):
+        if _schema_ready(init_schema):
             return
 
         owned = _connect()
 
         try:
-            init_schema(owned)
-            owned.commit()
-        except BaseException:
-            with _lock:
-                _ready.discard(init_schema)
-
-            raise
+            _run_setup(init_schema, owned)
         finally:
             owned.close()
 
