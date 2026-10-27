@@ -16,6 +16,7 @@ from collections.abc import Callable
 from typing import Any
 
 from backend.portfolio.summary import lineage_key
+from backend.repository.dependency import normalize_package
 from backend.repository.licenses import (
     NETWORK_COPYLEFT,
     NON_COMMERCIAL,
@@ -39,7 +40,7 @@ def _moment(application: dict[str, Any]) -> str:
 
 
 def latest_repository_systems(applications: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """The newest scan of every GitHub-connected system."""
+    """The newest scan of every repository-backed system."""
     latest: dict[str, dict[str, Any]] = {}
     for application in applications:
         if application.get("platform") != REPOSITORY_PLATFORM:
@@ -108,7 +109,8 @@ def _library_key(dependency: dict[str, Any]) -> tuple[str, str] | None:
     name = _text(dependency.get("name")).strip()
     if not name:
         return None
-    return _text(dependency.get("ecosystem")), name.lower()
+    ecosystem = _text(dependency.get("ecosystem"))
+    return ecosystem, normalize_package(ecosystem, name).lower()
 
 
 def _new_library(dependency: dict[str, Any]) -> dict[str, Any]:
@@ -116,6 +118,7 @@ def _new_library(dependency: dict[str, Any]) -> dict[str, Any]:
         "ecosystem": _text(dependency.get("ecosystem")),
         "name": _text(dependency.get("name")).strip(),
         "latest": "",
+        "_latest_at": "",
         "_licences": {},
         "_advisories": {},
         "usages": [],
@@ -126,7 +129,8 @@ def _add_usage(library: dict[str, Any], system: dict[str, Any], dependency: dict
     library["usages"].append(_usage(system, dependency))
     freshness = dependency.get("freshness")
     latest = _text(freshness.get("latest")) if isinstance(freshness, dict) else ""
-    library["latest"] = library["latest"] or latest
+    if latest and system["scan_date"] >= library["_latest_at"]:
+        library["latest"], library["_latest_at"] = latest, system["scan_date"]
     licence = _text(dependency.get("license_spdx")) or _text(dependency.get("license"))
     category = _text(dependency.get("license_category")) or UNKNOWN
     library["_licences"].setdefault(category, licence)
@@ -135,6 +139,7 @@ def _add_usage(library: dict[str, Any], system: dict[str, Any], dependency: dict
 
 
 def _finish_library(library: dict[str, Any]) -> dict[str, Any]:
+    library.pop("_latest_at")
     licences = library.pop("_licences")
     advisories = sorted(
         library.pop("_advisories").values(),
@@ -171,10 +176,22 @@ def _system_record(application: dict[str, Any], summary: dict[str, Any]) -> dict
     }
 
 
+def _list(report: Any, key: str) -> list[dict[str, Any]]:
+    raw = report.get(key) if isinstance(report, dict) else None
+    return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+
+
+def _resolved(dependency: dict[str, Any], index: dict[str, dict[str, Any]]) -> dict[str, Any]:
+    """Scanner dependencies name their advisories by ID; the details sit in the report."""
+    raw = dependency.get("vulnerabilities")
+    items = raw if isinstance(raw, list) else []
+    return {**dependency, "vulnerabilities": [index.get(item, {"id": item}) if isinstance(item, str) else item for item in items]}
+
+
 def _dependencies(application: dict[str, Any]) -> list[dict[str, Any]]:
     report = application.get("repository")
-    raw = report.get("dependencies") if isinstance(report, dict) else None
-    return [item for item in raw if isinstance(item, dict)] if isinstance(raw, list) else []
+    index = {_text(item.get("id")): item for item in _list(report, "vulnerabilities")}
+    return [_resolved(dependency, index) for dependency in _list(report, "dependencies")]
 
 
 def _dependency_flags(dependency: dict[str, Any]) -> tuple[str, bool, bool, bool]:
