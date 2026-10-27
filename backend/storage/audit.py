@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import threading
+from collections import deque
 from typing import Any
 
 from backend.storage import db, scans
@@ -75,19 +76,28 @@ def record(entry: dict[str, Any]) -> None:
             handle.write(line + "\n")
 
 
-def _file_entries() -> list[dict[str, Any]]:
+def _parse(line: str) -> dict[str, Any] | None:
+    try:
+        entry = json.loads(line)
+    except json.JSONDecodeError:
+        return None
+    if isinstance(entry, dict) and all(name in entry for name in FIELDS):
+        return entry
+    return None
+
+
+def _file_entries(limit: int) -> list[dict[str, Any]]:
+    """The last ``limit`` entries, oldest first, streaming so memory stays bounded."""
     if not AUDIT_FILE.exists():
         return []
 
-    entries = []
-    for line in AUDIT_FILE.read_text(encoding="utf-8").splitlines():
-        try:
-            entry = json.loads(line)
-        except json.JSONDecodeError:
-            continue
-        if isinstance(entry, dict) and all(name in entry for name in FIELDS):
-            entries.append(entry)
-    return entries
+    entries: deque[dict[str, Any]] = deque(maxlen=limit)
+    with AUDIT_FILE.open(encoding="utf-8") as handle:
+        for line in handle:
+            entry = _parse(line)
+            if entry is not None:
+                entries.append(entry)
+    return list(entries)
 
 
 def recent(limit: int) -> list[dict[str, Any]]:
@@ -101,4 +111,4 @@ def recent(limit: int) -> list[dict[str, Any]]:
             rows = cursor.fetchall()
         return [dict(zip(FIELDS, row, strict=True)) for row in rows]
 
-    return list(reversed(_file_entries()[-limit:]))
+    return list(reversed(_file_entries(limit)))

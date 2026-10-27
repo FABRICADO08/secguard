@@ -133,3 +133,25 @@ def test_postgres_entries_are_inserted_and_read_back(monkeypatch):
 
     assert rows == [(5.0, "github:octocat", "DELETE", "/api/applications/a", 200, "198.51.100.1")]
     assert audit.recent(10)[0]["actor"] == "github:octocat"
+
+
+def test_unrouted_paths_are_not_stored(client):
+    client.post("/api/token=abc123/nothing-here")
+
+    assert audit.recent(1)[0]["path"] == "(no matching route)"
+
+
+def test_file_reads_keep_only_the_newest_entries(monkeypatch):
+    for index in range(5):
+        audit.record({"at": float(index), "actor": "local", "method": "POST", "path": "/api/x", "status": 200,
+                      "address": "::1"})
+
+    assert [entry["at"] for entry in audit.recent(2)] == [4.0, 3.0]
+
+
+def test_an_unwritable_audit_store_is_not_ready(client, monkeypatch, tmp_path):
+    blocker = tmp_path / "blocker"
+    blocker.write_text("not a directory")
+    monkeypatch.setattr(audit, "AUDIT_FILE", blocker / "audit" / "audit.jsonl")
+
+    assert client.get("/api/health/ready").status_code == 503

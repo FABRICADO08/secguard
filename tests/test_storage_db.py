@@ -436,3 +436,44 @@ def test_finding_triage_round_trip(fake_db):
 
     assert seen == [{"status": "in_progress"}]
     assert triage_store.load_system("github:octo/demo") == {"R|a.py|T": {"status": "in_progress"}}
+
+
+def test_concurrent_first_callers_wait_for_schema_setup(monkeypatch):
+    import threading
+    import time
+
+    class Connection:
+        def commit(self):
+            pass
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(db, "_connect", Connection)
+    monkeypatch.setattr(db, "_ready", set())
+    started, release, order = threading.Event(), threading.Event(), []
+
+    def setup(connection):
+        started.set()
+        release.wait(5)
+        order.append("setup")
+
+    def first():
+        with db._connection(init=setup):
+            pass
+
+    def second():
+        started.wait(5)
+        with db._connection(init=setup):
+            order.append("used")
+
+    threads = [threading.Thread(target=first), threading.Thread(target=second)]
+    for thread in threads:
+        thread.start()
+    started.wait(5)
+    time.sleep(0.05)
+    release.set()
+    for thread in threads:
+        thread.join(5)
+
+    assert order == ["setup", "used"]
