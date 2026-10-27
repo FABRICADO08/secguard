@@ -15,7 +15,7 @@ from backend.recommendations import build_recommendations
 from backend.risk.scoring import summarize
 from backend.rules.base import ScanContext
 from backend.rules.engine import analyze
-from backend.security.auth import require_api_token
+from backend.security.auth import SCAN, require_scope
 from backend.security.rate_limit import rate_limited
 from backend.security.targets import BlockedTargetError, assert_target_allowed
 from backend.storage.findings import save_findings
@@ -247,7 +247,7 @@ def _discover_application(url, compatibility):
 
 def register_routes(app, compatibility):
     @app.post("/api/discover")
-    @require_api_token
+    @require_scope(SCAN)
     @rate_limited
     def discover():
         data = request.get_json(silent=True) or {}

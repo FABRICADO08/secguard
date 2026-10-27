@@ -6,6 +6,60 @@ info:
 servers:
   - url: /
 paths:
+  /api/keys:
+    get:
+      summary: List API keys without their secrets (administrators only)
+      responses:
+        "200":
+          description: Keys with id, name, scopes, created/expiry/revocation times and whether each is active.
+        "403":
+          description: The caller is not an administrator.
+    post:
+      summary: Create a scoped, expiring API key; the token is returned only once (administrators only)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, scopes]
+              properties:
+                name:
+                  type: string
+                  maxLength: 100
+                scopes:
+                  type: array
+                  items:
+                    type: string
+                    enum: [scan, admin]
+                expires_in_days:
+                  type: integer
+                  minimum: 1
+                  maximum: 365
+                  default: 90
+      responses:
+        "201":
+          description: The key's public record and its `sgk_` token.
+        "400":
+          description: Invalid name, scopes or expiry.
+        "403":
+          description: The caller is not an administrator.
+  /api/keys/{key_id}:
+    delete:
+      summary: Revoke an API key (administrators only)
+      parameters:
+        - name: key_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: The key is revoked.
+        "403":
+          description: The caller is not an administrator.
+        "404":
+          description: No such key.
   /api/audit:
     get:
       summary: Newest audit entries, newest first (administrators only)
