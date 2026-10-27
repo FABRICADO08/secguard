@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import threading
 import time
 from collections import defaultdict, deque
@@ -10,14 +11,17 @@ from typing import Any
 from flask import jsonify, request
 
 from backend.config import settings
+from backend.storage import db
+
+LOG = logging.getLogger(__name__)
 
 
 class RateLimiter:
     """
     In-process fixed-window limiter keyed by caller.
 
-    Sufficient for the single-process deployment this ships as; a shared
-    store would be needed once the API runs behind more than one worker.
+    Used without Postgres, where only one worker may run; with Postgres the
+    shared limiter below keeps one count across workers and instances.
     """
 
     def __init__(self) -> None:
@@ -92,16 +96,82 @@ class RateLimiter:
 limiter = RateLimiter()
 
 
+def _init_schema(connection) -> None:
+    with connection.cursor() as cursor:
+        cursor.execute(
+            """
+            CREATE TABLE IF NOT EXISTS rate_limits (
+                key TEXT PRIMARY KEY,
+                window_start DOUBLE PRECISION NOT NULL,
+                hits INTEGER NOT NULL
+            )
+            """
+        )
+
+
+_COUNT_HIT = """
+    INSERT INTO rate_limits (key, window_start, hits) VALUES (%s, %s, 1)
+    ON CONFLICT (key) DO UPDATE SET
+        hits = CASE WHEN rate_limits.window_start = EXCLUDED.window_start
+                    THEN rate_limits.hits + 1 ELSE 1 END,
+        window_start = EXCLUDED.window_start
+    RETURNING hits
+"""
+
+
+class PostgresRateLimiter:
+    """
+    Fixed-window counters in Postgres, shared by every worker and instance.
+
+    The upsert counts the hit and reads the total in one statement, so
+    concurrent requests cannot both slip under the limit.
+    """
+
+    def __init__(self) -> None:
+        self._last_sweep = 0.0
+
+    def check(self, key: str, limit: int, window: int) -> float | None:
+        if limit <= 0 or window <= 0:
+            return None
+
+        now = time.time()
+        window_start = float(int(now // window) * window)
+
+        with db._connection(init=_init_schema) as connection, connection.cursor() as cursor:
+            cursor.execute(_COUNT_HIT, (key, window_start))
+            (hits,) = cursor.fetchone()
+
+            if now - self._last_sweep >= window:
+                self._last_sweep = now
+                cursor.execute("DELETE FROM rate_limits WHERE window_start < %s", (window_start,))
+
+        if hits > limit:
+            return window_start + window - now
+
+        return None
+
+
+shared_limiter = PostgresRateLimiter()
+
+
+def _check(key: str) -> float | None:
+    limit, window = settings.RATE_LIMIT_REQUESTS, settings.RATE_LIMIT_WINDOW_SECONDS
+
+    if db.use_database():
+        try:
+            return shared_limiter.check(key, limit, window)
+        except Exception as error:  # noqa: BLE001 - an outage must not take the API down with it
+            LOG.warning("Shared rate limit unavailable, counting in process (%s)", type(error).__name__)
+
+    return limiter.check(key, limit, window)
+
+
 def rate_limited(view: Callable[..., Any]) -> Callable[..., Any]:
 
     @wraps(view)
     def wrapper(*args: Any, **kwargs: Any):
 
-        retry_after = limiter.check(
-            f"{view.__name__}:{request.remote_addr or 'unknown'}",
-            settings.RATE_LIMIT_REQUESTS,
-            settings.RATE_LIMIT_WINDOW_SECONDS,
-        )
+        retry_after = _check(f"{view.__name__}:{request.remote_addr or 'unknown'}")
 
         if retry_after is not None:
 

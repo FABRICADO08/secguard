@@ -22,7 +22,7 @@ To serve it with a production WSGI server:
 .venv/bin/gunicorn backend.app:app --bind 0.0.0.0:$PORT --workers 1
 ```
 
-Keep `--workers 1`: the rate limiter holds its counters in process, so additional workers would each enforce the limit separately.
+With Postgres configured, rate-limit counters live in the `rate_limits` table, so every worker and instance shares one limit and `--workers` can be raised. Without Postgres the counters are held in process: keep `--workers 1`, or each worker would enforce the limit separately. If the database is unreachable, rate limiting falls back to in-process counters instead of failing requests.
 
 For a deployment, set `SECGUARD_PRODUCTION=1`. SecGuard then refuses to start, naming each missing setting, unless GitHub sign-in, `SECGUARD_SECRET_KEY`, `SECGUARD_SECURE_COOKIES=1`, `SECGUARD_API_TOKEN` and Postgres are configured and `SECGUARD_ALLOW_PRIVATE_TARGETS` is off. Point the load balancer health check (Azure: **App Service → Monitoring → Health check**) at `GET /api/health/ready`, which answers 503 when storage cannot be reached; `GET /api/health` only confirms the process is up.
 
