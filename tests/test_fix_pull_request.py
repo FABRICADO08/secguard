@@ -41,6 +41,26 @@ def test_only_rewritable_direct_declarations_are_planned():
     ]
 
 
+def test_every_declaration_on_a_compact_line_is_upgraded():
+    upgrades = plan_upgrades({"dependencies": [
+        _dependency(name, "1.2.0", ecosystem="npm", manifest="package.json") for name in ("a", "b")
+    ]})
+
+    changed, applied = apply_upgrades('{"dependencies": {"a": "1.2.0", "b": "1.2.0"}}', upgrades)
+
+    assert changed == '{"dependencies": {"a": "1.2.9", "b": "1.2.9"}}' and len(applied) == 2
+
+
+@pytest.mark.parametrize("fix", [
+    {"target": "1.3.0\nevil==6.6.6"},
+    {"target": "1.2.0"},
+    {"target": "latest"},
+])
+def test_targets_that_are_not_a_newer_release_are_refused(fix):
+    assert plan_upgrades({"dependencies": [_dependency("flask", "==1.2.0", remediation=fix)]}) == []
+    assert plan_upgrades({"dependencies": [_dependency("bad\nname", "==1.2.0")]}) == []
+
+
 def test_a_major_upgrade_is_used_only_without_a_non_breaking_fix():
     dependency = _dependency("flask", "==1.2.0", remediation={"target": "3.0.0", "breaking": True})
 
@@ -78,22 +98,27 @@ class _Response:
 
 
 class _GitHub:
-    def __init__(self, files, branch_status=201):
+    def __init__(self, files, branch_status=201, pull_status=201):
         self.files = files
         self.branch_status = branch_status
+        self.pull_status = pull_status
         self.calls = []
 
     def __call__(self, method, path, token, **kwargs):
         self.calls.append((method, path, kwargs))
         if method == "GET" and "/contents/" in path:
             manifest = path.split("/contents/", 1)[1]
+            if manifest not in self.files:
+                return _Response(404)
             return _Response(200, {"sha": "blob", "content": base64.b64encode(self.files[manifest].encode()).decode()})
         if method == "GET":
             return _Response(200, {"object": {"sha": "base-sha"}})
         if path.endswith("/git/refs"):
             return _Response(self.branch_status)
-        if method == "PUT":
+        if method in ("PUT", "DELETE"):
             return _Response(200, {})
+        if self.pull_status >= 400:
+            return _Response(self.pull_status)
         return _Response(201, {"html_url": "https://github.com/acme/api/pull/7", "number": 7})
 
     def committed(self):
@@ -162,6 +187,39 @@ def test_an_existing_fix_branch_is_reported(client, stored, monkeypatch):
     assert response.status_code == 409
     assert "already exists" in response.get_json()["error"]
     assert not github.committed()
+
+
+def test_a_deleted_manifest_does_not_block_the_others(client, stored, monkeypatch):
+    _sign_in(monkeypatch)
+    github = _GitHub({"requirements.txt": "django==1.2.0\n"})
+    monkeypatch.setattr(app_module.github_auth, "_api", github)
+
+    response = client.post(f"/api/applications/{stored}/fix-pull-request")
+
+    assert response.status_code == 201
+    assert github.committed() == {"requirements.txt": "django==1.2.9\n"}
+
+
+def test_a_failed_pull_request_deletes_its_branch(client, stored, monkeypatch):
+    _sign_in(monkeypatch)
+    github = _GitHub({"requirements.txt": "django==1.2.0\n"}, pull_status=503)
+    monkeypatch.setattr(app_module.github_auth, "_api", github)
+
+    response = client.post(f"/api/applications/{stored}/fix-pull-request")
+
+    assert response.status_code == 502
+    method, path, _ = github.calls[-1]
+    assert method == "DELETE" and path.startswith("/repos/acme/api/git/refs/heads/secguard/upgrade-vulnerable-")
+
+
+def test_cross_site_requests_are_refused(client, stored, monkeypatch):
+    _sign_in(monkeypatch)
+    github = _GitHub({"requirements.txt": "django==1.2.0\n"})
+    monkeypatch.setattr(app_module.github_auth, "_api", github)
+
+    response = client.post(f"/api/applications/{stored}/fix-pull-request", headers={"Origin": "https://evil.example"})
+
+    assert response.status_code == 403 and not github.calls
 
 
 def test_a_stale_scan_opens_nothing(client, stored, monkeypatch):
