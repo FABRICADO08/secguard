@@ -183,6 +183,7 @@ function matchingLibraries() {
         filter[1](library) && (
             !term ||
             library.name.toLowerCase().includes(term) ||
+            (library.aliases || []).some(alias => alias.toLowerCase().includes(term)) ||
             library.advisories.some(advisory => advisory.id.toLowerCase().includes(term))
         )
     );
