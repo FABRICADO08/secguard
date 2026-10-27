@@ -155,3 +155,9 @@ def test_an_unwritable_audit_store_is_not_ready(client, monkeypatch, tmp_path):
     monkeypatch.setattr(audit, "AUDIT_FILE", blocker / "audit" / "audit.jsonl")
 
     assert client.get("/api/health/ready").status_code == 503
+
+
+def test_an_audit_file_that_cannot_be_appended_is_not_ready(client):
+    audit.AUDIT_FILE.mkdir(parents=True)
+
+    assert client.get("/api/health/ready").status_code == 503

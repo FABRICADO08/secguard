@@ -89,6 +89,9 @@ def _storage_ready() -> bool:
         else:
             for directory in (scans.APPLICATIONS_DIR, sessions.SESSIONS_DIR, audit.AUDIT_FILE.parent):
                 _writable(directory)
+            # Opening for append writes nothing but fails when the log itself cannot be appended to.
+            with audit.AUDIT_FILE.open("a", encoding="utf-8"):
+                pass
         return True
     except Exception as error:  # noqa: BLE001 - any storage failure means not ready
         # The exception text can carry connection details, so only its type is logged.
