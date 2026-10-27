@@ -211,6 +211,14 @@ PRODUCTION = _bool_env("SECGUARD_PRODUCTION")
 # ephemeral; this opts back in to JSON files on a persistent volume.
 ALLOW_FILE_STORAGE = _bool_env("SECGUARD_ALLOW_FILE_STORAGE")
 
+# "json" emits one JSON object per line for log collectors; production defaults to it.
+LOG_FORMAT = os.environ.get("SECGUARD_LOG_FORMAT", "json" if PRODUCTION else "text").strip().lower()
+
+LOG_LEVEL = os.environ.get("SECGUARD_LOG_LEVEL", "INFO").strip().upper()
+
+# Set by Azure when Application Insights is enabled on the App Service.
+APPLICATIONINSIGHTS_CONNECTION_STRING = os.environ.get("APPLICATIONINSIGHTS_CONNECTION_STRING", "").strip()
+
 
 def production_problems() -> list[str]:
     """Settings a production deployment is missing or has set unsafely."""

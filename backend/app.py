@@ -10,7 +10,7 @@ from pathlib import Path
 from flask import Flask, jsonify, request
 from werkzeug.middleware.proxy_fix import ProxyFix
 
-from backend.config import settings
+from backend.config import observability, settings
 from backend.discovery.api_discovery import discover_common_api_paths
 from backend.discovery.crawler import crawl
 from backend.discovery.endpoints import discover_endpoints
@@ -71,9 +71,11 @@ class _FirstForwardedValue:
         return self.app(environ, start_response)
 
 
+observability.configure_logging()
 settings.check_production()
 
 app = Flask(__name__)
+observability.install(app)
 app.secret_key = settings.SECRET_KEY or secrets.token_hex(32)
 
 if settings.TRUST_FIRST_FORWARDED_VALUE:
