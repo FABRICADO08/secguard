@@ -5,9 +5,14 @@ from collections.abc import Callable
 from functools import wraps
 from typing import Any
 
-from flask import jsonify, request
+from flask import g, jsonify, request
 
 from backend.config import settings
+from backend.security import api_keys
+
+SCAN = "scan"
+
+ADMIN = "admin"
 
 LOOPBACK_ADDRESSES = frozenset({"127.0.0.1", "::1", "localhost"})
 
@@ -27,7 +32,15 @@ def _presented_token() -> str:
     return request.headers.get("X-API-Key", "").strip()
 
 
-def request_is_authorized() -> bool:
+def presented_key() -> dict[str, Any] | None:
+    """The active API key presented with this request, if any."""
+    if "api_key" not in g:
+        token = _presented_token()
+        g.api_key = api_keys.lookup(token) if token.startswith(api_keys.PREFIX) else None
+    return g.api_key
+
+
+def request_is_authorized(scope: str = ADMIN) -> bool:
     """
     Scanning and deletion are privileged: they drive outbound traffic and
     destroy stored results.
@@ -40,6 +53,10 @@ def request_is_authorized() -> bool:
     reverse proxy every forwarded request looks local, so a proxied request
     is refused and the deployment has to configure a token.
     """
+
+    if _presented_token().startswith(api_keys.PREFIX):
+        key = presented_key()
+        return key is not None and (scope in key["scopes"] or ADMIN in key["scopes"])
 
     if settings.API_TOKEN:
 
@@ -54,12 +71,21 @@ def request_is_authorized() -> bool:
     return (request.remote_addr or "") in LOOPBACK_ADDRESSES
 
 
+def require_scope(scope: str) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    """Refuse callers without the master token, local access or an API key holding ``scope``."""
+    return lambda view: _guard(view, scope)
+
+
 def require_api_token(view: Callable[..., Any]) -> Callable[..., Any]:
+    return _guard(view, ADMIN)
+
+
+def _guard(view: Callable[..., Any], scope: str) -> Callable[..., Any]:
 
     @wraps(view)
     def wrapper(*args: Any, **kwargs: Any):
 
-        if not request_is_authorized():
+        if not request_is_authorized(scope):
 
             return jsonify(
                 {
@@ -67,8 +93,8 @@ def require_api_token(view: Callable[..., Any]) -> Callable[..., Any]:
                         False,
 
                     "error":
-                        "Unauthorized. Set SECGUARD_API_TOKEN and send it "
-                        "as 'Authorization: Bearer <token>' or 'X-API-Key'.",
+                        "Unauthorized. Send SECGUARD_API_TOKEN or an API key with the "
+                        f"'{scope}' scope as 'Authorization: Bearer <token>' or 'X-API-Key'.",
                 }
             ), 401
 

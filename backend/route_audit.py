@@ -13,7 +13,7 @@ from flask import Response, jsonify, request
 from backend.config import settings
 from backend.route_objectives import can_edit
 from backend.security import github_auth
-from backend.security.auth import request_is_authorized
+from backend.security.auth import presented_key, request_is_authorized
 from backend.storage import audit
 
 LOG = logging.getLogger(__name__)
@@ -32,10 +32,13 @@ MAX_LIMIT = 5000
 CSV_COLUMNS = ("time", "actor", "method", "path", "status", "address")
 
 
-def _actor() -> str:
+def actor() -> str:
     user = github_auth.current_user() if github_auth.enabled() else None
     if user is not None:
         return f"github:{user.login}"
+    key = presented_key()
+    if key is not None:
+        return f"api-key:{key['id']}"
     if request_is_authorized():
         return "api-token" if settings.API_TOKEN else "local"
     return "anonymous"
@@ -67,7 +70,7 @@ def record_request(response):
         audit.record(
             {
                 "at": time.time(),
-                "actor": _actor(),
+                "actor": actor(),
                 "method": request.method,
                 # Unrouted paths are free text a caller chose, so they are not stored.
                 "path": request.path if request.url_rule is not None else UNROUTED_PATH,

@@ -18,7 +18,7 @@ from backend.platforms.outsystems.service import (
 )
 from backend.recommendations import build_recommendations
 from backend.risk.scoring import summarize
-from backend.security.auth import require_api_token
+from backend.security.auth import SCAN, require_scope
 from backend.security.rate_limit import rate_limited
 from backend.storage.findings import save_findings
 from backend.storage.scans import save_application
@@ -137,7 +137,7 @@ def _analyze_platform_model(app, compatibility, platform, analyzer, empty_model,
 
 def register_routes(app, compatibility):
     @app.post("/api/mendix/analyze")
-    @require_api_token
+    @require_scope(SCAN)
     @rate_limited
     def analyze_mendix_model():
         """Analyze and persist an uploaded Mendix model."""
@@ -151,7 +151,7 @@ def register_routes(app, compatibility):
         )
 
     @app.post("/api/outsystems/analyze")
-    @require_api_token
+    @require_scope(SCAN)
     @rate_limited
     def analyze_outsystems():
         """Analyze and persist an uploaded OutSystems model."""
