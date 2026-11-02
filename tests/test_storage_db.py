@@ -118,7 +118,19 @@ def _delete_expired_sessions(tables, params):
 
 # Each entry maps the normalized statement prefix to a handler returning the
 # result rows, or (rows, rowcount) when a count matters.
+def _migration_version(tables, params):
+    return [(max(tables.setdefault("migrations", {}), default=0),)]
+
+
+def _record_migration(tables, params):
+    tables.setdefault("migrations", {})[params[0]] = params[1]
+    return []
+
+
 HANDLERS = {
+    "SELECT pg_advisory_xact_lock": lambda tables, params: [],
+    "SELECT COALESCE(MAX(version), 0) FROM schema_migrations": _migration_version,
+    "INSERT INTO schema_migrations": _record_migration,
     "CREATE TABLE": lambda tables, params: [],
     "INSERT INTO applications": _upsert("applications"),
     "SELECT data FROM applications WHERE id": _select_row("applications"),
@@ -477,3 +489,18 @@ def test_concurrent_first_callers_wait_for_schema_setup(monkeypatch):
         thread.join(5)
 
     assert order == ["setup", "used"]
+
+
+def test_migrations_apply_once_and_record_their_version(fake_db):
+    db.init_schema()
+    db._ready.clear()
+    db.init_schema()
+
+    assert list(fake_db.tables["migrations"]) == [db.SCHEMA_VERSION]
+
+
+def test_a_database_from_a_newer_release_is_refused(fake_db):
+    fake_db.tables["migrations"] = {db.SCHEMA_VERSION + 1: 0.0}
+
+    with pytest.raises(db.SchemaTooNew):
+        db.init_schema()

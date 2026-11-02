@@ -19,6 +19,7 @@ from __future__ import annotations
 import json
 import ssl
 import threading
+import time
 from collections.abc import Callable
 from contextlib import contextmanager
 from typing import Any
@@ -186,8 +187,37 @@ def init_schema(connection=None) -> None:
         return
 
     with connection.cursor() as cursor:
-        for statement in TABLES:
+        _migrate(cursor)
+
+
+# Append a version for every schema change; never edit an applied one.
+MIGRATIONS: dict[int, tuple[str, ...]] = {1: TABLES}
+
+SCHEMA_VERSION = max(MIGRATIONS)
+
+_MIGRATION_LOCK = 0x5EC6A4D
+
+
+class SchemaTooNew(RuntimeError):
+    """The database was migrated by a newer SecGuard release than this one."""
+
+
+def _migrate(cursor) -> None:
+    cursor.execute(
+        "CREATE TABLE IF NOT EXISTS schema_migrations (version INTEGER PRIMARY KEY, applied_at DOUBLE PRECISION NOT NULL)"
+    )
+    # Held until commit, so workers and instances starting together migrate one at a time.
+    cursor.execute("SELECT pg_advisory_xact_lock(%s)", (_MIGRATION_LOCK,))
+    cursor.execute("SELECT COALESCE(MAX(version), 0) FROM schema_migrations")
+    current = int(cursor.fetchone()[0])
+
+    if current > SCHEMA_VERSION:
+        raise SchemaTooNew(f"Database schema version {current} is newer than this release ({SCHEMA_VERSION}).")
+
+    for version in sorted(version for version in MIGRATIONS if version > current):
+        for statement in MIGRATIONS[version]:
             cursor.execute(statement)
+        cursor.execute("INSERT INTO schema_migrations (version, applied_at) VALUES (%s, %s)", (version, time.time()))
 
 
 def reset() -> None:
