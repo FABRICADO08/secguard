@@ -375,3 +375,98 @@ def test_tracker_urls_must_use_https(monkeypatch):
 
     assert providers.missing_settings("jira") == ["SECGUARD_JIRA_URL (must start with https://)"]
     assert providers.active() is None
+
+
+def test_ticket_settings_require_sign_in_when_github_is_enabled(client, monkeypatch):
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_ID", "client-id")
+    monkeypatch.setattr(settings, "GITHUB_CLIENT_SECRET", "client-secret")
+    monkeypatch.setattr(settings, "API_TOKEN", "server-token")
+
+    response = client.get("/api/tickets")
+
+    assert response.status_code == 401
+    assert response.get_json()["success"] is False
+
+
+def test_open_ticket_for_unknown_application_is_404(client):
+    response = client.post("/api/applications/nope/findings/nope-f1/ticket")
+
+    assert response.status_code == 404
+
+
+def test_open_ticket_for_unknown_finding_is_404(client):
+    store("scan-1", [FINDING])
+
+    response = client.post("/api/applications/scan-1/findings/other-f1/ticket")
+
+    assert response.status_code == 404
+    assert response.get_json()["error"] == "Finding not found."
+
+
+def test_open_ticket_provider_failure_is_502(client, tracker):
+    store("scan-1", [FINDING])
+    tracker.fail = True
+
+    response = client.post("/api/applications/scan-1/findings/scan-1-f1/ticket")
+
+    assert response.status_code == 502
+    assert response.get_json()["success"] is False
+
+
+def test_sync_application_tickets(client, tracker):
+    store("scan-1", [FINDING])
+
+    response = client.post("/api/applications/scan-1/tickets/sync")
+
+    assert response.status_code == 200
+    assert response.get_json()["result"]["opened"] == 1
+    assert len(tracker.issues) == 1
+    assert client.post("/api/applications/nope/tickets/sync").status_code == 404
+
+
+def test_sync_application_tickets_unconfigured_provider(client, monkeypatch):
+    store("scan-1", [FINDING])
+    monkeypatch.setattr(settings, "GITHUB_TICKET_TOKEN", "")
+
+    assert client.post("/api/applications/scan-1/tickets/sync").status_code == 409
+
+
+def test_sync_all_tickets_aggregates_each_system_once(client, tracker):
+    store("scan-1", [FINDING])
+    store("scan-2", [FINDING], updated_at="2026-10-02T00:00:00+00:00")
+
+    response = client.post("/api/tickets/sync")
+
+    assert response.status_code == 200
+    assert response.get_json()["result"]["opened"] == 1
+    assert len(tracker.issues) == 1
+
+
+def test_sync_all_tickets_unconfigured_provider(client, monkeypatch):
+    monkeypatch.setattr(settings, "GITHUB_TICKET_TOKEN", "")
+
+    assert client.post("/api/tickets/sync").status_code == 409
+
+
+def test_webhook_requires_a_configured_secret(client):
+    response = client.post("/api/tickets/github/webhook", data=b"{}")
+
+    assert response.status_code == 404
+
+
+def test_webhook_ignores_non_issue_events(client, monkeypatch):
+    monkeypatch.setattr(settings, "TICKET_WEBHOOK_SECRET", "hook-secret")
+    body = b"{}"
+    signature = "sha256=" + hmac.new(b"hook-secret", body, hashlib.sha256).hexdigest()
+
+    response = client.post(
+        "/api/tickets/github/webhook",
+        data=body,
+        headers={
+            "X-Hub-Signature-256": signature,
+            "X-GitHub-Event": "push",
+            "Content-Type": "application/json",
+        },
+    )
+
+    assert response.get_json() == {"success": True, "applied": False}
