@@ -1,3 +1,4 @@
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 
@@ -42,6 +43,13 @@ def test_a_new_key_is_shown_once_and_stored_hashed(client, master):
     listed = client.get("/api/keys", headers=MASTER, environ_base=REMOTE).get_json()["keys"]
     assert [key["id"] for key in listed] == [body["key"]["id"]] and listed[0]["active"]
     assert "hash" not in listed[0]
+
+
+def test_legacy_sha256_key_hashes_are_not_accepted():
+    secret = "old-key-secret"
+    legacy_hash = hashlib.sha256(secret.encode("utf-8")).hexdigest()
+
+    assert not api_keys._verify(secret, legacy_hash)
 
 
 def test_scopes_limit_what_a_key_can_do(client, master):

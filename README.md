@@ -328,7 +328,7 @@ curl -X POST -H "Authorization: Bearer $SECGUARD_API_TOKEN" -H "Content-Type: ap
   -d '{"name": "ci-uploader", "scopes": ["scan"], "expires_in_days": 90}' https://<host>/api/keys
 ```
 
-The response contains the token (`sgk_<id>_<secret>`). It is shown only once; SecGuard keeps only a SHA-256 hash of it. Send it the same way as the master token: `Authorization: Bearer` or `X-API-Key`. Keys last from 1 to 365 days (default 90). `GET /api/keys` lists keys without their secrets, and `DELETE /api/keys/<id>` revokes one immediately. To rotate a key, create the replacement, switch the caller over, then revoke the old one. The audit log records a key's requests as `api-key:<id>`.
+The response contains the token (`sgk_<id>_<secret>`). It is shown only once; SecGuard stores a salted PBKDF2-HMAC-SHA256 verifier, not the token. Send it the same way as the master token: `Authorization: Bearer` or `X-API-Key`. Keys last from 1 to 365 days (default 90). `GET /api/keys` lists keys without their secrets, and `DELETE /api/keys/<id>` revokes one immediately. To rotate a key, create the replacement, switch the caller over, then revoke the old one. The audit log records a key's requests as `api-key:<id>`. Keys using the previous SHA-256-only verifier must be recreated.
 
 ## Security configuration
 

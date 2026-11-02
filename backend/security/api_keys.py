@@ -51,8 +51,7 @@ def _verify(secret: str, stored: str) -> bool:
         actual = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt, iterations)
         return hmac.compare_digest(expected, actual)
     except (ValueError, TypeError):
-        # Legacy format: unsalted SHA-256 hex digest.
-        return hmac.compare_digest(stored, hashlib.sha256(secret.encode("utf-8")).hexdigest())
+        return False
 
 
 def _keys() -> dict[str, dict[str, Any]]:
@@ -85,15 +84,21 @@ def clean_request(payload: dict[str, Any]) -> tuple[str, list[str], int, str]:
     days = payload.get("expires_in_days", DEFAULT_DAYS)
     if not 1 <= len(name) <= 100:
         return "", [], 0, "Give the key a name of 1 to 100 characters."
-    if (
-        not isinstance(scopes, list)
-        or not scopes
-        or any(not isinstance(scope, str) or scope not in SCOPES for scope in scopes)
-    ):
+    if not _valid_scopes(scopes):
         return "", [], 0, f"scopes must be a non-empty list drawn from {', '.join(SCOPES)}."
-    if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= MAX_DAYS:
+    if not _valid_expiration(days):
         return "", [], 0, f"expires_in_days must be a whole number from 1 to {MAX_DAYS}."
     return name, sorted(set(scopes)), days, ""
+
+
+def _valid_scopes(scopes: Any) -> bool:
+    return isinstance(scopes, list) and bool(scopes) and all(
+        isinstance(scope, str) and scope in SCOPES for scope in scopes
+    )
+
+
+def _valid_expiration(days: Any) -> bool:
+    return not isinstance(days, bool) and isinstance(days, int) and 1 <= days <= MAX_DAYS
 
 
 def create(name: str, scopes: list[str], days: int, created_by: str,
