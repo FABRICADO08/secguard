@@ -78,12 +78,18 @@ def listing() -> list[dict[str, Any]]:
 
 def clean_request(payload: dict[str, Any]) -> tuple[str, list[str], int, str]:
     """Validate a create request; returns name, scopes, days and an error message."""
+    if not isinstance(payload, dict):
+        return "", [], 0, "Provide a JSON object."
     name = str(payload.get("name") or "").strip()
     scopes = payload.get("scopes")
     days = payload.get("expires_in_days", DEFAULT_DAYS)
     if not 1 <= len(name) <= 100:
         return "", [], 0, "Give the key a name of 1 to 100 characters."
-    if not isinstance(scopes, list) or not scopes or not set(scopes) <= set(SCOPES):
+    if (
+        not isinstance(scopes, list)
+        or not scopes
+        or any(not isinstance(scope, str) or scope not in SCOPES for scope in scopes)
+    ):
         return "", [], 0, f"scopes must be a non-empty list drawn from {', '.join(SCOPES)}."
     if isinstance(days, bool) or not isinstance(days, int) or not 1 <= days <= MAX_DAYS:
         return "", [], 0, f"expires_in_days must be a whole number from 1 to {MAX_DAYS}."
