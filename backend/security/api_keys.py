@@ -25,13 +25,34 @@ _TOKEN = re.compile(r"sgk_([0-9a-f]{12})_([A-Za-z0-9_-]{20,128})")
 
 PUBLIC_FIELDS = ("id", "name", "scopes", "created_at", "created_by", "expires_at", "revoked_at")
 
+_PBKDF2_ALG = "pbkdf2_sha256"
+_PBKDF2_ITERATIONS = 310000
+_PBKDF2_SALT_BYTES = 16
+
 
 def _now(now: datetime | None) -> datetime:
     return now or datetime.now(UTC)
 
 
 def _hash(secret: str) -> str:
-    return hashlib.sha256(secret.encode("utf-8")).hexdigest()
+    salt = secrets.token_bytes(_PBKDF2_SALT_BYTES)
+    digest = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt, _PBKDF2_ITERATIONS)
+    return f"{_PBKDF2_ALG}${_PBKDF2_ITERATIONS}${salt.hex()}${digest.hex()}"
+
+
+def _verify(secret: str, stored: str) -> bool:
+    try:
+        algorithm, iterations_s, salt_hex, digest_hex = stored.split("$", 3)
+        if algorithm != _PBKDF2_ALG:
+            return False
+        iterations = int(iterations_s)
+        salt = bytes.fromhex(salt_hex)
+        expected = bytes.fromhex(digest_hex)
+        actual = hashlib.pbkdf2_hmac("sha256", secret.encode("utf-8"), salt, iterations)
+        return hmac.compare_digest(expected, actual)
+    except (ValueError, TypeError):
+        # Legacy format: unsalted SHA-256 hex digest.
+        return hmac.compare_digest(stored, hashlib.sha256(secret.encode("utf-8")).hexdigest())
 
 
 def _keys() -> dict[str, dict[str, Any]]:
@@ -107,6 +128,6 @@ def lookup(token: str, now: datetime | None = None) -> dict[str, Any] | None:
     if match is None:
         return None
     record = _keys().get(match.group(1))
-    if record is None or not hmac.compare_digest(str(record.get("hash") or ""), _hash(match.group(2))):
+    if record is None or not _verify(match.group(2), str(record.get("hash") or "")):
         return None
     return record if _active(record, now) else None
